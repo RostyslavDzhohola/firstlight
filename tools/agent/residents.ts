@@ -12,8 +12,9 @@
 // --bodies (comma list, default portus,arcadia: where residents may live and go), --roles (comma
 // list to cycle instead of the cast's own), --seconds (stop after this long; default: until
 // Ctrl-C), --cpu (the process's CPU budget as a share of one core, default 0.5), --max-humans N
-// (the budget switch: play only while at most N people are online; over it they leave safely and
-// come back when it falls), --dev (dev guest tokens: local servers with ALLOW_DEV_GUESTS=1), --quiet.
+// (the budget switch: play only while at most N people are online; over it, or while the count can't
+// be had, they leave safely and come back when a count is at most N; nobody joins before the first),
+// --dev (dev guest tokens: local servers with ALLOW_DEV_GUESTS=1), --quiet.
 //
 // They talk (resident-talk.ts): a person who walks up is greeted and told who they are and what
 // they do; the phrase wheel gets answers in character. Authored lines only (no free text); the
@@ -83,7 +84,8 @@ export interface ResidentsOptions {
   /**
    * The budget switch: residents play only while at most this many people are online (the server's
    * /api/online count, which leaves agents out). Over it they walk to safety and leave, and come back
-   * when the count falls. Undefined: always play.
+   * when the count falls. Nobody joins before the first valid count, and while the count is unknown
+   * (the request fails) they stay out: unknown is not permission. Undefined: always play.
    */
   maxHumans?: number;
   /** How many people are online (default: GET <url>/api/online every `humansEveryMs`). */
@@ -170,8 +172,11 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
   const t0 = Date.now();
   const cpu0 = process.cpuUsage();
   let stopping = false;
-  /** Over the people budget (maxHumans): everyone stays out until the count falls. */
-  let parked = false;
+  /**
+   * Over the people budget (maxHumans), or the count is unknown: everyone stays out until a valid
+   * count is at most the budget. With a budget set, they start parked: no join before the first count.
+   */
+  let parked = o.maxHumans !== undefined;
   let humans: number | null = null;
   const brain = o.brain ?? brainFromEnv();
   const floor = new Floor();
@@ -262,7 +267,9 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
 
   async function play(m: (typeof members)[number]): Promise<void> {
     const { r } = m;
-    const first = await join(m);
+    // Parked from the start (no valid count under the budget yet): wait in the loop, join from there.
+    if (parked) m.state.status = "parked";
+    const first = parked ? null : await join(m);
     if (first) {
       m.state.status = `refused: ${first}`;
       if (FINAL.has(first)) return;
@@ -315,6 +322,45 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
   }
 
   const done = (async (): Promise<ResidentsReport> => {
+    let humansAt = 0;
+    const askHumans = o.humans ?? (async () => {
+      const r = await fetch(`${o.url.replace(/\/+$/, "")}/api/online`, { signal: AbortSignal.timeout(5000) });
+      const body = (await r.json()) as { online?: unknown };
+      if (typeof body.online !== "number" || !Number.isFinite(body.online)) throw new Error("no count");
+      return body.online;
+    });
+    /** Why they are parked, last said ("over" or "unknown"): each change of reason is logged once. */
+    let said: string | null = null;
+    const park = (why: "over" | "unknown", line: string) => {
+      if (said !== why) o.log(line);
+      said = why;
+      if (parked) return;
+      parked = true;
+      for (const m of members) if (m.r.agent.status === "playing") void m.r.agent.stop();
+    };
+    const checkHumans = async () => {
+      if (o.maxHumans === undefined) return;
+      humansAt = Date.now();
+      let n: number;
+      try {
+        n = await askHumans();
+        if (typeof n !== "number" || !Number.isFinite(n)) throw new Error("no count");
+      } catch {
+        // Unknown is not permission: out (or stay out) until a count comes back.
+        humans = null;
+        return park("unknown", "the people count is unavailable: the residents stay out until it comes back");
+      }
+      humans = n;
+      // Fails closed: a budget that isn't a number never lets anyone in.
+      if (!(n <= o.maxHumans)) park("over", `${n} people online (over ${o.maxHumans}): the residents stay out`);
+      else if (parked) {
+        o.log(`${n} people online (at most ${o.maxHumans}): the residents come in`);
+        parked = false;
+        said = null;
+      }
+    };
+    // With a budget, a valid count comes before anyone joins.
+    await checkHumans();
     const plays: Promise<void>[] = [];
     for (const m of members) {
       if (stopping) break;
@@ -330,37 +376,12 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
     // The watch: the time budget, the caller's `until`, and the CPU budget (over it: everyone rests longer).
     let last = process.cpuUsage();
     let lastAt = Date.now();
-    let humansAt = 0;
-    const askHumans = o.humans ?? (async () => {
-      const r = await fetch(`${o.url.replace(/\/+$/, "")}/api/online`, { signal: AbortSignal.timeout(5000) });
-      const body = (await r.json()) as { online?: unknown };
-      if (typeof body.online !== "number") throw new Error("no count");
-      return body.online;
-    });
-    const checkHumans = async () => {
-      if (o.maxHumans === undefined) return;
-      try {
-        humans = await askHumans();
-      } catch {
-        return; // unknown: carry on as before
-      }
-      const over = humans > o.maxHumans;
-      if (over && !parked) {
-        o.log(`${humans} people online (over ${o.maxHumans}): the residents step out`);
-        parked = true;
-        for (const m of members) if (m.r.agent.status === "playing") void m.r.agent.stop();
-      } else if (!over && parked) {
-        o.log(`${humans} people online (at most ${o.maxHumans}): the residents come back`);
-        parked = false;
-      }
-    };
     while (!stopping) {
       await sleep(1000);
       const now = Date.now();
-      if (o.maxHumans !== undefined && now - humansAt >= (o.humansEveryMs ?? 30_000)) {
-        humansAt = now;
-        await checkHumans();
-      }
+      // While the count is unknown, ask again sooner (at most every 5 s).
+      const every = humans === null ? Math.min(5000, o.humansEveryMs ?? 30_000) : (o.humansEveryMs ?? 30_000);
+      if (o.maxHumans !== undefined && now - humansAt >= every) await checkHumans();
       const used = process.cpuUsage(last);
       const share = (used.user + used.system) / 1000 / Math.max(1, now - lastAt);
       last = process.cpuUsage();
@@ -424,6 +445,12 @@ async function main() {
     console.error(`--bodies: none of ${BODY_IDS.join(", ")}`);
     process.exit(2);
   }
+  // A budget that isn't a number would compare false with every count, and so never apply.
+  const maxHumans = flag("max-humans") !== undefined ? Math.round(Number(flag("max-humans"))) : undefined;
+  if (maxHumans !== undefined && !(maxHumans >= 0)) {
+    console.error("--max-humans: a whole number of people, 0 or more");
+    process.exit(2);
+  }
   const run = runResidents({
     url: flag("url") ?? process.env.FL_URL ?? "http://localhost:2567",
     authUrl: flag("auth-url") ?? process.env.FL_AUTH_URL,
@@ -434,7 +461,7 @@ async function main() {
     budgetMs: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined,
     cpu: Math.max(0.05, Math.min(4, Number(flag("cpu") ?? 0.5) || 0.5)),
     dev: !!flag("dev") || process.env.FL_DEV === "1",
-    maxHumans: flag("max-humans") !== undefined ? Math.max(0, Math.round(Number(flag("max-humans")))) : undefined,
+    maxHumans,
     log,
   });
   let asked = 0;

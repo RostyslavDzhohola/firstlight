@@ -34,6 +34,11 @@ export const GATEWAY_RULES = {
   /** Calls per seat, and per address, in 10 s. */
   callsPerSeat: 40,
   callsPerIp: 120,
+  /**
+   * Calls a seat holds at once, the running one included: one action runs, the rest wait their turn.
+   * Past it a call is refused (429 "queue full"), so a caller can't park work faster than it drains.
+   */
+  queuePerSeat: 4,
   /** Joins per address per minute, and for everyone together. */
   joinsPerIp: 6,
   joinsTotal: 60,
@@ -90,10 +95,11 @@ export interface Gateway {
   seatsUsed(): number;
   /** Seat a new character for the caller at `ip`; `seat` (the handle) comes with a successful result. */
   join(ip: string | null, args: unknown): Promise<GatewayResult>;
-  /** Run a tool for the seat behind `token`. */
-  call(token: string, ip: string | null, name: string, args: unknown): Promise<GatewayResult>;
-  /** The caller hung up on a call in progress: stop what the seat is doing. */
-  cancel(token: string): void;
+  /**
+   * Run a tool for the seat behind `token`. When `signal` aborts (the caller hung up, or cancelled
+   * the request), the call leaves the seat's queue if it waits, or is stopped if it runs.
+   */
+  call(token: string, ip: string | null, name: string, args: unknown, signal?: AbortSignal): Promise<GatewayResult>;
   /** Close a seat (its character leaves). */
   drop(token: string, logout?: boolean): Promise<void>;
   /** Is there a seat behind this handle? */
@@ -185,6 +191,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
       const token = randomBytes(24).toString("base64url");
       const session = new SeatSession(ip);
       session.tools = tools;
+      session.maxPending = GATEWAY_RULES.queuePerSeat;
       const id = hash(token);
       seats.set(id, { session, key, lastUsed: now });
       const r = await session.call("firstlight_join", args ?? {});
@@ -202,7 +209,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
       seat.lastUsed = Date.now();
       return { ...r, ok: true, seat: token, idleMinutes: Math.round(GATEWAY_RULES.idleMs / 60_000) };
     },
-    async call(token, ip, name, args) {
+    async call(token, ip, name, args, signal) {
       const seat = typeof token === "string" && token.length <= 64 ? seats.get(hash(token)) : undefined;
       if (!seat) return { ok: false, reason: "no seat", hint: `no seat with that handle: it closed (left, or idle ${Math.round(GATEWAY_RULES.idleMs / 60_000)} min) or never was. Call firstlight_join (POST /api/agent/join) for a new one.` };
       const now = Date.now();
@@ -212,14 +219,11 @@ export function createGateway(opts: GatewayOptions): Gateway {
       if (!seatCalls.take(hash(token), now) || !ipCalls.take(key, now)) return { ok: false, reason: "slow down", hint: `at most ${GATEWAY_RULES.callsPerSeat} calls per 10 s per seat` };
       seat.lastUsed = now;
       if (name === "firstlight_join") return { ok: false, reason: "already playing", hint: "this seat has a character: firstlight_leave first, then join again", ...seat.session.status() };
-      const r = (await seat.session.call(name, args)) as GatewayResult;
+      seat.session.maxPending = GATEWAY_RULES.queuePerSeat;
+      const r = (await seat.session.call(name, args, { signal })) as GatewayResult;
       seat.lastUsed = Date.now();
       if (name === "firstlight_leave" && r.ok) seats.delete(hash(token));
       return r;
-    },
-    cancel(token) {
-      const seat = seats.get(hash(token));
-      if (seat && seat.session.busy > 0) void seat.session.call("firstlight_stop", {});
     },
     drop,
     has: (token) => typeof token === "string" && seats.has(hash(token)),
@@ -269,19 +273,29 @@ const bearer = (req: Request): string | null => {
   return h.startsWith("Bearer ") ? h.slice(7).trim() : null;
 };
 
-const STATUS: Record<string, number> = { "agents off": 403, "agent limit": 403, forbidden: 403, "slow down": 429, "gateway full": 503, "no seat": 401, "unknown tool": 404 };
+const STATUS: Record<string, number> = { "agents off": 403, "agent limit": 403, forbidden: 403, "slow down": 429, "queue full": 429, "gateway full": 503, "no seat": 401, "unknown tool": 404 };
+
+/** An AbortSignal that fires when the caller hangs up before its answer was sent. */
+export function hangUpSignal(res: Response): AbortSignal {
+  const ac = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) ac.abort();
+  });
+  return ac.signal;
+}
 
 /** What a caller is told about the HTTP face (GET /api/agent, and with every join). */
 export const HTTP_HOWTO = [
   "Over plain HTTP: POST /api/agent/join with a JSON body {name?, starter?, body?} returns `seat`, your handle.",
   "Then send `Authorization: Bearer <seat>` with every call: GET /api/agent/observe[?detail=full], POST /api/agent/act with {\"tool\": \"move\", \"target\": \"guide\"} (the tool's short name plus its arguments), POST /api/agent/leave.",
-  "One action runs at a time; tool \"stop\" interrupts it. A seat closes after a few idle minutes.",
+  "One action runs at a time and a few more may wait (past that: 429 queue full); tool \"stop\" interrupts the one running, and hanging up cancels your own call. A seat closes after a few idle minutes.",
 ].join("\n");
 
 export function mountAgentApi(app: Express, gateway: Gateway, allowedOrigins: readonly string[]): void {
   const allowed = new Set(allowedOrigins);
   const send = (res: Response, r: GatewayResult) => {
     res.setHeader("Cache-Control", "no-store");
+    if (r.reason === "slow down" || r.reason === "queue full") res.setHeader("Retry-After", r.reason === "slow down" ? "5" : "2");
     res.status(r.ok ? 200 : (STATUS[r.reason ?? ""] ?? 200)).json(r);
   };
   const guard = (req: Request, res: Response): boolean => {
@@ -319,7 +333,10 @@ export function mountAgentApi(app: Express, gateway: Gateway, allowedOrigins: re
     if (!guard(req, res)) return;
     const b = await body(req, res);
     if (!b) return;
+    const gone = hangUpSignal(res);
     const r = await gateway.join(directRequestIp(req), b.v ?? {});
+    // The caller hung up while it joined: nobody will ever hold this handle, so the seat goes now.
+    if (r.ok && gone.aborted) return void (await gateway.drop(String(r.seat)));
     send(res, r.ok ? { ...r, howto: HTTP_HOWTO, playbook: PLAYBOOK } : r);
   });
 
@@ -332,17 +349,17 @@ export function mountAgentApi(app: Express, gateway: Gateway, allowedOrigins: re
     if (!parsed.success) return send(res, { ok: false, reason: "bad arguments", hint: 'send {"tool": "<name>", ...arguments}' });
     const { tool, ...args } = parsed.data;
     const name = tool.startsWith("firstlight_") ? tool : `firstlight_${tool}`;
-    const token = bearer(req) ?? "";
-    // The caller hangs up: stop the walk or fight it was waiting on.
-    res.on("close", () => {
-      if (!res.writableEnded) gateway.cancel(token);
-    });
-    send(res, await gateway.call(token, directRequestIp(req), name, args));
+    // The caller hangs up: its call leaves the queue, or the walk or fight it waited on stops.
+    const gone = hangUpSignal(res);
+    const r = await gateway.call(bearer(req) ?? "", directRequestIp(req), name, args, gone);
+    if (!gone.aborted) send(res, r);
   });
 
   app.get("/api/agent/observe", async (req, res) => {
     if (!guard(req, res)) return;
-    send(res, await gateway.call(bearer(req) ?? "", directRequestIp(req), "firstlight_observe", req.query.detail === "full" ? { detail: "full" } : {}));
+    const gone = hangUpSignal(res);
+    const r = await gateway.call(bearer(req) ?? "", directRequestIp(req), "firstlight_observe", req.query.detail === "full" ? { detail: "full" } : {}, gone);
+    if (!gone.aborted) send(res, r);
   });
 
   app.post("/api/agent/leave", async (req, res) => {

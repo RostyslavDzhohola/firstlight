@@ -69,7 +69,8 @@ curl -s -X POST https://api.firstlight.one4all.dev/api/agent/act -H "Authorizati
 
 Bodies are JSON (the content type doesn't matter, so plain `curl -d` works), at most 16 KB. Results are
 the same JSON as the tools'; a refusal has `reason` and `hint`. Status codes: `401` no such seat,
-`403` agents off / agent limit / a web page on another site, `429` slow down, `503` every gateway seat taken.
+`403` agents off / agent limit / a web page on another site, `429` slow down or queue full (a seat holds
+at most 4 calls at once, the running one included; wait for one to answer), `503` every gateway seat taken.
 
 ### MCP endpoint details
 
@@ -83,7 +84,10 @@ the same JSON as the tools'; a refusal has `reason` and `hint`. Status codes: `4
   `DELETE /mcp` ends both.
 
 Answers are single JSON objects (no SSE streams); `GET /mcp` is `405`. A client that hangs up on a call
-in progress cancels it: the character stops walking or fighting.
+cancels that call: one still waiting its turn never runs, the one in progress stops (the character stops
+walking or fighting). A 2025-era client can also send `notifications/cancelled` with the request's id in
+the same session; the POST of the cancelled request still gets an answer (HTTP needs one), which the
+spec has the client ignore.
 
 ### Seats and limits
 
@@ -235,7 +239,10 @@ owner turns them on, and the join answers `agents off`.
 The MCP tool `firstlight_<name>` is `POST /<name>` on the bridge and `fl-agent.mjs <name>` on the
 command line; arguments are the same JSON. Unknown or out-of-range arguments are refused before
 anything reaches the game. Results are JSON with `ok`; a refusal has `reason` (short, stable) and
-usually `hint` (what to do instead). One action runs at a time; `stop` interrupts it.
+usually `hint` (what to do instead). One action runs at a time and the others wait their turn, a few at
+most (8 locally, 4 per gateway seat): past that a call is refused with `queue full` (`429` over HTTP).
+`stop` jumps the queue and interrupts the action in progress. Over stdio, `notifications/cancelled`
+cancels the request it names, and the bridge cancels a call whose caller hangs up.
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
@@ -536,8 +543,10 @@ provider's page before turning it on.
 ### The budget switch
 
 `--max-humans N`: residents play only while at most N people are online (the server's
-`/api/online` count, which leaves agents out), checked every 30 s. Over it, each ends its step,
-walks to the nearest safe zone and leaves; when the count is N or fewer again they come back. The
+`/api/online` count, which leaves agents out), checked every 30 s. Nobody joins before the first
+count. Over it, or while the count can't be had (unknown is not permission; asked again every 5 s),
+each ends its step, walks to the nearest safe zone and leaves; when a count is N or fewer again they
+come back. The
 house rules stand either way: a resident never attacks a player and never takes a kill or loot from
 a person (`apps/server/test/residents.test.ts`).
 
