@@ -2235,3 +2235,9 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   and a bone texture, both named by position. Portus' arrival compiles 152 shader stages, not 190
   (vertex 101 → 66), on both backends; frozen-time stills match. Why: target 2 of the perf climb,
   fewer compiles during the arrival's warm-up with the same picture.
+- **D-perf-5 (2026-11-14):** the portal vortex's tint, its destination's sky colours and the
+  opening's size, and the pad beam's tint, are uniforms, not constants baked into the shader: every
+  portal of one shape (arch or disc) and every pad beam runs one program. Same values (the same
+  `THREE.Color` conversion). Portus' bench: 132 → 129 live programs; the arrival 152 → 149 stages.
+  Why: target 2 of the perf climb (D-perf-4's census found the three Portus portals compiling one
+  fragment program each).
