@@ -14,7 +14,7 @@ source code. Run every command yourself. Don't delegate or hand this to another 
 
 **The run passes when you finish the first part without dying:**
 
-1. the tutorial in Portus (10 steps, then the portal),
+1. the tutorial in Portus (10 steps; it ends in the plaza, pointing at the Arcadia portal),
 2. walk into the Arcadia portal and arrive,
 3. take Lark's three missions,
 4. finish A1 Pest Control (8 Hopbits), A2 The Lost Bell and A3 The Big Lake.
@@ -24,8 +24,8 @@ source code. Run every command yourself. Don't delegate or hand this to another 
 ```
 home                  the site's first page
 start hexwick         a new guest the real way
-tutorial              every tutorial step up to the portal (or `step` one at a time to read each card)
-step                  the last step: walks into the Arcadia portal
+tutorial              every tutorial step (or `step` one at a time to read each card); it ends in the plaza
+portal arcadia        walk into the Arcadia portal the end card and the compass point at
 talk                  walk to Lark, take the three missions
 quest A1              hunt 8 Hopbits in Clover Fields
 quest A2              walk to Lacefall's plunge pool and pick up the bell
@@ -66,7 +66,7 @@ than a `state`, so take one only where the row is about looks, then open the PNG
 | A6 | crossing out of a safe ring | `state`: the zone label agrees with the server |
 | A7 | right after arriving on Arcadia | `state`: creatures within sight, the mission pointer on one |
 | A10 | anywhere safe | `dodge` and `dodge run`: the roll starts under 100 ms |
-| B10 | right after the portal | `shot`: the tutorial's end card is still up after the arrival |
+| B10 | right after the last tutorial step | `shot`: the end card names the Arcadia portal with an arrow and metres, and the compass carries the same marker |
 | A15 | two or three times | your `shot`s: no broken or placeholder art |
 
 Write each finding as it happens with `note <row> <pass|fail|unsure>: <what you saw>`, e.g.
