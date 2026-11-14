@@ -1,6 +1,6 @@
 // Evidence clip for #74 (trees change shape as you walk towards them): a dev admin on Arcadia at
 // Medium walks out of the pad's ring, faces the densest tree line 20–70 m ahead, walks towards it and
-// back, and the page is screenshotted all the while. The frames are numbered PNGs in
+// back in short steps with a screenshot after each (stop-motion). The frames are numbered JPEGs in
 // $TREEFADE_OUT/<label>/ (ffmpeg turns them into a clip afterwards), so a loaded machine slows the
 // clip down instead of breaking it the way a real-time recording does. Skipped unless TREEFADE_OUT is set:
 //   TREEFADE_OUT=/tmp/treefade TREEFADE_LABEL=after pnpm exec playwright test -c e2e/playwright.config.ts --project webgpu --grep @treefade
@@ -36,17 +36,20 @@ test("treefade · walk at a tree line", { tag: ["@treefade"] }, async ({ player,
   await player.turn(Number(await page.evaluate(TREE_BEARING)));
   await player.lookUp((-4 * Math.PI) / 180);
   await page.waitForTimeout(1500);
+  // Stop-motion: a short step, then a frame, so every frame is a still view however slow the machine is.
   let n = 0;
-  let filming = true;
-  const film = (async () => {
-    while (filming) await page.screenshot({ path: path.join(dir, `${String(n++).padStart(4, "0")}.png`) });
-  })();
-  await page.waitForTimeout(1500);
-  await player.hold(["KeyW"], 8000);
-  await page.waitForTimeout(800);
-  await player.hold(["KeyS"], 6000);
-  await page.waitForTimeout(800);
-  filming = false;
-  await film;
+  const shot = () => page.screenshot({ path: path.join(dir, `${String(n++).padStart(4, "0")}.jpg`), type: "jpeg", quality: 80 });
+  for (let i = 0; i < 4; i++) await shot();
+  for (let i = 0; i < 36; i++) {
+    await player.hold(["KeyW"], 350);
+    await page.waitForTimeout(120);
+    await shot();
+  }
+  for (let i = 0; i < 4; i++) await shot();
+  for (let i = 0; i < 30; i++) {
+    await player.hold(["KeyS"], 350);
+    await page.waitForTimeout(120);
+    await shot();
+  }
   console.log(`[treefade] ${n} frames in ${dir}`);
 });
