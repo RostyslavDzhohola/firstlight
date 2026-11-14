@@ -19,7 +19,7 @@ import { FROSTBLOOM, SPELL_BY_ID, spellDamage, wardShell, WISHFALL } from "../..
 // ------------------------------------------------------------------------------------ weapons
 
 /** Families that deal damage in a fight (support items, the radio, tonics and the whistle don't). */
-export const COMBAT_FAMILIES = ["fists", "sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "kunai"] as const;
+export const COMBAT_FAMILIES = ["fists", "sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "kunai", "boarspear", "crossbow", "lantern"] as const;
 export type Family = (typeof COMBAT_FAMILIES)[number];
 
 /** The tier a level may equip (content §1.5 gates: T2 at 6, T3 at 12), as an index. */
@@ -225,8 +225,8 @@ export function weaponTable(): WeaponRow[] {
 
 export const PVP_LEVELS = [1, 6, 12, 20] as const;
 
-/** Families §2.5 counts as burst (headshot, direct rocket, point-blank pellets): a lower floor. */
-export const BURST_FAMILIES: readonly Family[] = ["scatterpipe", "stillshot", "comet"];
+/** Families §2.5 counts as burst (headshot, direct rocket, point-blank pellets, a heavy bolt): a lower floor. */
+export const BURST_FAMILIES: readonly Family[] = ["scatterpipe", "stillshot", "comet", "crossbow"];
 
 export interface PvpCell {
   family: Family;

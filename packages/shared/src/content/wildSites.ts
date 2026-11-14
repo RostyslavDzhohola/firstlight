@@ -78,7 +78,7 @@ export const WILD_SITES: readonly WildSiteDef[] = [
     at: { between: [0, 1, 0.26] }, yaw: 0, levels: [7, 8],
     guardian: { kind: "cantor", level: 8 },
     pack: [{ kind: "bonewalker", count: 3, level: 7 }, { kind: "marsh_wisp", count: 2, level: 7 }],
-    chest: { coins: 70, weapons: 0, tonics: 1 },
+    chest: { coins: 70, weapons: 0, tonics: 1, rare: { id: "lantern", chance: 1 / 6 } }, // the shrine keeps a lamp lit
     blurb: "A ring of slate stones round an altar. The lantern on the obelisk never goes out.",
   },
   {
@@ -120,7 +120,7 @@ export const WILD_SITES: readonly WildSiteDef[] = [
     at: { between: [0, 1, 0.55] }, east: 80, yaw: 120, levels: [19, 20],
     guardian: { kind: "compliance_officer", level: 20 },
     pack: [{ kind: "enforcer", count: 2, level: 19 }, { kind: "auditor", count: 2, level: 19 }, { kind: "collector", count: 1, level: 20 }],
-    chest: { coins: 420, weapons: 2, tonics: 2 },
+    chest: { coins: 420, weapons: 2, tonics: 2, rare: { id: "crossbow", chance: 1 / 6 } }, // salvage from the hold
     blurb: "A freighter broken in two in the salt. Its chest sits in the break.",
   },
 ];

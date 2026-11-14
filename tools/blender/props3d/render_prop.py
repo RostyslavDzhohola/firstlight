@@ -111,6 +111,14 @@ def view_of(name):
         return {"up": "z", "side": "y"}
 
 
+def is_gun(name):
+    """Held like a gun (the recipe's GUN flag): Avatars.ts GUN_GRIP, not through the fist."""
+    try:
+        return bool(getattr(importlib.import_module(f"items.{name}"), "GUN", False))
+    except ModuleNotFoundError:
+        return False
+
+
 def place(objs, M, weapon_space):
     """Set the display transform: M maps weapon space to the world; GLB meshes are in Blender axes."""
     B2W = hold.w2b_matrix().inverted()
@@ -231,7 +239,7 @@ def main():
         _, arm = R.add_character(a.chars, ch, pal, a.look, rot_z=-20)
         n = names[i % len(names)]
         objs = load_today(n, a.look) if a.today else load_prop(a.dir, n, a.look, pal)
-        hold.hold(arm, objs, weapon_space_data=a.today)
+        hold.hold(arm, objs, weapon_space_data=a.today, gun=is_gun(n))
         clips.pose([arm], clip, int(frame))
         path = a.out.replace(".png", f"_{i}.png")
         bl.render(path)

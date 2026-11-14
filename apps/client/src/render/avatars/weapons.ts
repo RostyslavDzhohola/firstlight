@@ -205,6 +205,46 @@ function design(id: string): Piece[] {
         P(cylZ(0.02, 0.02, 0.12, 8), "leather"),
       ];
     }
+    case "boarspear":
+      // Winged Boarspear stand-in: ash shaft, iron socket and wings, a flat leaf blade
+      return [
+        P(cylZ(0.017, 0.015, 1.36, 8), "wood", [0, 0, 0.12]),
+        P(cylZ(0.019, 0.013, 0.09, 8), "metal", [0, 0, 0.82]),
+        P(box(0.011, 0.11, 0.014), "metal", [0, 0, 0.865]),
+        P(new THREE.OctahedronGeometry(1, 0), "metalLight", [0, 0, 0.995], [0, 0, 0], [0.004, 0.032, 0.125]),
+        P(cylZ(0.0205, 0.0205, 0.26, 8), "leather", [0, 0, 0.01]),
+        P(cylZ(0.012, 0.019, 0.06, 8), "metal", [0, 0, -0.54]),
+      ];
+    case "crossbow": {
+      // Windlass Crossbow stand-in (held like a gun): walnut tiller, steel prod, stirrup, loaded bolt
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 10; i++) {
+        const t = (i / 10) * 2 - 1;
+        pts.push(new THREE.Vector3(t * 0.33, 0.054, 0.312 - 0.07 * t * t));
+      }
+      return [
+        P(box(0.045, 0.09, 0.7), "wood", [0, 0.014, -0.025]),
+        P(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, 0.009, 5), "metalLight"),
+        P(torus(0.045, 0.005, 10), "metal", [0, 0.03, 0.39], [H, 0, 0]),
+        P(cylZ(0.004, 0.004, 0.36, 6), "wood", [0, 0.064, 0.19]),
+        P(new THREE.ConeGeometry(0.007, 0.04, 4).rotateX(H), "metalLight", [0, 0.064, 0.39]),
+        P(cylZ(0.006, 0.006, 0.14, 6), "metal", [0, -0.055, -0.1], [0.5, 0, 0]),
+      ];
+    }
+    case "lantern": {
+      // Shepherd's Lantern stand-in: hazel staff bent into a crook, a small lit lantern hanging from it
+      const crook = new THREE.TorusGeometry(0.075, 0.012, 6, 12, Math.PI)
+        .applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0)));
+      return [
+        P(cylZ(0.017, 0.013, 1.42, 8), "wood", [0, 0, 0.21]),
+        P(crook, "wood", [0, 0.075, 0.92]),
+        P(cylZ(0.0205, 0.0205, 0.28, 8), "leather", [0, 0, 0.02]),
+        P(new THREE.CylinderGeometry(0.018, 0.022, 0.065, 8), "glass", [0, 0.15, 0.79]),
+        P(new THREE.ConeGeometry(0.031, 0.024, 8), "metal", [0, 0.15, 0.836]),
+        P(new THREE.CylinderGeometry(0.031, 0.031, 0.012, 8), "metal", [0, 0.15, 0.748]),
+        P(cylZ(0.003, 0.003, 0.06, 4), "metal", [0, 0.15, 0.87]),
+      ];
+    }
     case "stillshot":
       return [
         P(box(0.05, 0.08, 0.36), "metal", [0, 0.03, 0.1]),

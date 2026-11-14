@@ -456,7 +456,7 @@ export class CombatClient {
       }
     } else {
       this.heavyDueAt = 0; // switched off the melee weapon: a released heavy is dropped
-      const wantScope = rmb && (def.id === "stillshot" || def.id === "longbow" || def.delivery === "hitscan" || def.delivery === "pellets");
+      const wantScope = rmb && (def.id === "stillshot" || def.id === "longbow" || def.id === "crossbow" || def.delivery === "hitscan" || def.delivery === "pellets");
       if (wantScope !== this.scoped) {
         this.scoped = wantScope;
         room.send("scope", { on: wantScope });

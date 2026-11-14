@@ -5,7 +5,7 @@
 # so a weapon-space point (x, y, z) is (x, -z, y) in Blender (the glTF importer's own conversion).
 # Socket (apps/client/src/render/Avatars.ts, SOCKETS.hand_r): in the palm, 3/4 of the way from the wrist
 # to the middle knuckle and 2.5 cm below it, parented to hand_r, its axes = the model's axes at rest.
-# Swords, staffs, wands and bows go in with no rotation (guns get GUN_GRIP; not used here).
+# Swords, staffs, wands and bows go in with no rotation; guns and crossbows get GUN_GRIP (gun=True).
 # Our own code: MIT.
 
 import numpy as np
@@ -41,14 +41,21 @@ def display_matrix(up="z", side="y"):
     return M
 
 
+def gun_grip_matrix():
+    """Avatars.ts GUN_GRIP in glTF axes: weapon +Z (muzzle) -> model -X (the right hand's knuckles at
+    rest), weapon +Y (top) -> model +Z (the thumb), weapon +X -> model -Y."""
+    return Matrix(((0, 0, -1, 0), (-1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
+
+
 def socket_point(arm):
     b = arm.data.bones
     return b["hand_r"].head_local.lerp(b["middle_01_r"].head_local, 0.75) + Vector((0, 0, -0.025))
 
 
-def hold(arm, objs, weapon_space_data=False):
+def hold(arm, objs, weapon_space_data=False, gun=False):
     """Parent objs (one object or a list) to a hand_r socket on arm. weapon_space_data: the meshes are in
-    weapon axes (sculpt previews, today's models); otherwise they are in Blender axes (an imported GLB)."""
+    weapon axes (sculpt previews, today's models); otherwise they are in Blender axes (an imported GLB).
+    gun: held the way the client holds guns and crossbows (GUN_GRIP), not through the fist."""
     import bpy
     sock = bpy.data.objects.new(f"socket_{arm.name}", None)
     bpy.context.scene.collection.objects.link(sock)
@@ -64,7 +71,9 @@ def hold(arm, objs, weapon_space_data=False):
     for obj in objs if isinstance(objs, (list, tuple)) else [objs]:
         obj.parent = sock
         obj.matrix_parent_inverse = Matrix.Identity(4)
-        obj.matrix_basis = w2b_matrix() if weapon_space_data else Matrix.Identity(4)
+        C = w2b_matrix()
+        G = C @ gun_grip_matrix() if gun else C  # weapon (glTF) -> socket (Blender axes)
+        obj.matrix_basis = G if weapon_space_data else G @ C.inverted()
     return sock
 
 

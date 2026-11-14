@@ -159,7 +159,12 @@ def build(name, out_dir, tex=512):
         albedo[sel, :3] = np.clip(rgb, 0, 1)
         albedo[sel, 3] = 1.0 if glow is None else 1.0 - np.clip(glow, 0, 1)
         nmap[sel, :3] = TB.tangent_normals(Nhi, nrm_lo[sel], tan[sel], bit[sel])
-    albedo, _ = TB.dilate(albedo, covered, 8)
+    albedo, m1 = TB.dilate(albedo, covered, 8)
+    # Texels no island reaches: opaque (alpha 1 = no glow) in the props' mean colour. Left at alpha 0
+    # they read as full glow, and a long prop's thin islands blend them in from the first mip level
+    # (the whole staff glowed a few metres away).
+    albedo[~m1, :3] = albedo[covered, :3].mean(axis=0)
+    albedo[~m1, 3] = 1.0
     nmap, m2 = TB.dilate(nmap, covered, 8)
     nmap[~m2] = (0.5, 0.5, 1.0, 1.0)
     os.makedirs(out_dir, exist_ok=True)

@@ -7,6 +7,7 @@ import { siteDiscoveryXp, WILD_SITE_BY_ID } from "@firstlight/shared/content/wil
 import { prefabPoint, wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { npcSystemOf, NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { pileStore } from "../src/world/piles.ts";
+import { rollChest } from "../src/world/npc/rewards.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, ground, harness, me, serverRoom, sleep, terrain, tpAndWait } from "./quest-helpers.ts";
 
@@ -69,4 +70,21 @@ describe("wild sites", () => {
     expect(Math.hypot(pile.x - chest[0], pile.y - chest[1], pile.z - chest[2])).toBeLessThan(1.5);
     void me;
   }, 40_000);
+});
+
+describe("wild-site rare finds (lane weapons, 2026-11-13)", () => {
+  it("the Lantern Shrine and the Long Haul wreck can hold their sculpted weapon, at the site's tier", () => {
+    const sys = { planet: "hollowmere" } as unknown as Parameters<typeof rollChest>[0];
+    const shrine = WILD_SITE_BY_ID.get("lantern_shrine")!.chest;
+    const wreck = WILD_SITE_BY_ID.get("long_haul_wreck")!.chest;
+    expect(shrine.rare?.id).toBe("lantern");
+    expect(wreck.rare?.id).toBe("crossbow");
+    // rng 0: every roll succeeds (the rare find is in); rng 0.99: none does (it isn't)
+    const lucky = rollChest(sys, shrine, 9, () => 0);
+    expect(lucky.items).toContainEqual({ id: "lantern", tier: 1, qty: 1 }); // L9 with a low tier roll: T1
+    expect(rollChest(sys, shrine, 9, () => 0.99).items.some((i) => i.id === "lantern")).toBe(false);
+    const late = rollChest({ planet: "meridian" } as unknown as Parameters<typeof rollChest>[0], wreck, 19, () => 0.5);
+    expect(late.items.find((i) => i.id === "crossbow")).toBeUndefined(); // 0.5 misses a 1/6 chance
+    expect(rollChest({ planet: "meridian" } as unknown as Parameters<typeof rollChest>[0], wreck, 19, () => 0).items).toContainEqual({ id: "crossbow", tier: 2, qty: 1 });
+  });
 });

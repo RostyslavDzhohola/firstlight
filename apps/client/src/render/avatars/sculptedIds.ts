@@ -3,4 +3,4 @@
 // (ui/sprites.ts). No three here: the HUD imports it.
 
 /** Weapon ids with a sculpted model and a rendered icon (`weapons/<id>.glb`, `weapons/icon_<id>.webp`). */
-export const SCULPTED_WEAPONS: readonly string[] = ["emberglass", "axe", "longbow"];
+export const SCULPTED_WEAPONS: readonly string[] = ["emberglass", "axe", "longbow", "boarspear", "crossbow", "lantern"];
