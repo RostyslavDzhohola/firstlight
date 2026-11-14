@@ -5,8 +5,8 @@
 // the visit really joined a world. A step can only land on a visit the server made, and nothing the
 // page sends later can move a visit into or out of the people's figures.
 //
-// Token: `v1.<id>.<kind letter>.<issued, base36 ms>.<mac>` with mac = HMAC-SHA256 over the rest,
-// truncated to 128 bits, base64url. It accepts steps for TOKEN_TTL_MS after issue; until RENEW_MS the
+// Token: `v1.<id>.<kind letter>.<visit began>.<token issued>.<mac>` (times in base36 ms) with mac =
+// HMAC-SHA256 over the rest, truncated to 128 bits, base64url. It accepts steps for TOKEN_TTL_MS after issue; until RENEW_MS the
 // page may trade it for a fresh one with the same id and kind (a browser stays one visit for its first
 // weeks), after that it is a new visit.
 
