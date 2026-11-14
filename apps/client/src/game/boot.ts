@@ -90,9 +90,17 @@ export function describeBootFailure(e: unknown): BootFailure | null {
   return { id: "unreachable", title: "Couldn't reach the world", text: "The game server didn't answer. Check your connection and try again; your character is safe.", action: "retry" };
 }
 
-/** Reconnect loop: keep trying through drops and timeouts; stop when the server refused us. */
+/**
+ * The server speaks another protocol (a deploy while this tab played) and the one automatic reload
+ * already happened (Net.reloadForVersion): rejoining can never work, so say so instead of retrying.
+ */
+export function isVersionRefusal(e: unknown): boolean {
+  return message(e) === "version";
+}
+
+/** Reconnect loop: keep trying through drops and timeouts; stop when the server refused us or speaks another version. */
 export function shouldKeepReconnecting(e: unknown): boolean {
-  return !refused(e);
+  return !refused(e) && !isVersionRefusal(e);
 }
 
 /** The screens a failed boot can end on (main.ts wires the real ones; tests record the calls). */
@@ -121,7 +129,8 @@ export async function runBoot(start: () => Promise<void>, ui: BootScreens): Prom
     await start();
     return true;
   } catch (e) {
-    console.error("[boot] failed", e);
+    // A warning, not an error: the screen below says what happened (#85: no console error on a failure path).
+    console.warn("[boot] failed", e);
     const removed = removalReason(e);
     if (removed !== null) {
       ui.hideLoading();

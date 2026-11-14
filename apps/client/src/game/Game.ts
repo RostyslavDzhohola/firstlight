@@ -46,7 +46,7 @@ import { CLOSE } from "@firstlight/shared/net/social";
 import { SANDBOX_REFUSALS } from "./AdminModeClient.ts";
 import { ArrivalWatch, closeAction, ConnectionLost, StorageBackoff, waitFor } from "./arrival.ts";
 import { HitStop } from "./hitStop.ts";
-import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
+import { BootGate, isVersionRefusal, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
@@ -369,6 +369,7 @@ export class Game {
       this.stop();
       return;
     }
+    if (isVersionRefusal(e)) return this.versionChanged();
     if (!shouldKeepReconnecting(e)) {
       hideLoading();
       this.stop();
@@ -376,6 +377,14 @@ export class Game {
     }
     if (e instanceof ConnectionLost && e.action === "rejoin-fresh") invalidatePlayToken();
     void this.reconnect();
+  }
+
+  /** The server was updated under us and this page can't follow (the one automatic reload is used up). */
+  private versionChanged() {
+    hideLoading();
+    this.stop();
+    funnelStep("version");
+    this.menu.showNotice("A NEW VERSION IS OUT", "The game was updated while you played. Reload to play the new version; your character is safe.", "Reload", () => location.reload());
   }
 
   /** Rejoin after an unexpected disconnect: backoff 1.5 s → 30 s, then a "lost connection" screen. */
@@ -393,6 +402,7 @@ export class Game {
           return;
         } catch (e) {
           console.warn("rejoin failed", e);
+          if (isVersionRefusal(e)) return this.versionChanged();
           if ((e instanceof ConnectionLost && e.action === "removed") || !shouldKeepReconnecting(e)) {
             hideLoading();
             if (e instanceof ConnectionLost && e.code !== null) removedFromWorld(e.code);
