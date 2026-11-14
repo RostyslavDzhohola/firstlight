@@ -1,7 +1,8 @@
-// The tracked hunt mission's world callout (D-zones-2): on a planet, the mission the HUD tracker
-// tracks (missions.ts trackedMission) points at the nearest creep in view whose kill would count
-// (the server's huntTargets), or at its area. Pinned to the screen edge with an arrow when the point
-// is off screen (placeCallout).
+// The tracked mission's world callout (D-zones-2): on a planet, the mission the player tracks
+// (game/missionTrack.ts, #69) points at the nearest creep in view whose kill would count (the
+// server's huntTargets), its area, or its next ring, beacon or piece. Pinned to the screen edge with an
+// arrow when the point is off screen (placeCallout). The same point is a marker on the compass with
+// its distance, in the mission's colour (#70): the long-range way; the callout is the close-range cue.
 
 import "../ui/missionPointer.css";
 import * as THREE from "three/webgpu";
@@ -14,6 +15,9 @@ import { huntTargets } from "./huntTargets.ts";
 import { missionTarget, type PointerNpc, type PointerTarget } from "./missionTarget.ts";
 import type { ClientSystem } from "./systems.ts";
 import { objectiveObject, trialSeen } from "./trialState.ts";
+import { missionTrack } from "./missionTrack.ts";
+import { compassGuides, type CompassMarker } from "../social/compass.ts";
+import { missionColour } from "../ui/missionColour.ts";
 
 /** Pick the target this often (ms); the callout itself follows it every frame. */
 const PICK_MS = 250;
@@ -30,7 +34,12 @@ class MissionPointer implements ClientSystem {
   private readonly sub: HTMLElement;
   private target: PointerTarget | null = null;
   private mission = "";
+  /** The tracked mission's id and name, for the compass marker. */
+  private missionId = "";
+  private missionName = "";
   private pickedAt = -Infinity;
+  private readonly compassGuide = (): CompassMarker[] =>
+    this.target && this.missionId ? [{ key: "mission", label: this.missionName, colour: missionColour(this.missionId), pos: this.target.at, kind: "mission" }] : [];
   private last = { text: "", key: "" };
   private boxSize: { w: number; h: number } | null = null;
 
@@ -47,6 +56,7 @@ class MissionPointer implements ClientSystem {
     this.box = el("div", "fl-callout__box fl-holo", this.callout);
     this.title = el("span", "", this.box);
     this.sub = el("small", "", this.box);
+    compassGuides.add(this.compassGuide);
   }
 
   update(_dt: number, now: number) {
@@ -57,9 +67,11 @@ class MissionPointer implements ClientSystem {
     if (now - this.pickedAt >= PICK_MS) {
       this.pickedAt = now;
       // The HUD tracker's mission; missions from other planets don't point here (missionTarget).
-      const open = trackedMission(g.hud.you?.missions ?? [], g.bodyId);
+      const open = trackedMission(g.hud.you?.missions ?? [], g.bodyId, missionTrack.chosen);
       const def = open ? MISSION_BY_ID.get(open.id) : undefined;
       this.mission = def ? `${def.name} · ${open!.progress}/${missionGoal(def)}` : "";
+      this.missionId = def?.id ?? "";
+      this.missionName = def?.name ?? "";
       const npcs: PointerNpc[] = [];
       (room.state as any).npcs?.forEach((n: any, id: string) => npcs.push({ id, kind: n.kind, hp: n.hp, x: n.x, y: n.y, z: n.z }));
       const terrain = g.planet.terrain;
@@ -149,6 +161,7 @@ class MissionPointer implements ClientSystem {
   }
 
   dispose() {
+    compassGuides.delete(this.compassGuide);
     this.root.remove();
   }
 }

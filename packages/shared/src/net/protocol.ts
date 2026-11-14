@@ -163,6 +163,8 @@ export type ClientMessages = {
    * `supportSync`): each Glasswing Ward that is up comes back as a `spell` event with `late`.
    */
   spellSync: Record<string, never>;
+  /** The mission the player tracks (#69; null: none chosen). The hunt pointer's `huntTargets` follow it. Session-only, at most 5 quest ops a second. */
+  track: { id: string | null };
 };
 
 /**

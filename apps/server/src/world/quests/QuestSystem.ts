@@ -155,6 +155,8 @@ export class QuestSystem implements RoomSystem {
   private lastSweep = 0;
   /** The last huntTargets each player was sent (only changes go out). */
   private readonly huntSent = new WeakMap<PlayerActor, string>();
+  /** The mission each player chose to track (#69), if any. */
+  private readonly tracked = new WeakMap<PlayerActor, string>();
 
   constructor(room: BodyRoom) {
     this.room = room;
@@ -177,6 +179,14 @@ export class QuestSystem implements RoomSystem {
     room.onMessage("title", z.object({ medalId: z.string().max(40).nullable() }), (c, m) => this.setTitle(c, m.medalId));
     room.onMessage("interact", z.object({ target: z.string().max(40), code: z.string().max(8).optional() }), (c, m) => this.interact(c, m.target, m.code));
     room.onMessage("questSync", z.object({}).passthrough().optional(), (c) => this.sync(c));
+    // The mission the player tracks (#69): the hunt pointer's targets follow it. Session-only (the
+    // client keeps the choice and sends it again after each join).
+    room.onMessage("track", z.object({ id: z.string().max(8).nullable() }), (c, m) => {
+      const a = this.room.playerById(c.sessionId);
+      if (!this.allowOp(a)) return;
+      if (m.id) this.tracked.set(a, m.id);
+      else this.tracked.delete(a);
+    });
     this.unsubs.push(onGameEvent(room, (e) => this.onEvent(e)));
     this.unsubs.push(onNpcEvent((e) => this.onNpcEvent(e)));
     this.unsubs.push(onHallChanged((lines) => this.room.broadcast("hall" as never, { lines } as never)));
@@ -505,7 +515,7 @@ export class QuestSystem implements RoomSystem {
    * client's mission pointer follows these (D-zones-2). Sent when the list changes.
    */
   private sendHuntTargets(a: PlayerActor) {
-    const m = trackedMission(a.char.missions, this.body);
+    const m = trackedMission(a.char.missions, this.body, this.tracked.get(a) ?? null);
     const def = m ? MISSION_BY_ID.get(m.id) : undefined;
     const hunt = !!m && !!def?.hunt && def.body === this.body;
     const ids: string[] = [];

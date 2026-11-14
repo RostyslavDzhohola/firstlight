@@ -65,6 +65,8 @@ export interface MissionLine {
   /** Right column: "3/8", "380 m", "Done". */
   progress: string;
   state?: "open" | "tracked" | "done";
+  /** The mission's colour (#86: the same on its compass marker and its objects in the world). */
+  colour?: string;
 }
 
 export interface ToastOptions {

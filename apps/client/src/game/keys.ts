@@ -73,4 +73,6 @@ export const BINDINGS: readonly Binding[] = [
   { code: "KeyV", what: "push to talk", voice: true },
   { code: "KeyB", what: "radio", voice: true },
   { code: "Escape", shift: true, what: "mute everyone", voice: true },
+  { code: "KeyL", what: "missions panel: collapse / expand (#69)" },
+  { code: "KeyL", shift: true, what: "track the next mission (#69)" },
 ];

@@ -9,6 +9,7 @@ import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import { trackerRows } from "./trackerRows.ts";
 import { trialWay } from "../game/nextSteps.ts";
+import { missionTrack } from "../game/missionTrack.ts";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
@@ -235,7 +236,17 @@ export class JournalPanel extends Panel {
       if (!def) continue;
       missionCard(body, def, you, (row) => {
         el("span", "rw", row, `${def.body[0]!.toUpperCase()}${def.body.slice(1)} · ${def.trial ? `${GLEAMS.name}, trial ${def.trial}` : def.guide}`);
-        if (!m.done) el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
+        if (!m.done) {
+          const tracked = missionTrack.chosen === def.id;
+          const t = el("button", `btn${tracked ? "" : " ghost"}`, row, tracked ? "Tracking" : "Track");
+          t.dataset.e2e = `journal-track-${def.id}`;
+          t.disabled = tracked;
+          t.onclick = () => {
+            missionTrack.choose(def.id);
+            this.render();
+          };
+          el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
+        }
       });
     }
     el("div", "rw", body, `${mine.filter((m) => m.done).length} of ${MISSIONS.length} missions done this life.`).style.marginTop = "8px";
@@ -354,8 +365,9 @@ export class MissionTracker {
   private last = "";
   /** Open mission ids at the last update (null before the first): a new one is the mission just taken. */
   private static openIds: Set<string> | null = null;
-  /** The mission the player took most recently (survives travel: one tracker per body). */
-  private static recent: string | null = null;
+  private readonly offTrack = missionTrack.onChange(() => {
+    this.last = "";
+  });
 
   constructor(
     private readonly hud: Pick<Hud, "setMissions"> | HTMLElement,
@@ -368,17 +380,19 @@ export class MissionTracker {
     if (you) {
       const open = new Set(all.filter((m) => !m.done).map((m) => m.id));
       const prev = MissionTracker.openIds;
-      if (prev) for (const id of open) if (!prev.has(id)) MissionTracker.recent = id;
+      // #69: the one tracked stays tracked; a mission just taken is tracked only if nothing was.
+      missionTrack.settle(all, body, prev ? [...open].filter((id) => !prev.has(id)) : []);
       MissionTracker.openIds = open;
     }
-    const key = JSON.stringify([all, body, trial, MissionTracker.recent]);
+    const key = JSON.stringify([all, body, trial, missionTrack.chosen]);
     if (key === this.last || this.hud instanceof HTMLElement) return;
     this.last = key;
-    const rows = trackerRows(all, body, { trial, recent: MissionTracker.recent });
+    const rows = trackerRows(all, body, { trial, tracked: missionTrack.chosen });
     this.hud.setMissions(rows.lines, rows.header, rows.more ? { count: rows.more, open: this.onMore } : null);
   }
 
   dispose() {
+    this.offTrack();
     if (!(this.hud instanceof HTMLElement)) this.hud.setMissions([]);
   }
 }
