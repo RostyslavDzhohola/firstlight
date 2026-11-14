@@ -81,28 +81,28 @@ const skink = (scales: number, stripe: number): WildPart[] => [
   { g: "cone", m: "std", p: [0, 0.06, -0.3], s: [0.06, 0.32, 0.06], c: scales, role: "tail" },
 ];
 
-/** A fish's rise: the ring on the water (the torus lies flat; it grows and thins as it fades). */
-const ring = (c: number): WildPart[] => [{ g: "tor", m: "std", p: [0, 0.02, 0], s: [1, 1, 1], c }];
-const glow = (c: number): WildPart[] => [{ g: "sph", m: "glow", p: [0, 0, 0], s: [0.07, 0.07, 0.07], c }];
+/** A fish's rise: the ring on the water (a faint glow torus lying flat; it grows and thins as it fades). */
+const ring = (c: number): WildPart[] => [{ g: "tor", m: "glow", p: [0, 0.02, 0], s: [1, 1, 1], c }];
+const glow = (c: number): WildPart[] => [{ g: "sph", m: "glow", p: [0, 0, 0], s: [0.12, 0.12, 0.12], c }];
 
 /** Per planet (append-only ids are not needed: nothing is saved or sent). */
 export const WILDLIFE: Record<BodyId, WildSpecies[]> = {
   portus: [],
   lumen: [],
   arcadia: [
-    { id: "hedge_finch", name: "Hedge Finch", behaviour: "bird", parts: bird(0x7a5536, 0xe0a060, 0xf0c040), count: [4, 7], regions: ["meadow", "heath", "marsh"], size: 1.5 },
-    { id: "clover_kit", name: "Clover Kit", behaviour: "grazer", parts: kit(0xb08a64, 0xeadcc4), count: [2, 4], regions: ["meadow", "heath"], size: 1.25 },
+    { id: "hedge_finch", name: "Hedge Finch", behaviour: "bird", parts: bird(0x7a5536, 0xe0a060, 0xf0c040), count: [4, 7], regions: ["meadow", "heath", "marsh", "wood"], size: 2.4 },
+    { id: "clover_kit", name: "Clover Kit", behaviour: "grazer", parts: kit(0xb08a64, 0xeadcc4), count: [2, 4], regions: ["meadow", "heath", "marsh"], size: 1.6 },
     { id: "lake_darter", name: "Lake Darter", behaviour: "fish", parts: ring(0xdff4ff), count: [1, 1], size: 1 },
     { id: "lamp_beetle", name: "Lamplight Beetle", behaviour: "glow", parts: glow(0xfff08a), count: [9, 14], regions: ["wood", "marsh", "meadow"], night: true, size: 1 },
   ],
   hollowmere: [
-    { id: "fen_crow", name: "Fen Crow", behaviour: "bird", parts: bird(0x2a2633, 0x4a4458, 0x8a8070), count: [3, 6], regions: ["fen", "ashwood", "mire"], size: 1.7 },
+    { id: "fen_crow", name: "Fen Crow", behaviour: "bird", parts: bird(0x2a2633, 0x4a4458, 0x8a8070), count: [3, 6], regions: ["fen", "ashwood", "mire"], size: 2.6 },
     { id: "bog_hopper", name: "Bog Hopper", behaviour: "grazer", parts: hopper(0x5d7048, 0xc8e070), count: [2, 4], regions: ["fen", "mire", "glowcap"], size: 1 },
     { id: "mere_eel", name: "Mere Eel", behaviour: "fish", parts: ring(0xc8c0e8), count: [1, 1], size: 1 },
     { id: "ghost_moth", name: "Ghost Moth", behaviour: "glow", parts: glow(0xc8b0ff), count: [8, 12], regions: ["glowcap", "mire", "fen", "ashwood"], night: true, size: 1.3 },
   ],
   meridian: [
-    { id: "dust_lark", name: "Dust Lark", behaviour: "bird", parts: bird(0xc09a6a, 0xf0dcb8, 0x5a3a20), count: [4, 7], regions: ["flats", "rust", "dunes"], size: 1.5 },
+    { id: "dust_lark", name: "Dust Lark", behaviour: "bird", parts: bird(0xc09a6a, 0xf0dcb8, 0x5a3a20), count: [4, 7], regions: ["flats", "rust", "dunes"], size: 2.4 },
     { id: "rock_skink", name: "Rock Skink", behaviour: "grazer", parts: skink(0xa8552e, 0xf0b060), count: [2, 3], regions: ["flats", "rust", "salt"], size: 1.2 },
     { id: "brine_minnow", name: "Brine Minnow", behaviour: "fish", parts: ring(0xf0f8ff), count: [1, 1], size: 1 },
     { id: "ember_mite", name: "Ember Mite", behaviour: "glow", parts: glow(0xff9a40), count: [8, 12], regions: ["rust", "flats"], night: true, size: 1 },
@@ -121,7 +121,7 @@ export const MAX_ANIMALS = 110;
 export const MAX_GROUPS = 18;
 /** World cells (m) that may each hold one group, and the share that do. */
 const CELL = 34;
-const GROUP_CHANCE = 0.32;
+const GROUP_CHANCE = 0.4;
 /** How close (m) a walking or running player gets before birds lift and grazers move off. */
 export const BIRD_FLEE = 7;
 export const BIRD_FLEE_RUN = 13;
@@ -159,6 +159,8 @@ interface Group {
   hx: number; hy: number; hz: number;
   first: number;
   count: number;
+  /** When a bird of the flock was startled (s, the draw clock); 0 = calm. */
+  alarmAt: number;
 }
 
 const _m = new THREE.Matrix4();
@@ -213,7 +215,7 @@ export class Wildlife {
     this.water = BODIES[body].waterLevel;
     this.regionIds = REGION_KINDS[body].map((k) => k.id);
     for (let i = 0; i < MAX_ANIMALS; i++) this.animals.push({ group: -1, x: 0, y: 0, z: 0, fx: 1, fy: 0, fz: 0, vx: 0, vy: 0, vz: 0, alt: 0, mode: MODE.GONE, t: 0, phase: 0, a: 0, b: 0 });
-    for (let i = 0; i < MAX_GROUPS; i++) this.groups.push({ key: 0, alive: false, species: 0, hx: 0, hy: 0, hz: 0, first: -1, count: 0 });
+    for (let i = 0; i < MAX_GROUPS; i++) this.groups.push({ key: 0, alive: false, species: 0, hx: 0, hy: 0, hz: 0, first: -1, count: 0, alarmAt: 0 });
   }
 
   get enabled(): boolean {
@@ -240,7 +242,8 @@ export class Wildlife {
   /** Put (x, y, z) on the ground (or on the water for fish) plus `alt`, in place on `a`. */
   private settle(a: Animal, alt: number, onWater: boolean) {
     const l = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) || 1;
-    const h = onWater ? this.water : Math.max(this.water, this.ground(a.x, a.y, a.z));
+    // Fish rings ride a little above the water so the rendered surface (its waves) never covers them.
+    const h = onWater ? this.water + 0.12 : Math.max(this.water, this.ground(a.x, a.y, a.z));
     const r = (this.R + h + alt) / l;
     a.x *= r; a.y *= r; a.z *= r;
   }
@@ -271,15 +274,20 @@ export class Wildlife {
           const key = hash4(seed, i, j, k);
           if (hash01(key, 1) >= GROUP_CHANCE) continue;
           if (this.groups.some((g) => g.alive && g.key === key)) continue;
-          // The home: the cell's jittered point, dropped onto the surface; it must lie in this cell.
-          const ux = (i + hash01(key, 2)) * CELL, uy = (j + hash01(key, 3)) * CELL, uz = (k + hash01(key, 4)) * CELL;
+          // One home per surface column: the ray through the cell's centre must meet the ground inside
+          // this cell; the home is a jittered point beside that, dropped onto the surface.
+          const cdx = cx / cl, cdy = cy / cl, cdz = cz / cl;
+          const ch = Math.max(this.water, this.terrain.groundHeight(cdx, cdy, cdz));
+          const cr = this.R + ch;
+          if (Math.floor((cdx * cr) / CELL) !== i || Math.floor((cdy * cr) / CELL) !== j || Math.floor((cdz * cr) / CELL) !== k) continue;
+          const jx = (hash01(key, 2) - 0.5) * 0.8 * CELL, jy = (hash01(key, 3) - 0.5) * 0.8 * CELL, jz = (hash01(key, 4) - 0.5) * 0.8 * CELL;
+          const ux = cdx * cr + jx, uy = cdy * cr + jy, uz = cdz * cr + jz;
           const ul = Math.sqrt(ux * ux + uy * uy + uz * uz);
           const dx = ux / ul, dy = uy / ul, dz = uz / ul;
           const h = this.terrain.groundHeight(dx, dy, dz);
           const wet = h < this.water - 0.8;
           const sr = this.R + (wet ? this.water : h);
           const hx = dx * sr, hy = dy * sr, hz = dz * sr;
-          if (Math.floor(hx / CELL) !== i || Math.floor(hy / CELL) !== j || Math.floor(hz / CELL) !== k) continue;
           if (Math.hypot(hx - px, hy - py, hz - pz) > r) continue;
           if (!wet && h < this.water + 0.3) continue; // the beach: nobody lives on the wet sand
           if (nearSafeZone(BODIES[this.body], dx, dy, dz, 6)) continue; // not on pads and outposts
@@ -324,7 +332,7 @@ export class Wildlife {
     }
     if (first < 0) return;
     const g = this.groups[gi]!;
-    g.alive = true; g.key = key; g.species = sp; g.hx = hx; g.hy = hy; g.hz = hz; g.first = first; g.count = want;
+    g.alive = true; g.alarmAt = 0; g.key = key; g.species = sp; g.hx = hx; g.hy = hy; g.hz = hz; g.first = first; g.count = want;
     _up.set(hx, hy, hz).normalize();
     tangentBasis(_up, _rt, _fw);
     const spread = s.behaviour === "glow" ? 5 : s.behaviour === "fish" ? 0 : 3.5;
@@ -394,15 +402,17 @@ export class Wildlife {
       case "bird": {
         if (a.mode !== MODE.FLY) {
           const flee = this.pspeed > RUNNING ? BIRD_FLEE_RUN : BIRD_FLEE;
-          if (dist < flee) {
-            // Lift off: away from the player, up, with a little scatter of its own.
+          if (dist < flee || g.alarmAt > 0) {
+            // Lift off: away from the player, up, with a little scatter of its own. One startled bird
+            // lifts the whole flock (each a beat after the last).
+            if (g.alarmAt === 0) g.alarmAt = t;
             a.mode = MODE.FLY;
             a.t = 4 + a.b * 3;
             const inv = 1 / Math.max(0.1, dist);
             const sx = (Math.sin(a.phase * 7.1) * 0.5), sz = (Math.cos(a.phase * 5.3) * 0.5);
             _up.set(a.x, a.y, a.z).normalize();
             tangentBasis(_up, _rt, _fw);
-            const v = 7 + a.b * 3;
+            const v = 5 + a.b * 2.5;
             a.vx = (dxp * inv + _rt.x * sx + _fw.x * sz) * v;
             a.vy = (dyp * inv + _rt.y * sx + _fw.y * sz) * v;
             a.vz = (dzp * inv + _rt.z * sx + _fw.z * sz) * v;
@@ -417,7 +427,7 @@ export class Wildlife {
           }
         } else {
           // Flying: climb to ~9 m, then glide away; land again where it ends up.
-          a.alt = Math.min(9 + a.b * 6, a.alt + dt * 5);
+          a.alt = Math.min(6 + a.b * 5, a.alt + dt * 3.5);
           a.x += a.vx * dt; a.y += a.vy * dt; a.z += a.vz * dt;
           const l = Math.hypot(a.vx, a.vy, a.vz) || 1;
           a.fx = a.vx / l; a.fy = a.vy / l; a.fz = a.vz / l;
@@ -429,6 +439,7 @@ export class Wildlife {
               a.t = 1;
               // Re-home the group where it landed, so it doesn't fly straight back.
               g.hx = a.x; g.hy = a.y; g.hz = a.z;
+              g.alarmAt = 0;
             }
           }
         }
@@ -518,14 +529,14 @@ export class Wildlife {
       // The ring grows and thins over ~1.6 s, then is gone until the next rise.
       const age = a.b;
       if (age < 0 || age > 1.6) return 0;
-      const r = 0.2 + age * 0.9;
+      const r = 0.3 + age * 1.1;
       const thin = Math.max(0.15, 1 - age / 1.6);
       _local.makeRotationAxis(_axisX, Math.PI / 2);
-      _m.makeScale(r, r, r * 0.5 * thin);
+      _m.makeScale(r, r, r * 1.6 * thin);
       _local.multiply(_m);
       _m.multiplyMatrices(_basis, _local);
       const c = cols[0]!, k = 0.35 + 0.65 * thin;
-      batch.push("tor", "std", _m, c[0] * k, c[1] * k, c[2] * k);
+      batch.push("tor", "glow", _m, c[0] * k, c[1] * k, c[2] * k);
       return 1;
     }
     const flying = a.mode === MODE.FLY && a.alt > 0.2;

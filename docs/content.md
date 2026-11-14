@@ -737,6 +737,55 @@ the Cratermaw and 4 Glimmerhops; 650 XP, 110 coins, 1 Large Tonic.
 
 ---
 
+### 3.9 Regions, ambient wildlife, the food chain and Granny Gust (new, 2026-11-14, lane wild, issues #7, #15, #2)
+
+**Regions (#7; code `packages/shared/src/planet/regions.ts`).** Every planet and the moon is cut into
+cells about 200 m apart (a jittered grid on the cube faces, nearest centre wins, borders wobbled by
+up to 45 m, looks blended over 28 m), each one region kind of its body; neighbouring cells take
+different kinds where possible, so a 500 m straight walk crosses at least two (tested: ≥ 95% of walks
+on each planet, ≥ 80% on the moon). Each kind pulls the ground colour, the grass's dryness and its
+flower drifts, and adds its own cosmetic undergrowth (walk-through kinds the planet already draws).
+
+| Body | Kinds (cells ≈ 96 / 216 / 384 / 24) |
+|---|---|
+| Arcadia | Clover Meadows (flowers ×1.8), Fernshade Wood (ferns, toadstools), Thistle Heath (straw, gorse), Sedge Marsh (wet teal ground) |
+| Hollowmere | Greyreed Fen (reeds), Inkwater Mire (ferns), Ashwood Barrens (bare grey), Glowcap Hollow (glowing fungi) |
+| Meridian | Cracked Flats, Pale Dunes (bare), Rust Steppe (scrub), Saltglass Pan (white, bare) |
+| Lumen | Dark Mare, Pale Uplands (no life) |
+
+**Ambient wildlife (#7; client-only, `apps/client/src/world/wildlife.ts`).** Four kinds per planet,
+none on Lumen or Portus: Arcadia Hedge Finch, Clover Kit, Lake Darter (fish rings), Lamplight Beetle
+(night); Hollowmere Fen Crow, Bog Hopper, Mere Eel, Ghost Moth (night); Meridian Dust Lark, Rock
+Skink, Brine Minnow, Ember Mite (night). Groups in 34 m world cells (32% hold one) within 85 m, gone
+past 115 m, drawn within 75 m, at most 18 groups and 110 animals. Birds lift at 7 m (13 m when you
+run, > 4.5 m/s) and land 4–7 s later further on; grazers keep 11 m off; fish rise every ~3 s and stop
+for 10 s when you wade within 4 m; insects drift and scatter within 2.5 m, only when night > 0.45.
+
+**Food chain (#15; `packages/shared/src/content/ecology.ts`, `apps/server/src/world/npc/ecology.ts`).**
+Woolbacks and Dusk Wolves in pack spawn points (no Golden Hopbit in them) follow one population per
+region cell; every other group (camps, beasts, bosses, eggs, arrival groups, Hopbits) keeps its timer.
+Per cell: capacity k = herd slots (min 4), kp = pack slots (min 1.5); a crowd raises k 25% per extra
+player (up to +75%). Per second: forage regrows 1/400·f(1−f) + 1/4000·(1−f), is eaten 1/600·(w/k)·f;
+Woolbacks are born 1/150·w·f·(1−w/k), starve 1/200 below forage 0.25; wolves kill 1/360·p·x/(x+0.5)
+(x = w/k) where no real pack is awake, breed 1/600 logistic toward kp·min(1, x/0.6), +0.1 per kill;
+both drift 1/600 toward the planet's mean, never stay under 15% (wanderers refill 1/300 of capacity per
+second) or over 140%. Model step 5 s. Settles at herds ≈ ¾ full, packs ≈ 9/10 (12 h test on all three
+planets); clearing a cell's wolves gives ≈ 20% more Woolbacks for ≈ 10 min; a wiped herd is back over
+half in 10 min. Near players: a herd spawns round(fill × slots) members, gains one about every 40 s
+while short, and once cleared comes back walking in from 22 m off, its countdown (120 s) running at
+fill/0.75 (max 1.5×) and stopped below fill 0.2. Calm wolves start a hunt about once per 50 s per wolf
+for a Woolback within 45 m; the pack runs it down (prey bolts within 14 m), gives up after 25 s, rests
+10 s after eating. Predator kills pay nobody. Counts are saved with the copy and run on while it is empty.
+
+**Granny Gust (#2; roaming mini-boss, Hollowmere, Whisper Fen; `apps/server/src/world/npc/granny.ts`).**
+Level 9, HP1 620, beast tier, 140 coins, weapon drop 1/2 (T2). Sight 45 m all round; roams at 3.2 m/s
+within 110 m of her spot; chases at 10.5 m/s (a sprint is 9). **Gale Dash**: charge, 0.9 s tell (a line
+of hers, then the red line), 16 m/s for 26 m, 15 damage, knockback 6, range 3–22 m, cooldown 2.2 s.
+**Cane Rap**: arc 100°, 2.2 m, 9 damage, 0.5 s tell. After 3 dashes she sits **winded 4.5 s** and takes
+×1.8 damage (×0.6 otherwise). Gives up on a target over 80 m away or out of reach for 5 s; after **45 s**
+of one chase with you alive she gives up on you (medal 22), and leaves you be 90 s. Regen is held for
+her quarry (REGEN.PAUSED_IN `miniboss`). Respawn: the beast timer (900 s).
+
 ## 4. Bosses
 
 ### 4.1 Shared boss rules
@@ -1014,6 +1063,8 @@ since the last rebirth; "account" means cumulative.
 | 19 | With Friends Like These | joke | Be killed by a member of your current party | account | Trusting |
 | 20 | Own Goal | joke | Die to your own Comet rocket, Scrapburst or Emberglass splash | account | Self-Starter |
 | 21 | The Three Gleams | feat | Win all three trials of the Three Gleams in one life and open the Gleam Vault (§5.1) | life (earned once per account) | Gleamkeeper |
+| 22 | Not Today, Nana | survival | Survive one of Granny Gust's chases on Hollowmere: 45 s in her sights without falling (§3.9) | account | Light on My Feet |
+| 23 | Grounded | feat | Be loot-eligible on a Granny Gust kill (§3.9) | account | Gust Breaker |
 | H1–H9 | the original 9 egg medals in §6 | hidden | Claim that egg's item | account | same as the medal name |
 | H10 | Tended the Dawn | hidden | Claim the Dewdial Crown | account | Dawn Tender |
 | H11 | Kept the Wicks | hidden | Claim the Wickfloat Mantle | account | Wick Keeper |
@@ -1267,6 +1318,7 @@ not a trademark search.
 | Group | Names | Result |
 |---|---|---|
 | Decided (D) | FIRSTLIGHT, Portus, Arcadia, Hollowmere, Meridian, Hall of Firsts, Hexwick, Brother Ash, Unit 7, Hexquill, Sunbrand, Pocket Carbine, Woolback, Dusk Wolf, Tidewrath, The Receiver, Meridian Oversight, Hollow Court | OK, with flags: **Hollow King** is one word from *Hollow Knight* (Team Cherry); keep, with fallback "the Barrow King". **Kappa** is folklore (fine), but also an apparel trademark and a Twitch emote; low risk in games. **Tidewrath** is flagged Y in [r2-04] because of the kaiju archetype; mitigated by the design rules in 4.2 |
+| Wild lane (2026-11-14) | Clover Meadows, Fernshade Wood, Thistle Heath, Sedge Marsh, Greyreed Fen, Inkwater Mire, Ashwood Barrens, Glowcap Hollow, Cracked Flats, Pale Dunes, Rust Steppe, Saltglass Pan, Dark Mare, Pale Uplands; Hedge Finch, Clover Kit, Lake Darter, Lamplight Beetle, Fen Crow, Bog Hopper, Mere Eel, Ghost Moth, Dust Lark, Rock Skink, Brine Minnow, Ember Mite; Granny Gust, Gale Dash, Cane Rap; medals Not Today, Nana and Grounded | OK (generic words). Granny Gust builds on the folklore of a speeding old-woman ghost (issue #2); deliberately not "Turbo Granny"/"Turbo Baba" and nothing of any manga or anime version: her look (lantern, cane, teal shawl, white bun, a wisp for feet), lines and mechanics are our own |
 | Starter looks (new, round 2) | River ninja, Wayfarer (Kappa); Trooper, Scout (Unit 7) | OK (generic words) |
 | Plain starter (new, #80) | Traveller | OK (a generic word; wears Brother Ash's existing body, no new look) |
 | Ninja starter (new, 6h) | Hinoko, Ember Kunai, Ember Seal | OK. "Hinoko" is the Japanese common noun for flying sparks (火の粉); no franchise character of that name known to us. "Ember Seal" and "Ember Kunai" are generic words (a kunai is a real tool). Rejected: "Kage", "Rin", "Hotaru", "Homura", "Hibana", "Kitsune"/fox motifs (all close to famous anime characters or the nine-tailed fox), "Wren" (already the example player name in UI copy and tests). Reasoned check only |

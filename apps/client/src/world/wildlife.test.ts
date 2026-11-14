@@ -67,6 +67,24 @@ describe("ambient wildlife (#7)", () => {
     }
   });
 
+  it("is dense enough to meet: several groups round a player standing in the open by day", () => {
+    for (const b of ["arcadia", "hollowmere", "meridian"] as const) {
+      const cells = regionCells(b);
+      let total = 0, n = 0;
+      for (let i = 0; i < cells.length && n < 16; i += 5) {
+        const life = new Wildlife(b, createTerrain(b));
+        const p = surface(b, cells[i]!.dir, 1);
+        if (Math.hypot(...p) < BODIES[b].radius + BODIES[b].waterLevel + 1.5) continue;
+        life.setPlayer(p[0], p[1], p[2], 0);
+        life.scan();
+        const c = life.census();
+        total += c.bird + c.grazer + c.fish;
+        n++;
+      }
+      expect(total / n, b).toBeGreaterThanOrEqual(2.5);
+    }
+  });
+
   it("stays within its caps and draws a few parts per animal", () => {
     const life = new Wildlife("arcadia", createTerrain("arcadia"));
     roam(life, "arcadia", () => false, 1);
