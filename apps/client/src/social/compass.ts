@@ -20,8 +20,11 @@ export interface CompassMarker {
   label: string;
   colour: string;
   pos: V3;
-  /** Party member (default), a guide (the tutorial's next place), the tracked mission or the nearest pad. */
-  kind?: "party" | "guide" | "mission" | "home";
+  /**
+   * Party member (default), a guide (the tutorial's next place), the tracked mission, the nearest pad,
+   * or an undiscovered wild site (game/siteCompass.ts: hidden off the strip, not pinned to its end).
+   */
+  kind?: "party" | "guide" | "mission" | "home" | "site";
 }
 
 /**
@@ -172,7 +175,7 @@ export class Compass {
         v.label = label;
         v.text.textContent = label;
       }
-      const clamped = place(v.e, bearingTo(pos, forward, m.pos), false);
+      const clamped = place(v.e, bearingTo(pos, forward, m.pos), m.kind === "site");
       v.e.classList.toggle("edge", clamped);
     }
     for (const [k, v] of this.markers) {

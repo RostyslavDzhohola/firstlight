@@ -11,6 +11,7 @@ import { createInventoryClient } from "./InventoryClient.ts";
 import { createOnboardingClient } from "./OnboardingClient.ts";
 import { horseClientSystem, horseInputSystem } from "./HorseClient.ts";
 import { createMissionPointer } from "./MissionPointer.ts";
+import { createSiteCompass } from "./siteCompass.ts";
 import { createMissionObjects } from "./missionObjects.ts";
 import { createMapClient } from "./MapClient.ts";
 import { createAdminModeClient } from "./AdminModeClient.ts";
@@ -68,4 +69,5 @@ CLIENT_SYSTEMS.push(createMomentsClient);
 CLIENT_SYSTEMS.push(createNextSteps);
 // Mission objects say what they are (#86): the label over the ring, beacon or piece you look at.
 CLIENT_SYSTEMS.push(createMissionObjects);
-
+// World lane: undiscovered wild sites within sight as "?" on the compass.
+CLIENT_SYSTEMS.push(createSiteCompass);
