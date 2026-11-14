@@ -6,8 +6,26 @@
 import { expect, test } from "./fixtures.ts";
 import type { Player, Snap } from "./player.ts";
 import { NPC_DEFS } from "@firstlight/shared/content/npcs";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 
 const HOSTILE = new Set(NPC_DEFS.filter((d) => d.temper === "hostile").map((d) => d.id));
+
+/**
+ * Stop-motion film for the owner (off unless J8_FILM names a folder): numbered JPEGs, one after each
+ * step, so a loaded machine slows the film down instead of dropping its frames (treefade.spec.ts).
+ * `ffmpeg -framerate 6 -i <dir>/<project>/%04d.jpg` makes the clip.
+ */
+function filmer(player: Player) {
+  const root = process.env.J8_FILM;
+  if (!root) return async () => {};
+  const dir = path.join(root, player.info.project.name);
+  mkdirSync(dir, { recursive: true });
+  let n = 0;
+  return async () => {
+    await player.page.screenshot({ path: path.join(dir, `${String(n++).padStart(4, "0")}.jpg`), type: "jpeg", quality: 80, timeout: 60_000 }).catch(() => {});
+  };
+}
 
 /** V, and the camera's way to `view`: the choice, what the camera does, and the blend at its end. */
 async function toggleTo(player: Player, view: "first" | "third"): Promise<{ ms: number; s: Snap }> {
@@ -30,7 +48,10 @@ test.describe("J8 first person", () => {
     expect(start.player?.viewNow, "a new player starts in third person").toBe("third");
     expect(start.weapon?.delivery, "Brother Ash holds the Sunbrand (melee)").toBe("melee");
 
+    const film = filmer(player);
+    await film();
     const into = await toggleTo(player, "first");
+    await film();
     await player.note("into first person", { ms: into.ms });
     await player.shot("first-person");
 
@@ -39,8 +60,13 @@ test.describe("J8 first person", () => {
     await player.readyToFight();
     await player.admin("level", { level: 3 }); // a levelled character: the fight is about the swing, not survival
     const xp0 = (await player.snap()).you?.xp ?? 0;
-    await player.npc("spawn", { kind: "hopbit", level: 1, roam: 0 });
+    // Filming: a pack of three, so the film shows a fight, not one swing (the test still needs one kill).
+    for (let i = 0; i < (process.env.J8_FILM ? 3 : 1); i++) await player.npc("spawn", { kind: "hopbit", level: 1, roam: 0 });
     await player.hold(["KeyS"], 700);
+    if (process.env.J8_FILM) for (let i = 0; i < 8; i++) {
+      await film();
+      await player.turn(i < 4 ? 12 : -12); // a look round in first person before the fight
+    }
 
     const t0 = await player.now();
     const until = Date.now() + 90_000;
@@ -51,7 +77,8 @@ test.describe("J8 first person", () => {
     const reach = (start.weapon?.range ?? 2.4) - 0.4;
     while (Date.now() < until) {
       const s = await player.snap();
-      if ((s.you?.xp ?? 0) > xp0 || s.player?.dead) break;
+      const won = (s.you?.xp ?? 0) > xp0;
+      if (s.player?.dead || (won && !process.env.J8_FILM)) break;
       if (s.player?.viewNow !== "first") offView++;
       // Healed early: on a loaded machine a snapshot can take seconds, and a Hopbit doesn't wait.
       if ((s.player?.hp ?? 1) < 0.75 * (s.player?.maxHp ?? s.player?.hp ?? 1)) await player.admin("heal");
@@ -61,6 +88,7 @@ test.describe("J8 first person", () => {
       }
       const foe = s.npcs?.filter((n) => n.hostile && !n.dead && n.dist < 40 && HOSTILE.has(n.kind)).sort((a, b) => a.dist - b.dist)[0];
       if (!foe) {
+        if (won) break; // filming: the pack is down
         if (!respawned && Date.now() - lastFoeAt > 8000) {
           respawned = true;
           await player.npc("spawn", { kind: "hopbit", level: 1, roam: 0 });
@@ -73,11 +101,14 @@ test.describe("J8 first person", () => {
       // Turn onto it and swing at once: in first person the swing follows the camera on the same frame.
       await player.aimOnce(foe);
       if (foe.surface > reach) {
+        await film();
         await player.hold(["KeyW"], Math.min(500, Math.max(120, (foe.surface - reach) * 180)));
         continue;
       }
+      await film();
       await player.attack();
       swings++;
+      await film();
       await player.page.waitForTimeout(250);
     }
     const end = await player.snap();
@@ -92,7 +123,9 @@ test.describe("J8 first person", () => {
     expect((end.you?.xp ?? 0) > xp0, "the kill paid XP").toBe(true);
     expect(end.player?.viewNow).toBe("first");
 
+    for (let i = 0; i < 4; i++) await film(); // the kill's notice, held
     const out = await toggleTo(player, "third");
+    for (let i = 0; i < 4; i++) await film();
     await player.note("back to third person", { ms: out.ms });
     await player.shot("third-person");
   });
