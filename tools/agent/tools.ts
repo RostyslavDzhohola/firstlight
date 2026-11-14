@@ -10,7 +10,7 @@ import { AgentError, FirstlightAgent, type ActionResult, type ConnectOptions, ty
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { MISSIONS, isTrialType } from "@firstlight/shared/content/missions";
 import { SPELL_IDS, SPELLS } from "@firstlight/shared/content/spells";
-import { RESPEC, TREE } from "@firstlight/shared/content/tree";
+import { RESPEC } from "@firstlight/shared/content/tree";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 
@@ -455,7 +455,7 @@ export const TOOLS: readonly ToolDef[] = [
   },
   {
     name: "firstlight_build",
-    description: `The build tree: every level past the first gives a point; spend points on nodes in any of five branches (body, blade, aim, magic, travel), top-down, deeper nodes costing more. firstlight_observe shows self.tree (points, taken, the nodes open now and what each does for you). action=spend with node; action=respec takes every point back, only in a safe zone, for ${RESPEC.coinsPerPoint} coins a point. Points are lost with the level on death. Nodes: ${TREE.map((n) => `${n.id} (${n.cost})`).join(", ")}.`,
+    description: `Build tree: each level past the first gives a point. action=spend with node (self.tree.open in firstlight_observe lists them and what each does); action=respec takes all points back, in a safe zone, for ${RESPEC.coinsPerPoint} coins a point.`,
     needsAgent: true,
     inputSchema: {
       type: "object",
@@ -463,7 +463,7 @@ export const TOOLS: readonly ToolDef[] = [
       required: ["action"],
       properties: {
         action: { type: "string", description: "spend a point, or respec.", enum: ["spend", "respec"] },
-        node: { type: "string", description: "spend: the node id (from self.tree.open).", enum: TREE.map((n) => n.id) },
+        node: { type: "string", description: "spend: a node id from self.tree.open.", minLength: 1, maxLength: 40 },
       },
     },
     async run(s, a) {
