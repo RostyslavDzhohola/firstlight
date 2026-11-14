@@ -7,7 +7,7 @@
 //   pnpm metrics --load                + first visit in a headless browser (cold and warm)
 //   pnpm metrics --frame               + ?bench on every body at Medium (METRICS_TIER / --tier high)
 //   pnpm metrics --passes              + ?bench=passes per-pass GPU cost (WebGPU, ~15 min)
-//   pnpm metrics --server              + server tick time, CPU, memory, bytes at 1/25/50/100 bots
+//   pnpm metrics --server              + server tick time, CPU, memory, bytes at 1/25/50/80 bots
 //   pnpm metrics --all                 everything above
 //   pnpm metrics --only frame          just the named group(s), comma-separated
 //   pnpm metrics --repeat 3            run each group 3 times: medians, and noise from the spread
@@ -330,7 +330,7 @@ async function serverGroup(notes: string[]): Promise<Metric[]> {
     const idle = await metricsNow();
     out.push(m("server", "server.idle.rss", idle.rssMB, "MB", "lower", 0.15), m("server", "server.idle.heap", idle.heapMB, "MB", "lower", 0.15));
     const seconds = Number(opt("--server-seconds", "20"));
-    const levels = opt("--bots", "1,25,50,100").split(",").map(Number);
+    const levels = opt("--bots", "1,25,50,80").split(",").map(Number);
     const rssAt = new Map<number, number>();
     const heapAt = new Map<number, number>();
     for (const n of levels) {
