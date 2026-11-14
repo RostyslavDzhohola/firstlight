@@ -74,9 +74,18 @@ The owner kept this method for the detail in these models. Aim every recipe at t
 - A square texture wastes most of itself on a long prop, and `uv_bands` helps only a little (#60).
 - The clip checkers sample whole triangles, because long faces hide between vertices. They report depths at the client's model scale.
 
+## Shipping a held prop
+
+1. Rebuild the tools' reference folder from the repo once per machine: `tools/blender/props3d/ref.sh` (the shipped characters as PNG-textured GLBs, the clips, and today's code-built items dumped by `apps/client/src/render/avatars/weapons.test.ts`).
+2. Build with `build.sh <id>`, then copy `$WORK/stage/<id>*` to `apps/client/public/assets-dev/weapons/`.
+3. Render the inventory icon (`render_prop.py --mode icon`, 128² WebP as `icon_<id>.webp` next to it).
+4. Add the id to `SCULPTED_WEAPONS` (`apps/client/src/render/avatars/sculptedIds.ts`). The client loads it with the character assets, draws it with the avatars' toon material (painted glow), and keeps the code-built model in `weapons.ts` as the stand-in and fallback, so a new item also needs a simple code-built design there.
+5. Guns and crossbows are held with `GUN_GRIP`: set `GUN = True` in the recipe so `hold.py`, `render_prop.py` and `prop_check.py --gun` mount it the client's way.
+
 ## Known gaps
 
 #54 tracks what the tests left open, ticket by ticket. Check it before relying on these:
 
-- The props tools read a reference folder that so far lived only in `/tmp`. The dump of today's code-built weapons has no script in the repo yet (#57).
-- The game doesn't load sculpted weapons yet (#61), nor a character's own clips and extra bones (#65).
+- Long props still waste a square texture (#60), and thin blades still crease close up (#59).
+- Every long weapon passes through or behind the head in run, sprint and roll (#63). `prop_check.py --rot x,y,z` measures a carry rotation in the socket; on Hexwick with today's staff, +70° and +100° about the socket X axis made it worse (5 → 12 and 11 flags), ±70° about Z (the staff's own axis) and (60, 0, −45) changed nothing (5). Negative angles need `--rot=-70,0,0` (argparse reads a leading minus as an option).
+- A character's own clips and extra bones aren't in the game yet (#65).
