@@ -2,7 +2,7 @@
 // pads: a ruin, a watchtower you climb, a shrine, a cave mouth, and one landmark per planet seen from
 // afar. Each has a level band, a guardian with its pack, a chest that opens when the guardian falls
 // (loot scaled to the band) and a discovery (XP once per life, decided on the server). Numbers are in
-// docs/content.md §3.6. Where each one stands is planet/wildSites.ts (deterministic, shared); its
+// docs/content.md §3.7. Where each one stands is planet/wildSites.ts (deterministic, shared); its
 // model and colliders come from the Blender build (content/wildSitePrefabs.ts).
 //
 // Site ids are persistence keys (LifeProgress.sites): append, never rename or reuse.
@@ -37,9 +37,15 @@ export interface WildSiteDef {
   blurb: string;
 }
 
-/** Discovery XP: 30 % of the XP from the band's lower level to the next, rounded to 5. */
+/**
+ * Discovery XP: 10 % of the XP from the band's lower level to the next, rounded to 5. A token on top
+ * of the fight, which pays like farming: at 30 % (the first cut) the sites took level 5 to 6.4 min of
+ * play against the 7–13 band and made level 11 2.3 times its neighbours (pnpm balance, review
+ * 2026-11-13 world sites, finding 3).
+ */
+export const SITE_DISCOVERY_SHARE = 0.1;
 export function siteDiscoveryXp(site: Pick<WildSiteDef, "levels">): number {
-  return Math.round((0.3 * xpToNext(site.levels[0])) / 5) * 5;
+  return Math.round((SITE_DISCOVERY_SHARE * xpToNext(site.levels[0])) / 5) * 5;
 }
 
 /** Feet within this many metres of a site's footprint (its prefab `foot`) discover it. */
@@ -51,7 +57,7 @@ export const WILD_SITES: readonly WildSiteDef[] = [
     id: "bellwether_watch", name: "Bellwether Watch", body: "arcadia", kind: "watchtower", prefab: "a_watchtower",
     at: { between: [0, 1, 0.3] }, yaw: 20, levels: [2, 3],
     guardian: { kind: "linewyrm", level: 3 },
-    pack: [{ kind: "hopbit", count: 4, level: 2 }, { kind: "sparkfly", count: 1, level: 3 }],
+    pack: [{ kind: "hopbit", count: 2, level: 2 }, { kind: "sparkfly", count: 1, level: 3 }],
     chest: { coins: 25, weapons: 0, tonics: 1 },
     blurb: "A limestone watchtower with a bell at the top. Climb it and look for the arch.",
   },
@@ -59,7 +65,7 @@ export const WILD_SITES: readonly WildSiteDef[] = [
     id: "emberfall_keep", name: "Emberfall Keep", body: "arcadia", kind: "ruin", prefab: "a_ruin",
     at: { between: [0, 3, 0.55] }, yaw: -30, levels: [4, 5],
     guardian: { kind: "pixel_lancer", level: 5 },
-    pack: [{ kind: "bomblet", count: 2, level: 4 }, { kind: "hopbit", count: 3, level: 4 }, { kind: "linewyrm", count: 1, level: 5 }],
+    pack: [{ kind: "bomblet", count: 1, level: 4 }, { kind: "hopbit", count: 1, level: 4 }, { kind: "linewyrm", count: 1, level: 5 }],
     chest: { coins: 45, weapons: 1, tonics: 1 },
     blurb: "A roofless keep with a fallen tower. Something still guards its court.",
   },

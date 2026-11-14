@@ -8,7 +8,7 @@ import { maxHp } from "../../packages/shared/src/content/progression.ts";
 import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
-  affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
+  affordability, bossRows, COMBAT_FAMILIES, siteVisits, SITE_TRIP_S, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
   regenSafety, SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
 } from "./model.ts";
 import { REGEN } from "../../packages/shared/src/content/progression.ts";
@@ -30,7 +30,7 @@ const all = checks();
 const failed = all.filter((c) => !c.ok);
 
 if (args.has("--json")) {
-  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), progression: progression(), shop: affordability(), starters: starterRoles(), spells: spellRows(), spellPeaks: spellPeaks(), checks: all }, null, 2));
+  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), sites: siteVisits(), progression: progression(), shop: affordability(), starters: starterRoles(), spells: spellRows(), spellPeaks: spellPeaks(), checks: all }, null, 2));
 } else if (!args.has("--failures")) {
   console.log("# FIRSTLIGHT balance report (tools/balance; D-balance-1)");
   table("Weapon DPS at the tier's gate level (sustained: 60 s with reloads, heat and cooldowns; burst: first 3 s with headshots)",
@@ -60,8 +60,11 @@ if (args.has("--json")) {
     ["0 to full health", `${f(rg.fullS, 0)} s`, "≥ 60 s"],
     ["HP it would add while the quickest regular kills an idle player (if it ran)", `${f(rg.regenInFightShare * 100, 0)}% of max`, "never runs in a fight"],
   ]);
+  table(`Wild sites on the route (content §3.7): done once at the band's lower level; fight = the guardian and its pack one after another, + ${SITE_TRIP_S} s for the trip`,
+    ["Site", "Done at L", "Discovery XP", "Fight XP", "Coins (chest + kills)", "Minutes"],
+    siteVisits().map((v) => [v.id, v.level, v.discoveryXp, v.fightXp, v.coins, f(v.minutes, 1)]));
   const prog = progression();
-  table("Progression along the intended route (20 s between kills; missions credited at their usual level)",
+  table("Progression along the intended route (20 s between kills; missions and wild sites credited at their usual level)",
     ["Level", "Area", "XP/min", "Coins/min", "Minutes", "Reached at", "Coins at start"],
     prog.map((r) => [r.level, r.area, f(r.xpPerMin, 0), f(r.coinsPerMin, 1), f(r.minutes, 1), f(r.reachedAt, 1), Math.round(r.coinsAtStart)]));
   table("Shop: first level a one-life purse covers the price (T3 after buying the T2 and ~100 of tonics)", ["Item", "Price", "Gate", "Affordable at"], affordability(prog).map((a) => [a.item, a.price, a.gate, a.affordableAt]));

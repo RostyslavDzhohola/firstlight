@@ -3,7 +3,8 @@ import { WEAPONS } from "../../packages/shared/src/content/weapons.ts";
 import { npcDef } from "../../packages/shared/src/content/npcs.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import { checks } from "./bands.ts";
-import { clampHits, closingTime, creatureTimeline, damageBy, dodgeFactor, gatedTier, hitTimeline, novaHeadshotLevels, progression, pvpCell, SERVER_CHARGE_ALLOWANCE, SERVER_RATE_ALLOWANCE, spellPeaks, spellRows, timeToKill } from "./model.ts";
+import { clampHits, closingTime, creatureTimeline, damageBy, dodgeFactor, gatedTier, hitTimeline, novaHeadshotLevels, progression, pvpCell, SERVER_CHARGE_ALLOWANCE, SERVER_RATE_ALLOWANCE, SITE_TRIP_S, siteVisits, spellPeaks, spellRows, timeToKill } from "./model.ts";
+import { siteDiscoveryXp, WILD_SITES } from "../../packages/shared/src/content/wildSites.ts";
 
 const w = (id: string) => WEAPONS.find((x) => x.id === id)!;
 
@@ -232,6 +233,20 @@ describe("spells and the starters' spell power", () => {
 describe("the shipped catalogues", () => {
   it("level 2 lands at the end of the one-minute tutorial", () => {
     expect(progression()[1]!.reachedAt).toBe(1);
+  });
+
+  it("puts every wild site on the route once, at its band's lower level, and the route is faster for it (review 2026-11-13)", () => {
+    const v = siteVisits();
+    expect(v.map((x) => x.id)).toEqual(WILD_SITES.map((s) => s.id));
+    for (const [i, x] of v.entries()) {
+      expect(x.level).toBe(WILD_SITES[i]!.levels[0]);
+      expect(x.discoveryXp).toBe(siteDiscoveryXp(WILD_SITES[i]!));
+      expect(x.fightXp).toBeGreaterThan(x.discoveryXp); // the fight is the reward; discovery a token
+      expect(x.coins).toBeGreaterThanOrEqual(WILD_SITES[i]!.chest.coins);
+      expect(x.minutes).toBeGreaterThan(SITE_TRIP_S / 60);
+    }
+    const wreck = progression().find((r) => r.level === 19)!;
+    expect(wreck.minutes).toBeGreaterThan(v.at(-1)!.minutes); // the site's time is on the level it is done at
   });
 
   it("every balance check is in band (run `pnpm balance` for the report)", () => {
