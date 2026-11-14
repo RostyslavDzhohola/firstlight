@@ -20,6 +20,7 @@ import type { PlayerActor } from "../src/world/actors.ts";
 import { adminCheck, adminItems } from "../src/world/adminMode.ts";
 import { addAccountStat, getAccountStat, loadCharacter, openGameDb, type Db } from "../src/db/index.ts";
 import { ensureAccount } from "../src/db/accounts.ts";
+import { flushFunnel } from "../src/db/funnel.ts";
 import { setGameDb, stmt } from "../src/db/game-db.ts";
 import { rayTerrain } from "../src/world/geometry.ts";
 import { characterRepo } from "../src/world/characters.ts";
@@ -344,6 +345,9 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
   it("the whole kit, kills, loot, props, pads, eggs, a bypassing writer and travel leave game.db as it was", async () => {
     const { s } = await owner("auditor");
     await onlyRooms((md) => md.sandbox === "auditor"); // the real room closed (its last writes done)
+    // The funnel queues its steps and writes them within a second (db/funnel.ts): the real join's
+    // "new" and "join" belong to the world as it was, so they go in before the snapshot.
+    flushFunnel(db);
     const before = snapshot();
     const refusedBefore = refusedWrites.count;
     const sb = sandboxOfBot(s);
@@ -387,6 +391,7 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
     expect(me(t).level).toBe(LEVEL_CAP);
     await safeLeave(t.room);
     await onlyRooms(() => false);
+    flushFunnel(db); // anything the sandbox queued would land now, not after the check
     expect(snapshot()).toBe(before);
     expect(db.prepare("SELECT COUNT(*) AS n FROM test_account").get()).toEqual({ n: 0 }); // never flagged from a sandbox (D-home-6)
     expect(EGG_TIMERS.puzzles.size).toBe(0);
