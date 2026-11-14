@@ -16,7 +16,7 @@ import { percentile } from "./timing.ts";
 /** One measured configuration: features switched off, and an optional GTAO override. */
 export interface PassConfig {
   off: ReadonlySet<string>;
-  ao?: { samples: number; scale: number } | null;
+  ao?: GtaoVariant | null;
 }
 
 export interface PassCostHost {
@@ -42,6 +42,8 @@ export interface PassCostOptions {
   only?: readonly string[];
   /** Also sweep GTAO samples × resolution when AO is on. */
   gtao?: boolean;
+  /** The GTAO variants to sweep (default GTAO_SWEEP: samples × resolution). */
+  gtaoSweep?: readonly GtaoVariant[];
 }
 
 export interface Stat {
@@ -58,6 +60,8 @@ export interface PassCost {
 }
 
 export interface GtaoCost {
+  /** Where the denoise ran (post.ts AoDenoise); absent: the shipped default. */
+  denoise?: "full" | "ao" | "off";
   samples: number;
   /** GTAO resolution scale (1 = full, 0.5 = half). */
   scale: number;
@@ -87,7 +91,23 @@ export interface PassCostReport {
   shaderBuildsDuringMeasure: number;
 }
 
-export const GTAO_SWEEP: readonly { samples: number; scale: number }[] = [
+export interface GtaoVariant {
+  samples: number;
+  scale: number;
+  denoise?: "full" | "ao" | "off";
+}
+
+/**
+ * #66: the denoise and resolution sweep (`?benchgtao=denoise`): today's half-res + full-res denoise,
+ * raw GTAO (the denoise's own cost), the denoise at AO resolution, and quarter-res GTAO.
+ */
+export const GTAO_DENOISE_SWEEP: readonly GtaoVariant[] = [
+  { samples: 16, scale: 0.5, denoise: "full" }, { samples: 16, scale: 0.5, denoise: "off" }, { samples: 16, scale: 0.5, denoise: "ao" },
+  { samples: 16, scale: 1, denoise: "full" }, { samples: 16, scale: 1, denoise: "ao" },
+  { samples: 16, scale: 0.25, denoise: "full" }, { samples: 16, scale: 0.25, denoise: "ao" },
+];
+
+export const GTAO_SWEEP: readonly GtaoVariant[] = [
   { samples: 16, scale: 1 }, { samples: 16, scale: 0.5 },
   { samples: 8, scale: 1 }, { samples: 8, scale: 0.5 },
   { samples: 4, scale: 1 }, { samples: 4, scale: 0.5 },
@@ -109,7 +129,8 @@ export async function measurePassCosts(host: PassCostHost, opts: PassCostOptions
   const baseCpu: number[] = [];
   const baseDiffs: number[] = [];
   const deltas = new Map<string, number[]>(measured.map((f) => [f, []]));
-  const gtaoRaw = GTAO_SWEEP.map(() => [] as number[]);
+  const SWEEP = opts.gtaoSweep ?? GTAO_SWEEP;
+  const gtaoRaw = SWEEP.map(() => [] as number[]);
   let builds = 0;
   let invalidReason: string | null = null;
   const fail = (why: string) => (invalidReason ??= why);
@@ -154,7 +175,7 @@ export async function measurePassCosts(host: PassCostHost, opts: PassCostOptions
       if (sweep) {
         // GTAO cost against AO off = (base − AO off) − (base − override).
         const aoDelta = roundDelta.get("ao") ?? (await bracketed({ off: new Set(["ao"]) }));
-        for (let i = 0; i < GTAO_SWEEP.length; i++) gtaoRaw[i]!.push(aoDelta - (await bracketed({ off: NONE, ao: GTAO_SWEEP[i]! })));
+        for (let i = 0; i < SWEEP.length; i++) gtaoRaw[i]!.push(aoDelta - (await bracketed({ off: NONE, ao: SWEEP[i]! })));
       }
     }
   } catch (e) {
@@ -173,9 +194,9 @@ export async function measurePassCosts(host: PassCostHost, opts: PassCostOptions
     .sort((a, b) => b.deltaMs.p50 - a.deltaMs.p50);
   const baseline = { ...stat(baseWall), cpuMs: r3(percentile(baseCpu, 0.5)) };
   const gtao = sweep
-    ? GTAO_SWEEP.map((g, i) => {
+    ? SWEEP.map((g, i) => {
         const c = stat(gtaoRaw[i]!);
-        return { samples: g.samples, scale: g.scale, costMs: c, belowNoise: Math.abs(c.p50) <= noise };
+        return { ...(g.denoise ? { denoise: g.denoise } : {}), samples: g.samples, scale: g.scale, costMs: c, belowNoise: Math.abs(c.p50) <= noise };
       })
     : null;
   if (baseWall.length === 0) fail("no batch was measured");

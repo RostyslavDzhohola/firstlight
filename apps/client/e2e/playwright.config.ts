@@ -8,7 +8,7 @@
 //
 // Env: E2E_OUT (artifacts, default e2e/.out), E2E_PORT / E2E_CLIENT_PORT, E2E_WORKERS (default 2),
 // E2E_REUSE=1 (reuse a stack you started yourself; its server log must be $E2E_OUT/server.log),
-// E2E_FLAGS=a,b (extra URL flags on every page, e.g. `nopacks`). Evidence runs that `pnpm e2e` skips:
+// E2E_FLAGS=a,b (extra URL flags on every page, e.g. `nopacks`), E2E_START_SCALE=4 (longer server/client start-up limits). Evidence runs that `pnpm e2e` skips:
 // bench-warmup.spec.ts (BENCH_MODE) and artpacks.spec.ts (ARTPACKS).
 
 import { defineConfig } from "@playwright/test";
@@ -76,7 +76,8 @@ export default defineConfig({
             url: `${LOCAL_API}/healthz`,
             env: SERVER_ENV,
             reuseExistingServer: process.env.E2E_REUSE === "1",
-            timeout: 60_000,
+            // E2E_START_SCALE stretches both start-up limits on a machine other lanes load heavily.
+            timeout: 60_000 * Number(process.env.E2E_START_SCALE ?? 1),
           },
           {
             name: "client",
@@ -84,7 +85,7 @@ export default defineConfig({
             url: `http://127.0.0.1:${CLIENT_PORT}/`,
             env: CLIENT_ENV,
             reuseExistingServer: process.env.E2E_REUSE === "1",
-            timeout: 120_000,
+            timeout: 120_000 * Number(process.env.E2E_START_SCALE ?? 1),
           },
         ],
 });
