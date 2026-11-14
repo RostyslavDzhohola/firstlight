@@ -43,8 +43,7 @@ function scrubUrl(raw: string): string {
 /** Path segments after a sensitive one are dropped (relative paths in messages). */
 function scrubPath(path: string): string {
   const parts = path.split("/");
-  for (let i = 0; i < parts.length - 1; i++) if (SENSITIVE_SEGMENT.test(parts[i]!)) parts[i + 1] = "[redacted]";
-  return parts.join("/");
+  return parts.map((p, i) => (i > 0 && SENSITIVE_SEGMENT.test(parts[i - 1]!) && p ? "[redacted]" : p)).join("/");
 }
 
 /** Make any text from an error report safe to keep. */
@@ -57,10 +56,10 @@ export function scrubText(text: string): string {
   t = t.replace(/eyJ[\w-]{4,}\.[\w-]{4,}\.[\w-]{4,}/g, "[jwt]");
   t = t.replace(/\b(Bearer|Basic)\s+[^\s"']+/gi, "$1 [redacted]");
   t = t.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]");
-  t = t.replace(/\b(token|secret|password|passwd|pwd|otp|code|key|apikey|api_key|session|sid|auth|signature|sig)(\s*[=:]\s*)["']?[^\s"',;&}]+/gi, "$1$2[redacted]");
+  t = t.replace(/\b(token|secret|password|passwd|pwd|otp|code|key|apikey|api_key|session|sid|auth|signature|sig)(\s*[=:]\s*)["']?[^\s"',;&}]{6,}/gi, "$1$2[redacted]");
   t = t.replace(/\b[a-f0-9]{32,}\b/gi, "[hex]");
   // Long token-like runs (base64/base64url ids, API keys): letters and digits mixed, 24+ long.
-  t = t.replace(/[A-Za-z0-9_+/=-]{24,}/g, (m) => (/[0-9]/.test(m) && /[A-Za-z]/.test(m) ? "[token]" : m));
+  t = t.replace(/[A-Za-z0-9_+=-]{24,}/g, (m) => (/[0-9]/.test(m) && /[A-Za-z]/.test(m) ? "[token]" : m));
   return t;
 }
 
