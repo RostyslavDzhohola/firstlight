@@ -300,7 +300,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       const room = matchMaker.getLocalRoomById(r.roomId) as BodyRoom | undefined;
       const t = [...(room?.tickTimes ?? [])].sort((a, b) => a - b);
       const q = (p: number) => (t.length ? +t[Math.min(t.length - 1, Math.floor(t.length * p))]!.toFixed(2) : 0);
-      return { roomId: r.roomId, metadata: r.metadata, clients: r.clients, tickP50: q(0.5), tickP95: q(0.95), tickMax: q(1) };
+      return { roomId: r.roomId, metadata: r.metadata, clients: r.clients, tickP50: q(0.5), tickP95: q(0.95), tickP99: q(0.99), tickMax: q(1), npcs: room?.state.npcs.size ?? 0 };
     });
     const mem = process.memoryUsage();
     const cpu = process.cpuUsage();
