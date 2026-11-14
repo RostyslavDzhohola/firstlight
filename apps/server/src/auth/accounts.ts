@@ -19,7 +19,8 @@ import { linkAccounts } from "../db/link.ts";
 import { setDisplayName } from "../db/accounts.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
-import { flushFunnel, pruneClientErrors, rollupFunnel } from "../db/funnel.ts";
+import { closeFunnel, funnelConfig } from "../db/funnel.ts";
+import { startFunnelService, type FunnelService } from "../db/funnelService.ts";
 import { stmt } from "../db/game-db.ts";
 import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual, strongSecret } from "./crypto.ts";
@@ -60,6 +61,8 @@ export interface AccountsConfig {
   devCodeRoute?: boolean;
   /** The root `pnpm dev`'s per-run key (DEV_SIGNIN_KEY, tools/dev.ts); a reader of the route must send it. */
   devCodeKey?: string;
+  /** The funnel (#85; FUNNEL_ENABLED, default on): off, nothing is recorded and no funnel timer or worker starts. */
+  funnelEnabled?: boolean;
   /** Accepted after the Better Auth verifier (dev guest tokens when ALLOW_DEV_GUESTS=1). */
   fallbackVerifier?: TokenVerifier;
   mailer?: Mailer;
@@ -94,7 +97,12 @@ export interface Accounts {
   requireAdmin: (req: Request, res: Response, next: NextFunction) => Promise<void>;
   mountBeforeJson(app: Express): void;
   mountAfterJson(app: Express): void;
-  close(): void;
+  /** The funnel's worker (reports and housekeeping off the game's thread, D-sec3-1); null when the funnel is off or game.db is in memory. */
+  funnel: FunnelService | null;
+  /** The daily housekeeping (also run once at boot): old analytics rows, abandoned guests, and the funnel's in its worker. */
+  housekeep(): Promise<void>;
+  /** Flush what is queued (one overall deadline) and close the databases. */
+  close(): Promise<void>;
 }
 
 export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
@@ -110,6 +118,14 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   authDb.pragma("busy_timeout = 5000");
   const db = openGameDb(cfg.gameDbPath);
   setGameDb(db);
+  // The funnel (#85): on unless switched off. Its reports and housekeeping run in a worker thread on
+  // their own connection (db/funnelService.ts, D-sec3-1), which needs game.db to be a file.
+  funnelConfig.enabled = cfg.funnelEnabled ?? true;
+  const funnel = funnelConfig.enabled && cfg.gameDbPath !== ":memory:" ? startFunnelService(db, cfg.gameDbPath) : null;
+  if (funnel) {
+    // Today's caps start from what today already holds (a restart doesn't reset them); counted in the worker.
+    await funnel.prime().catch((e: Error) => console.warn(`funnel: today's counts not read (${e.message}); today's caps start from zero`));
+  }
 
   let devOutbox: DevOutbox | null = null;
   let mailer: Mailer;
@@ -210,19 +226,26 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const backfilled = backfillTestAccounts(db, (id) => (anonStmt.get(id) as { anon: number | null } | undefined)?.anon === 1);
   if (backfilled !== null) console.log(`test accounts backfill: flagged ${backfilled} automation guest account(s)`);
   // Daily housekeeping (and once at boot): old analytics rows, abandoned guests (F12, see prune.ts).
-  const housekeeping = () => {
+  // The funnel's (old error reports, old cohort days folded into funnel_day) runs in its worker; the
+  // returned promise settles when that is done (tests and the benchmark wait for it).
+  const housekeeping = (): Promise<void> => {
     pruneSessionLog(db);
-    pruneClientErrors(db);
-    rollupFunnel(db); // the funnel's old cohort days folded into funnel_day (D-ship-6)
+    const funnelDone = funnel
+      ? funnel.housekeep().then(
+          () => {},
+          (e: Error) => console.warn(`funnel housekeeping: ${e.message}`),
+        )
+      : Promise.resolve();
     try {
       const n = pruneGuests(authDb, db, { isLive: (userId) => !!sessions.get(userId) });
       if (n) console.log(`pruned ${n} abandoned guest account(s)`);
     } catch (e) {
       console.warn(`guest pruning failed: ${(e as Error).message}`);
     }
+    return funnelDone;
   };
-  housekeeping();
-  const pruneTimer = setInterval(housekeeping, 24 * 3_600_000);
+  void housekeeping();
+  const pruneTimer = setInterval(() => void housekeeping(), 24 * 3_600_000);
   pruneTimer.unref();
 
   const startedAt = Date.now();
@@ -369,10 +392,17 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
         console.warn("dev-code: DEV_SIGNIN_CODES=1 but no DEV_SIGNIN_KEY, so the cards can't fetch codes; start with the root `pnpm dev` (or DEV_MAIL_LOG=1 prints them)");
       }
     },
-    close() {
+    funnel,
+    housekeep: housekeeping,
+    async close() {
+      if (closed) return;
       closed = true;
       clearInterval(pruneTimer);
-      flushFunnel(db, { final: true }); // queued funnel rows and error reports, waiting for locks as usual (db/funnel.ts)
+      // Queued funnel rows and error reports: written in slices without waiting for a lock, until one
+      // overall deadline; the rest is counted lost and logged once (db/funnel.ts closeFunnel). Then the
+      // funnel's worker stops.
+      if (funnel) await funnel.close();
+      else await closeFunnel(db);
       setGameDb(null);
       try {
         db.close();
@@ -413,6 +443,7 @@ export function accountsConfigFromEnv(env: {
   devMailLog: boolean;
   devCodeRoute?: boolean;
   devSigninKey?: string;
+  funnelEnabled?: boolean;
 }): AccountsConfig {
   return {
     production: env.production,
@@ -432,6 +463,7 @@ export function accountsConfigFromEnv(env: {
     devMailLog: env.devMailLog,
     devCodeRoute: !!env.devCodeRoute && !env.production,
     devCodeKey: env.production ? "" : (env.devSigninKey ?? ""),
+    funnelEnabled: env.funnelEnabled ?? true,
   };
 }
 

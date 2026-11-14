@@ -9,7 +9,7 @@
 
 import type { Identity } from "../auth/identity.ts";
 import { readVisit, stricterKind, visitLive, type Visit } from "../auth/visitToken.ts";
-import { ACCOUNT_STEPS, accountSubject, queueStep, visitSubject, type FunnelKind } from "../db/funnel.ts";
+import { ACCOUNT_STEPS, accountSubject, funnelConfig, queueStep, visitSubject, type FunnelKind } from "../db/funnel.ts";
 import { currentDb } from "../social/store.ts";
 import type { PlayerActor } from "./actors.ts";
 import type { BodyRoom } from "./BodyRoom.ts";
@@ -22,7 +22,7 @@ export function funnelKind(identity: Pick<Identity, "test" | "agent">): FunnelKi
 
 /** Record an account step for a live player (first time only). Never throws: analytics must not break play. */
 export function accountStep(actor: PlayerActor, step: string, value?: number, now = Date.now()): void {
-  if (actor.identity.loadtest || actor.sandbox) return;
+  if (!funnelConfig.enabled || actor.identity.loadtest || actor.sandbox) return;
   const db = currentDb();
   if (!db) return;
   try {
@@ -39,6 +39,7 @@ const EXPECT_MS = 2 * 60_000;
 
 /** /api/play reserved a seat for a page that sent its visit token: remember it for the join. */
 export function expectVisit(sessionId: string, token: unknown, now = Date.now()): void {
+  if (!funnelConfig.enabled) return;
   const visit = readVisit(token);
   if (!visit || !visitLive(visit, now)) return;
   for (const [k, e] of expected) {
@@ -56,6 +57,7 @@ function takeVisit(sessionId: string, now: number): Visit | null {
 
 /** The room side: joins and the game events that are first-session milestones. */
 export function createFunnelSystem(room: BodyRoom): RoomSystem | null {
+  if (!funnelConfig.enabled) return null; // FUNNEL_ENABLED=0: the rooms record nothing
   // Bots and sandboxes are refused per player (accountStep), whatever the room's metadata says yet.
   const off = onGameEvent(room, (e) => {
     switch (e.type) {

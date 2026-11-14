@@ -2,21 +2,26 @@
 // renderer backend and tier split, time per body, D1/D7 return, players online now. Our own data
 // only (session_log in game.db); load-test players are never recorded, and our test accounts are
 // left out of every figure and counted apart (D-home-6). The #85 funnel and client errors (db/funnel.ts)
-// lead the page. `?format=json` for scripts (`pnpm metrics --funnel` reads it).
+// lead the page; their report is made by the funnel's worker thread (db/funnelService.ts, D-sec3-1),
+// which this awaits, so a large funnel never stalls the rooms. `?format=json` for scripts (`pnpm
+// metrics --funnel` reads it): `funnel` is the report, or `{off: true}` (FUNNEL_ENABLED=0) or
+// `{error}` (no worker, or no answer in time).
 
 import type { Express, RequestHandler } from "express";
 import type { Identity } from "../auth/identity.ts";
 import {
   ACCOUNT_FUNNEL,
   agentSessionCount,
-  funnelWindows,
+  funnelConfig,
   retention,
   sessionStats,
   testSessionCount,
   VISIT_FUNNEL,
   type FunnelKpi,
   type FunnelReport,
+  type FunnelWindows,
 } from "../db/index.ts";
+import { funnelServiceFor } from "../db/funnelService.ts";
 import { liveRooms } from "../social/index.ts";
 import { bars, esc, fmtDuration, fmtTime, page, PAGE_HEADERS, pct } from "./html.ts";
 import type { OpsDeps } from "./admin.ts";
@@ -78,12 +83,29 @@ function stepRows(steps: readonly string[], pick: (r: FunnelReport) => Record<st
 }
 
 /** The funnel's write queue since the server started: what waits, what was retried, what was lost (db/funnel.ts). */
-export function funnelQueueLine(q: ReturnType<typeof funnelWindows>["limits"]["queue"]): string {
+export function funnelQueueLine(q: FunnelWindows["limits"]["queue"]): string {
   const bad = q.lost > 0 || q.dropped > 0;
   return `<p class="muted"${bad ? ' style="color:var(--bad)"' : ""} data-funnel-queue>Funnel writes since start: ${q.pending} waiting, ${q.retries} retried (database busy), ${q.lost} lost after retries, ${q.dropped} refused (queue full)${q.lastError ? `; last error: ${esc(q.lastError)}` : ""}.</p>`;
 }
 
-function funnelSection(f: ReturnType<typeof funnelWindows>): string {
+/** The funnel's part of /stats: its report, or why there is none. */
+type FunnelPart = FunnelWindows | { off: true } | { error: string };
+
+async function funnelPart(db: OpsDeps["db"], now: number): Promise<FunnelPart> {
+  if (!funnelConfig.enabled) return { off: true };
+  const service = funnelServiceFor(db);
+  if (!service) return { error: "the funnel's worker is not running (game.db in memory?)" };
+  try {
+    return await service.windows(now);
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+function funnelSection(part: FunnelPart): string {
+  if ("off" in part) return `<section><h2>Launch KPIs (#85)</h2><p class="muted" data-funnel-off>The funnel is off (FUNNEL_ENABLED=0): nothing is recorded. Set FUNNEL_ENABLED=1 (or remove it) and restart the server to turn it on; the pages already deployed start reporting by themselves.</p></section>`;
+  if ("error" in part) return `<section><h2>Launch KPIs (#85)</h2><p style="color:var(--bad)" data-funnel-error>The funnel report isn't available right now: ${esc(part.error)}. Reload in a minute.</p></section>`;
+  const f = part;
   const w = f.windows;
   const kpiRows = f.kpis.all.map((k, i) => `<tr><td>${esc(k.label)}</td><td class="muted">${k.source === "server" ? "server" : "page"}</td><td class="muted">${esc(k.target)}</td>${kpiCell(f.kpis.day[i]!)}${kpiCell(f.kpis.week[i]!)}${kpiCell(k)}</tr>`).join("");
   const capped = Object.entries(f.limits.today).filter(([, b]) => b.used >= b.cap).map(([k]) => k);
@@ -117,7 +139,7 @@ ${tutorialRows ? `<section><h2>Tutorial, step by step (visits)</h2><table>${head
 
 export function mountStats(app: Express, deps: OpsDeps): void {
   const gate = deps.requireAdmin as RequestHandler;
-  app.get("/stats", gate, (req, res) => {
+  app.get("/stats", gate, async (req, res) => {
     const now = Date.now();
     const today = sessionStats(deps.db, Math.floor(now / DAY) * DAY);
     const week = sessionStats(deps.db, now - 7 * DAY);
@@ -125,7 +147,7 @@ export function mountStats(app: Express, deps: OpsDeps): void {
     const online = onlineNow();
     const tests = testSessionCount(deps.db, now - 7 * DAY);
     const agentWeek = agentSessionCount(deps.db, now - 7 * DAY);
-    const funnel = funnelWindows(deps.db, now);
+    const funnel = await funnelPart(deps.db, now);
     if (req.query.format === "json") {
       res.set("Cache-Control", "no-store").json({ online, today, week, retention: ret, testAccounts: { onlineNow: online.test, week: tests }, agents: { onlineNow: online.agents, week: agentWeek }, funnel });
       return;

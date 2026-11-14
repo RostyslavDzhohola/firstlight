@@ -72,11 +72,12 @@ const game = await createGame({
     mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });
     mountHome(app, { db: accounts.db, visits: dataFastVisits({ apiKey: env.datafastApiKey }) });
   },
-  onShutdown: () => {
-    // Each step on its own: a failure in one must not skip closing the databases.
+  onShutdown: async () => {
+    // Each step on its own: a failure in one must not skip closing the databases. Closing the
+    // accounts flushes the funnel's queue within one deadline (FUNNEL_LIMITS.closeDeadlineMs).
     for (const [what, fn] of [["end sessions", endAllSessions], ["close accounts", () => accounts.close()]] as const) {
       try {
-        fn();
+        await fn();
       } catch (err) {
         console.error(`shutdown: ${what} failed: ${(err as Error)?.message ?? err}`);
       }

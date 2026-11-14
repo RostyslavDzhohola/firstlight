@@ -61,6 +61,7 @@ async function start() {
     extraRoutes: (app, a) => mountOps(app, { db: a.db, requireAdmin: a.requireAdmin, allowedOrigins: [ORIGIN] }),
   });
   harness.game = server.game;
+  await server.accounts.housekeep(); // the boot housekeeping (in the funnel's worker) is done before a test writes old rows
   resetFunnelBudgets(server.accounts.db);
   return server;
 }

@@ -12,6 +12,8 @@
 // batched queue, and each body is limited to INGEST.bodyLimit before any other parser reads it
 // (mounted ahead of express.json, whatever the content type).
 // Bodies are JSON sent as text/plain (a CORS "simple" request: no preflight; fetch keepalive).
+// With the funnel switched off (FUNNEL_ENABLED=0, funnelConfig) all three answer 204 before reading
+// anything, and the page takes that as "not now" (net/beacon.ts), so turning it on later needs no new client.
 
 import express, { type Express, type Request, type Response } from "express";
 import { AGENT_HEADER } from "@firstlight/shared/net/agents";
@@ -21,6 +23,7 @@ import { WindowLimiter } from "../auth/limiter.ts";
 import { safeEqual } from "../auth/crypto.ts";
 import { issueVisit, readVisit, renewVisit, VISIT_TOKEN, visitLive, visitRenewable, type VisitKind } from "../auth/visitToken.ts";
 import {
+  funnelConfig,
   hasStep,
   MAX_TUTORIAL_STEPS,
   MAX_VISIT_ROWS,
@@ -119,8 +122,10 @@ export function mountFunnelIngest(app: Express, dbOf: () => Db | null = currentD
     return ip ? banKey(ip) : "unknown";
   };
   const slow = (res: Response) => res.status(429).json({ error: "slow down" });
+  // Switched off: 204, nothing read, nothing stored.
+  const on = (_req: Request, res: Response, next: () => void) => (funnelConfig.enabled ? next() : void res.set("Cache-Control", "no-store").status(204).end());
 
-  app.post("/api/visit", body, (req, res) => {
+  app.post("/api/visit", on, body, (req, res) => {
     limits();
     res.set("Cache-Control", "no-store");
     const db = dbOf();
@@ -137,7 +142,7 @@ export function mountFunnelIngest(app: Express, dbOf: () => Db | null = currentD
     res.json({ visit: token, exp: now + VISIT_TOKEN.TOKEN_TTL_MS });
   });
 
-  app.post("/api/funnel", body, (req, res) => {
+  app.post("/api/funnel", on, body, (req, res) => {
     limits();
     const db = dbOf();
     if (!db) return void res.json({ done: [], off: true });
@@ -182,7 +187,7 @@ export function mountFunnelIngest(app: Express, dbOf: () => Db | null = currentD
     res.json(full ? { done, full: true } : { done });
   });
 
-  app.post("/api/client-error", body, (req, res) => {
+  app.post("/api/client-error", on, body, (req, res) => {
     limits();
     const db = dbOf();
     if (!db) return void res.status(204).end();

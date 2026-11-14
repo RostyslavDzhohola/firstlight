@@ -82,7 +82,7 @@ export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: st
     originSecret: cfgOver.originSecret ?? "",
     async close(keepFiles = false) {
       await game.close();
-      accounts.close();
+      await accounts.close();
       if (!keepFiles) rmSync(dir, { recursive: true, force: true });
     },
   };
