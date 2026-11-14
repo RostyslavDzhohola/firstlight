@@ -52,10 +52,21 @@ def socket_point(arm):
     return b["hand_r"].head_local.lerp(b["middle_01_r"].head_local, 0.75) + Vector((0, 0, -0.025))
 
 
-def hold(arm, objs, weapon_space_data=False, gun=False):
+def euler_gltf(deg):
+    """A rotation in the socket's glTF axes from 'x,y,z' degrees (three's Euler XYZ order), as a 4x4."""
+    import math
+
+    from mathutils import Euler
+    x, y, z = (math.radians(float(v)) for v in deg.split(","))
+    return Euler((x, y, z), "XYZ").to_matrix().to_4x4()
+
+
+def hold(arm, objs, weapon_space_data=False, gun=False, extra=None):
     """Parent objs (one object or a list) to a hand_r socket on arm. weapon_space_data: the meshes are in
     weapon axes (sculpt previews, today's models); otherwise they are in Blender axes (an imported GLB).
-    gun: held the way the client holds guns and crossbows (GUN_GRIP), not through the fist."""
+    gun: held the way the client holds guns and crossbows (GUN_GRIP), not through the fist.
+    extra: a further rotation in the socket's glTF axes, applied after the mount (a carry or block
+    pose: Avatars.ts heldPose)."""
     import bpy
     sock = bpy.data.objects.new(f"socket_{arm.name}", None)
     bpy.context.scene.collection.objects.link(sock)
@@ -72,7 +83,10 @@ def hold(arm, objs, weapon_space_data=False, gun=False):
         obj.parent = sock
         obj.matrix_parent_inverse = Matrix.Identity(4)
         C = w2b_matrix()
-        G = C @ gun_grip_matrix() if gun else C  # weapon (glTF) -> socket (Blender axes)
+        G = gun_grip_matrix() if gun else Matrix.Identity(4)
+        if extra is not None:
+            G = extra @ G
+        G = C @ G  # weapon (glTF) -> socket (Blender axes)
         obj.matrix_basis = G if weapon_space_data else G @ C.inverted()
     return sock
 

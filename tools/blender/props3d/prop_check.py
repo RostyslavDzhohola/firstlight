@@ -68,6 +68,8 @@ def main():
     ap.add_argument("--clips", required=True)
     ap.add_argument("--step", type=int, default=2)
     ap.add_argument("--tol", type=float, default=0.02)
+    ap.add_argument("--rot", default="", help="x,y,z degrees: a further rotation in the socket (glTF axes, Euler XYZ)")
+    ap.add_argument("--gun", action="store_true", help="held like a gun (GUN_GRIP)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     bl.reset()
@@ -85,11 +87,11 @@ def main():
         b0 = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=os.path.join(a.dir, f"{a.prop}.glb"))
         objs = [o for o in set(bpy.data.objects) - b0 if o.type == "MESH"]
-    hold.hold(arm, objs, weapon_space_data=a.today)
+    hold.hold(arm, objs, weapon_space_data=a.today, gun=a.gun, extra=hold.euler_gltf(a.rot) if a.rot else None)
     local = [(o, surface_samples(o)) for o in objs]
     mw = arm.matrix_world
     s = SCALE.get(a.char, 1.0)
-    report = {"char": a.char, "prop": a.prop, "model": "today" if a.today else "new", "tol_m": a.tol,
+    report = {"char": a.char, "prop": a.prop, "model": "today" if a.today else "new", "tol_m": a.tol, "rot": a.rot,
               "model_scale": s, "clips": {}}
     total = 0
     for clip in a.clips.split(","):

@@ -27,7 +27,7 @@ from part import Part
 
 F = np.float32
 SCAN = ((-0.36, -0.12, -0.42), (0.36, 0.12, 0.50))
-VIEW = {"up": "y", "side": "z"}
+VIEW = {"up": "z", "side": "x"}  # top-down: the prod spreads across
 GUN = True
 
 Y_TOP = 0.062          # the top of the tiller (the bolt groove)

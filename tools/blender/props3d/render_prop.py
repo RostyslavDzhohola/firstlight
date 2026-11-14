@@ -153,6 +153,7 @@ def main():
     ap.add_argument("--zoom", default="")
     ap.add_argument("--shots", default="")
     ap.add_argument("--today", action="store_true")
+    ap.add_argument("--rots", default="", help="hand: per shot 'x,y,z' degrees (separated by ';'), a further socket rotation")
     ap.add_argument("--chars", default="/tmp/fl-props/ref")
     ap.add_argument("--res", type=int, default=900)
     ap.add_argument("--out", required=True)
@@ -231,6 +232,7 @@ def main():
     clips = Clips(os.path.join(a.chars, "starters_anims.glb"))
     sc.camera = bl.camera("cam_hand", (0, 0, 1.0), (0.3, -1, 0.12), 6.5, lens=50, ortho=2.6)
     paths, prev = [], []
+    rots = a.rots.split(";") if a.rots else []
     for i, (ch, clip, frame) in enumerate(s.split(":") for s in a.shots.split(",")):
         for o in prev:
             o.hide_render = True
@@ -239,7 +241,8 @@ def main():
         _, arm = R.add_character(a.chars, ch, pal, a.look, rot_z=-20)
         n = names[i % len(names)]
         objs = load_today(n, a.look) if a.today else load_prop(a.dir, n, a.look, pal)
-        hold.hold(arm, objs, weapon_space_data=a.today, gun=is_gun(n))
+        rot = rots[i % len(rots)] if rots else ""
+        hold.hold(arm, objs, weapon_space_data=a.today, gun=is_gun(n), extra=hold.euler_gltf(rot) if rot else None)
         clips.pose([arm], clip, int(frame))
         path = a.out.replace(".png", f"_{i}.png")
         bl.render(path)
