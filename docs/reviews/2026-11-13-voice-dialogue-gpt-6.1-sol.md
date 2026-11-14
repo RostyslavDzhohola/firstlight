@@ -43,9 +43,9 @@ A browser, live listening, GC and CPU in a real browser, touch and gamepad.
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
-| 4 | | |
-| 5 | | |
-| 6 | | |
+| 1 | `SpeechPlayer` (one per audio context): the latest request per speaker wins; a load that finishes after a newer request, after `stop(key)` or after `stopAll()` never plays and never touches the subtitle. Leaving a body calls `stopSpeech` (`Game.enterBody`); disposing the quest system stops its characters (`NpcTalk.dispose`). Tests: A then B with B first, A first then B, two speakers, stopAll, stop one. | `1964aee0` |
+| 2 | Subtitles return a token; the player shows the text at once with its estimate, then holds it from the recording's start for its length + 0.9 s (a 20 s download test). `busy(key)` lasts until the source's `ended` event (loading: as long as the first subtitle; text only: the reading time); `NpcTalk.busyUntil` is gone. A resident's spoken answer uses the same held subtitle. | `1964aee0` |
+| 3 | `MusicGen.live(now)` skips the steps that went by and writes 250 ms ahead; at most `MUSIC_MAX_SOURCES_PER_TICK` = 24 (15 measured). Tests: a ten-minute and a ten-hour gap on every body with combat and night on (nothing in the past, count bounded), steady play equal to an offline render. Other audio timers (duck, weather, thunder) use the audio clock: no catch-up. | `807cc824` |
+| 4 | `VoiceCache`: 32 MiB of decoded PCM (D-voice-fix-2), least recently used out first, a line pinned from its request until it ends or is dropped. Tests: the bound with a playing line held, two playing lines over the bound restored as they end. | `1964aee0` |
+| 5 | Ptolemy: "A guide has more than one mission, and you can carry them all…"; `ptolemy.tip.2` regenerated with the same voice and chain. | `7a4c8fe2` |
+| 6 | `node tools/voice/setup.ts` with pinned `requirements.txt`, Python 3.11–3.13 picked or named, FFmpeg/libmp3lame checked, models kept when their sha256 matches; proved from an `env -i` shell with a fresh home (models cloned in, not downloaded), then `generate.ts` reproduced `ptolemy.tip.2` byte for byte. Added `tools/voice/check.ts` (every recording measured): it found Nell's 0.7–1.3 s pauses and an MP3 overshoot to −0.6 dBFS; both fixed in the generator, 4 lines regenerated, no outliers left. | `858d4519` |
