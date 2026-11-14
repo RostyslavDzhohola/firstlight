@@ -47,7 +47,7 @@ describe("frame clock (#33: no slow motion below 20 fps)", () => {
 
   it("about 2 s of real sprinting at 5 fps completes the 2 s sprint step (not 40 frames)", () => {
     const o = new OnboardingSteps();
-    const sample = (dt: number) => ({ anim: ANIM.SPRINT, dt, moved: 0, lookRad: 0, dummiesDown: 0, pressed: new Set<string>(), mapOpen: false, phrased: false, voiceOn: false, inPortal: false });
+    const sample = (dt: number) => ({ anim: ANIM.SPRINT, dt, moved: 0, lookRad: 0, trained: false, pressed: new Set<string>(), mapOpen: false, phrased: false, voiceOn: false, inPortal: false });
     for (let i = 0; i < 9; i++) o.observe(sample(frameClock(200).dt));
     expect(o.isDone("sprint")).toBe(false);
     o.observe(sample(frameClock(200).dt));

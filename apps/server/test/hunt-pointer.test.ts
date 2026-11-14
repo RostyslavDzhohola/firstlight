@@ -122,4 +122,22 @@ describe("huntTargets and per-target counts (A1, Clover Fields Hopbits)", () => 
     r.onMessage("huntTargets", (m) => lists.push(m));
     await waitFor(() => lists.some((l) => l.id === "A1" && l.npcs.length > 0), 10_000);
   }, 30_000);
+
+  it("follows the mission the player tracks (#69): tracking another one empties the list, tracking the hunt again brings it back", async () => {
+    NPC_TUNING.ambient = true;
+    const c = newCharacter(0, 0);
+    c.body = "arcadia";
+    c.pos = ahead(25);
+    c.missions = [{ id: "A1", progress: 0, done: false, counts: [0] }, { id: "A3", progress: 0, done: false }];
+    characterRepo.current.save("tracker", c);
+    const r = await joinAs(game, "tracker", "arcadia", {}, "admin", false);
+    rooms.push(r);
+    let hunt: { id: string; npcs: string[] } = { id: "", npcs: [] };
+    r.onMessage("huntTargets", (m) => (hunt = m));
+    await waitFor(() => hunt.id === "A1" && hunt.npcs.length > 0, 10_000); // nothing chosen: the first open one here
+    r.send("track", { id: "A3" });
+    await waitFor(() => hunt.id === "", 5000); // A3 is no hunt
+    r.send("track", { id: "A1" });
+    await waitFor(() => hunt.id === "A1" && hunt.npcs.length > 0, 5000);
+  }, 30_000);
 });

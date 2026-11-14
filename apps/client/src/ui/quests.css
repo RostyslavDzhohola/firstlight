@@ -104,3 +104,14 @@
 
 /* Nameplate chip for characters an AI agent plays (D-agents-1; text from shared net/agents.ts). */
 .fl-plate__ai { display: inline-block; margin-left: .45em; padding: .08em .38em .02em; vertical-align: .08em; font: 700 .82em/1.1 var(--font-display); letter-spacing: .12em; color: var(--photon); border: 1px solid var(--photon-line); border-radius: var(--r-1); background: rgba(8, 14, 22, .55); text-shadow: none; }
+/* Creature tags (#73, world/npcs/tags.ts): level and name over a fought creature's bar, toned by its level
+   against yours (easy grey, even paper, hard amber "!", deadly red "!!"), faded with range like the plates. */
+.fl-npctags { position: fixed; inset: 0; pointer-events: none; z-index: 19; }
+.fl-npctag { position: absolute; left: 0; top: 0; transform-origin: 50% 100%; padding-bottom: 4px; white-space: nowrap; font: 700 var(--t-sm)/1.2 var(--font-display); letter-spacing: .04em; color: var(--paper); text-shadow: 0 0 2px #05070b, 0 0 2px #05070b, 0 1px 3px rgba(5, 7, 11, .95); will-change: transform, opacity; }
+.fl-npctag b { margin-right: .4em; padding: .05em .35em 0; border-radius: var(--r-1); background: rgba(8, 10, 14, .72); font: 700 var(--t-xs)/1.25 var(--font-mono); letter-spacing: 0; text-shadow: none; }
+.fl-npctag[data-tone="easy"] { color: var(--fog-3); }
+.fl-npctag[data-tone="easy"] b { color: #b9c2cc; }
+.fl-npctag[data-tone="even"] b { color: #f4efe4; }
+.fl-npctag[data-tone="hard"] b { color: #ffb347; box-shadow: inset 0 0 0 1px rgba(255, 179, 71, .6); }
+.fl-npctag[data-tone="deadly"] { color: #ffb0a6; }
+.fl-npctag[data-tone="deadly"] b { color: #fff; background: #c2281e; }

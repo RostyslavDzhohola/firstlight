@@ -11,6 +11,7 @@ import { createInventoryClient } from "./InventoryClient.ts";
 import { createOnboardingClient } from "./OnboardingClient.ts";
 import { horseClientSystem, horseInputSystem } from "./HorseClient.ts";
 import { createMissionPointer } from "./MissionPointer.ts";
+import { createMissionObjects } from "./missionObjects.ts";
 import { createMapClient } from "./MapClient.ts";
 import { createAdminModeClient } from "./AdminModeClient.ts";
 import { createTrialClient } from "./TrialClient.ts";
@@ -65,3 +66,6 @@ CLIENT_SYSTEMS.push(createControlsClient);
 CLIENT_SYSTEMS.push(createMomentsClient);
 // "What next" hints after the tutorial (D-polish-ux-3).
 CLIENT_SYSTEMS.push(createNextSteps);
+// Mission objects say what they are (#86): the label over the ring, beacon or piece you look at.
+CLIENT_SYSTEMS.push(createMissionObjects);
+

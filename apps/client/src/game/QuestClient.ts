@@ -22,6 +22,9 @@ import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
 import { HOTKEYS, hits } from "./keys.ts";
 import { trialSeen } from "./trialState.ts";
+import { missionTrack } from "./missionTrack.ts";
+import { MISSIONS_KEY } from "../ui/missionsPanel.ts";
+import { uiSettings } from "../ui/uiSettings.ts";
 import { worldPrompt } from "./worldPrompt.ts";
 import type { ClientSystem } from "./systems.ts";
 
@@ -62,6 +65,8 @@ export class QuestClient implements ClientSystem {
   private lastYou: unknown = null;
   private t = 0;
   private readonly onKey = (e: KeyboardEvent) => this.key(e);
+  /** The server hears which mission is tracked (#69): its hunt targets follow it. */
+  private readonly offTrack: () => void;
 
   constructor(game: Game) {
     this.game = game;
@@ -103,6 +108,8 @@ export class QuestClient implements ClientSystem {
     });
     for (const t of ["medal", "missionDone", "shop"]) room.onMessage(t, () => {});
     room.send("questSync", {});
+    room.send("track", { id: missionTrack.chosen });
+    this.offTrack = missionTrack.onChange((id) => this.game.net.room?.send("track", { id }));
     if (pendingStage) {
       room.send("admin", { cmd: "stage", args: { n: pendingStage.n, all: pendingStage.all } });
       pendingStage = null;
@@ -127,6 +134,12 @@ export class QuestClient implements ClientSystem {
     if (!this.game.input.inPlay || this.game.photo?.active) return;
     if (e.code === "KeyM") this.map.open();
     else if (e.code === "KeyJ") this.journal.show();
+    else if (e.code === MISSIONS_KEY.code && !e.shiftKey) uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
+    else if (e.code === MISSIONS_KEY.code && e.shiftKey) {
+      // Shift+L: track the next open mission (the panel can't be clicked while the mouse looks around).
+      const next = missionTrack.nextAfter(this.game.hud.you?.missions ?? []);
+      if (next) missionTrack.choose(next.id);
+    }
   }
 
   private pileNear(): boolean {
@@ -242,6 +255,7 @@ export class QuestClient implements ClientSystem {
 
   dispose() {
     window.removeEventListener("keydown", this.onKey);
+    this.offTrack();
     Panel.current?.close(false);
     this.console.close();
     this.world.dispose();

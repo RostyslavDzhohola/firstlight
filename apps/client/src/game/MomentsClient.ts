@@ -86,7 +86,7 @@ export class MomentsClient implements ClientSystem {
     on("you", (y: YouState & { level: number; dead?: boolean }) => {
       const prev = this.level;
       this.level = y.level;
-      if (prev !== null && y.level > prev) m.push(...levelMoments(prev, y.level));
+      if (prev !== null && y.level > prev) m.push(...levelMoments(prev, y.level, this.game.hud.starterIndex));
       if (y.dead) m.clearBanners(); // the death screen has the floor
     });
     on("missionDone", (d: { id: string; xp: number; coins: number; items?: { id: string; qty: number }[] }) => {

@@ -3,30 +3,29 @@ import { ANIM } from "@firstlight/shared/net/schema";
 import { activeSteps, ALL_STEPS, OnboardingSteps, STEPS, type Sample, type StepId } from "./onboardingSteps.ts";
 
 const s = (over: Partial<Sample> = {}): Sample => ({
-  dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, dummiesDown: 0, pressed: new Set(), mapOpen: false, phrased: false, voiceOn: false, inPortal: false, ...over,
+  dt: 1 / 60, moved: 0, lookRad: 0, anim: ANIM.IDLE, trained: false, pressed: new Set(), mapOpen: false, phrased: false, voiceOn: false, inPortal: false, ...over,
 });
 const keys = (...codes: string[]) => s({ pressed: new Set(codes) });
 const FIRST: StepId[] = ["move", "look", "jump", "sprint", "dodge"];
 
 describe("onboarding steps", () => {
-  it("follow SPEC §6.12: movement, the dummies, then weapons, pick-up, map, phrases, voice and a portal", () => {
+  it("follow SPEC §6.12: movement, one attack, then weapons, pick-up, map, phrases and voice (the portal id stays for saved progress)", () => {
     expect(ALL_STEPS.map((x) => x.id)).toEqual(["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel", "voice", "portal"]);
     expect(ALL_STEPS.filter((x) => x.optional).map((x) => x.id)).toEqual(["voice"]);
     expect(new OnboardingSteps().current?.id).toBe("move");
   });
 
-  it("this build hides voice chat (D-controls-1): no voice tip, the same ids and order otherwise", () => {
-    expect(STEPS.map((x) => x.id)).toEqual(["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel", "portal"]);
-    expect(activeSteps(true)).toBe(ALL_STEPS);
+  it("this build hides voice chat (D-controls-1) and no build walks into a portal (#68): it ends on the phrase wheel", () => {
+    expect(STEPS.map((x) => x.id)).toEqual(["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel"]);
+    expect(activeSteps(true).map((x) => x.id)).toEqual(["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel", "voice"]);
     const o = new OnboardingSteps();
     for (const id of ["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map"] as const) o.complete(id);
-    expect(o.observe(s({ phrased: true }))).toEqual(["wheel"]);
-    expect(o.current?.id).toBe("portal"); // straight from the phrase wheel to the portal
     expect(o.observe(keys("KeyV"))).toEqual([]); // V does nothing here
     expect(o.isDone("voice")).toBe(false);
-    expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
+    expect(o.observe(s({ inPortal: true }))).toEqual([]); // a portal is no step
+    expect(o.observe(s({ phrased: true }))).toEqual(["wheel"]);
     expect(o.allDone).toBe(true);
-    expect(o.doneCount).toBe(11);
+    expect(o.doneCount).toBe(10);
   });
 
   it("move completes after walking 6 m on the ground (dodges don't count)", () => {
@@ -68,15 +67,13 @@ describe("onboarding steps", () => {
     expect(o.next?.id).toBe("look");
   });
 
-  it("the dummies step follows the server's count; the tutorial goes on after it", () => {
+  it("the attack step is one swing the server took (#68); the tutorial goes on after it", () => {
     const o = new OnboardingSteps();
-    o.observe(s({ dummiesDown: 2 }));
-    expect(o.progressText("attack")).toBe("2 / 3");
-    expect(o.isDone("attack")).toBe(false);
     for (const id of FIRST) o.complete(id);
     expect(o.current?.id).toBe("attack");
+    expect(o.current?.bar).toBe(false);
     expect(o.next?.id).toBe("switch");
-    o.observe(s({ dummiesDown: 3 }));
+    expect(o.observe(s({ trained: true }))).toEqual(["attack"]);
     expect(o.current?.id).toBe("switch");
     expect(o.allDone).toBe(false);
   });
@@ -97,51 +94,37 @@ describe("onboarding steps", () => {
     expect(o.observe(s({ phrased: true }))).toEqual(["wheel"]);
   });
 
-  it("voice is optional: V or opting in completes it, else it moves on after 8 s on the card", () => {
-    const a = new OnboardingSteps(ALL_STEPS);
+  it("voice is optional: K or opting in completes it, else it moves on after 8 s on the card", () => {
+    const a = new OnboardingSteps(activeSteps(true));
     expect(a.observe(keys("KeyK"))).toEqual(["voice"]);
-    const b = new OnboardingSteps(ALL_STEPS);
+    const b = new OnboardingSteps(activeSteps(true));
     expect(b.observe(s({ voiceOn: true }))).toEqual(["voice"]);
-    const c = new OnboardingSteps(ALL_STEPS);
+    const c = new OnboardingSteps(activeSteps(true));
     for (const id of ["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel"] as const) c.complete(id);
     expect(c.current?.id).toBe("voice");
     for (let i = 0; i < 7; i++) c.observe(s({ dt: 1 }));
     expect(c.isDone("voice")).toBe(false);
     c.observe(s({ dt: 1.1 }));
     expect(c.isDone("voice")).toBe(true);
-    expect(c.current?.id).toBe("portal");
+    expect(c.current).toBeNull();
   });
 
   it("time on another card doesn't count toward voice's 8 s", () => {
-    const o = new OnboardingSteps(ALL_STEPS);
+    const o = new OnboardingSteps(activeSteps(true));
     for (let i = 0; i < 20; i++) o.observe(s({ dt: 1 }));
     expect(o.isDone("voice")).toBe(false);
   });
 
-  it("the portal is the final pointer: walking into one finishes the tutorial", () => {
+  it("the last card is the phrase wheel: nothing comes after it, a portal never shows up (#68)", () => {
     const o = new OnboardingSteps();
-    for (const x of STEPS) if (x.id !== "portal") o.complete(x.id);
-    expect(o.current?.id).toBe("portal");
+    for (const x of STEPS) if (x.id !== "wheel") o.complete(x.id);
+    expect(o.current?.id).toBe("wheel");
     expect(o.next).toBeNull();
-    expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
+    expect(o.observe(s({ inPortal: true }))).toEqual([]);
+    expect(o.observe(s({ phrased: true }))).toEqual(["wheel"]);
     expect(o.current).toBeNull();
     expect(o.allDone).toBe(true);
     expect(o.doneCount).toBe(STEPS.length);
-  });
-
-  it("actually walking into a portal ticks it whatever the card says", () => {
-    const o = new OnboardingSteps();
-    expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
-    expect(o.current?.id).toBe("move");
-  });
-
-  it("only entering a ring ticks it: being near one never does, even with the portal card up (T9 review)", () => {
-    const o = new OnboardingSteps();
-    for (const x of STEPS) if (x.id !== "portal") o.complete(x.id);
-    expect(o.current?.id).toBe("portal");
-    for (let i = 0; i < 30; i++) expect(o.observe(s({ moved: 0.1 }))).toEqual([]);
-    expect(o.isDone("portal")).toBe(false);
-    expect(o.observe(s({ inPortal: true }))).toEqual(["portal"]);
   });
 
   it("sprint's counter never shows the goal before the step completes (live tutorial run: '2.0 / 2 s' unticked)", () => {
@@ -153,16 +136,16 @@ describe("onboarding steps", () => {
   });
 
   it("a tip that moves on by itself is marked as moved on, not as done by the player", () => {
-    const o = new OnboardingSteps();
-    for (const x of STEPS) if (x.id !== "portal") o.complete(x.id);
-    for (let i = 0; i < 46; i++) o.observe(s({ dt: 1 }));
-    expect(o.isDone("portal")).toBe(true);
+    const o = new OnboardingSteps(activeSteps(true));
+    for (const x of activeSteps(true)) if (x.id !== "voice") o.complete(x.id);
+    for (let i = 0; i < 9; i++) o.observe(s({ dt: 1 }));
+    expect(o.isDone("voice")).toBe(true);
     expect(o.allDone).toBe(true);
-    expect(o.movedOn("portal")).toBe(true);
-    const walked = new OnboardingSteps();
-    for (const x of STEPS) if (x.id !== "portal") walked.complete(x.id);
-    walked.observe(s({ inPortal: true }));
-    expect(walked.movedOn("portal")).toBe(false);
-    expect(walked.movedOn("move")).toBe(false);
+    expect(o.movedOn("voice")).toBe(true);
+    const spoke = new OnboardingSteps(activeSteps(true));
+    for (const x of activeSteps(true)) if (x.id !== "voice") spoke.complete(x.id);
+    spoke.observe(keys("KeyV"));
+    expect(spoke.movedOn("voice")).toBe(false);
+    expect(spoke.movedOn("move")).toBe(false);
   });
 });

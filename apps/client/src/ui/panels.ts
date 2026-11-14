@@ -10,6 +10,10 @@ import { MEDALS } from "@firstlight/shared/content/medals";
 import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import { trackerRows } from "./trackerRows.ts";
 import { trialWay } from "../game/nextSteps.ts";
+import { missionTrack } from "../game/missionTrack.ts";
+import { spellCost, spellEffect, spellPower } from "../game/spellInfo.ts";
+import { SPELLS } from "@firstlight/shared/content/spells";
+import { LEVEL_CAP } from "@firstlight/shared/content/progression";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
@@ -195,7 +199,7 @@ export class CuratorPanel extends Panel {
 // ---------------------------------------------------------------- journal
 
 export class JournalPanel extends Panel {
-  private tab: "missions" | "medals" | "wardrobe" | "sites" = "missions";
+  private tab: "missions" | "spells" | "medals" | "wardrobe" | "sites" = "missions";
   protected closeKeys = ["KeyJ"];
 
   show(tab?: JournalPanel["tab"]) {
@@ -212,7 +216,7 @@ export class JournalPanel extends Panel {
     const title = you?.title ? MEDALS.find((m) => m.id === you.title)?.title : null;
     el("div", "sub", head, title ? `Title: ${title}` : "No title worn");
     const tabs = el("div", "tabs", b);
-    for (const t of ["missions", "medals", "wardrobe", "sites"] as const) {
+    for (const t of ["missions", "spells", "medals", "wardrobe", "sites"] as const) {
       const x = el("button", `tab${this.tab === t ? " on" : ""}`, tabs, t[0]!.toUpperCase() + t.slice(1));
       x.onclick = () => {
         this.tab = t;
@@ -221,6 +225,7 @@ export class JournalPanel extends Panel {
     }
     const body = el("div", "body", b);
     if (this.tab === "missions") this.renderMissions(body, you);
+    else if (this.tab === "spells") this.renderSpells(body, you);
     else if (this.tab === "medals") this.renderMedals(body, you);
     else if (this.tab === "sites") this.renderSites(body, you);
     else this.renderWardrobe(body, you);
@@ -237,10 +242,41 @@ export class JournalPanel extends Panel {
       if (!def) continue;
       missionCard(body, def, you, (row) => {
         el("span", "rw", row, `${def.body[0]!.toUpperCase()}${def.body.slice(1)} · ${def.trial ? `${GLEAMS.name}, trial ${def.trial}` : def.guide}`);
-        if (!m.done) el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
+        if (!m.done) {
+          const tracked = missionTrack.chosen === def.id;
+          const t = el("button", `btn${tracked ? "" : " ghost"}`, row, tracked ? "Tracking" : "Track");
+          t.dataset.e2e = `journal-track-${def.id}`;
+          t.disabled = tracked;
+          t.onclick = () => {
+            missionTrack.choose(def.id);
+            this.render();
+          };
+          el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
+        }
       });
     }
     el("div", "rw", body, `${mine.filter((m) => m.done).length} of ${MISSIONS.length} missions done this life.`).style.marginTop = "8px";
+  }
+
+  /** #79: each spell's numbers at your level, and what the next level adds. */
+  private renderSpells(body: HTMLElement, you: YouPlus | null) {
+    const level = you?.level ?? 1;
+    const starter = this.game.hud.starterIndex;
+    el("p", "sub", body, `At level ${level}. Spell damage grows 3% a level (and with your starter's spell power); cooldowns and costs stay the same.`);
+    for (const s of SPELLS) {
+      const row = el("div", "row", body);
+      row.dataset.e2e = `journal-spell-${s.id}`;
+      const left = el("div", "", row);
+      el("div", "nm", left, `${s.keycap} · ${s.name}`);
+      if (level < s.level) {
+        el("div", "meta", left, `Unlocks at level ${s.level}. ${s.blurb}`);
+        continue;
+      }
+      el("div", "", left, spellEffect(s, level, starter));
+      const now = spellPower(s, level, starter);
+      const next = level < LEVEL_CAP ? spellPower(s, level + 1, starter) : null;
+      el("div", "meta", left, `${spellCost(s)}${now && next && next.value !== now.value ? ` · level ${level + 1}: ${next.value} ${now.unit}` : ""}`);
+    }
   }
 
   private renderMedals(body: HTMLElement, you: YouPlus | null) {
@@ -376,8 +412,9 @@ export class MissionTracker {
   private last = "";
   /** Open mission ids at the last update (null before the first): a new one is the mission just taken. */
   private static openIds: Set<string> | null = null;
-  /** The mission the player took most recently (survives travel: one tracker per body). */
-  private static recent: string | null = null;
+  private readonly offTrack = missionTrack.onChange(() => {
+    this.last = "";
+  });
 
   constructor(
     private readonly hud: Pick<Hud, "setMissions"> | HTMLElement,
@@ -390,17 +427,19 @@ export class MissionTracker {
     if (you) {
       const open = new Set(all.filter((m) => !m.done).map((m) => m.id));
       const prev = MissionTracker.openIds;
-      if (prev) for (const id of open) if (!prev.has(id)) MissionTracker.recent = id;
+      // #69: the one tracked stays tracked; a mission just taken is tracked only if nothing was.
+      missionTrack.settle(all, body, prev ? [...open].filter((id) => !prev.has(id)) : []);
       MissionTracker.openIds = open;
     }
-    const key = JSON.stringify([all, body, trial, MissionTracker.recent]);
+    const key = JSON.stringify([all, body, trial, missionTrack.chosen]);
     if (key === this.last || this.hud instanceof HTMLElement) return;
     this.last = key;
-    const rows = trackerRows(all, body, { trial, recent: MissionTracker.recent });
+    const rows = trackerRows(all, body, { trial, tracked: missionTrack.chosen });
     this.hud.setMissions(rows.lines, rows.header, rows.more ? { count: rows.more, open: this.onMore } : null);
   }
 
   dispose() {
+    this.offTrack();
     if (!(this.hud instanceof HTMLElement)) this.hud.setMissions([]);
   }
 }

@@ -1,5 +1,5 @@
-// Map and minimap targets for the tutorial (#31): while the dummy step is on, each training dummy
-// still standing is marked like a mission target, so a player who wandered off can find them again.
+// Map and minimap targets for the tutorial (#31): while the attack step is on, each training dummy
+// still standing is marked like a mission target; once it's over, the Arcadia portal (#68).
 
 import type { V3 } from "../social/compassMath.ts";
 import { dummyDir, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
@@ -27,16 +27,6 @@ export function dummyTargets(step: StepId | undefined, down: readonly boolean[])
     out.push({ id: `dummy:${i}`, dir: dummyDir(i) as V3, label });
   }
   return out;
-}
-
-/**
- * The dummy callout's second line: how far the next dummy is once the player is more than a few
- * strides off (rounded to 5 m so the label isn't re-laid out every frame), then the rules (#31).
- */
-export function dummyCalloutSub(dist: number): string {
-  const rules = "10 XP each. Three hits knock one down.";
-  if (!(dist > 12)) return rules;
-  return `${Math.max(15, Math.round(dist / 5) * 5)} m away · ${rules}`;
 }
 
 /** What the map and minimap draw besides mission targets; the tutorial sets it while it runs. */

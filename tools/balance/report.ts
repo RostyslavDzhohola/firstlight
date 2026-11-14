@@ -9,8 +9,9 @@ import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
   affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
-  SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
+  regenSafety, SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
 } from "./model.ts";
+import { REGEN } from "../../packages/shared/src/content/progression.ts";
 
 const args = new Set(process.argv.slice(2));
 const f = (x: number, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : "∞");
@@ -52,6 +53,13 @@ if (args.has("--json")) {
     ["Creature", "Tier", "Lv", "HP", "TTK min", "TTK med", "TTK max", "Kills player", "Pack", "Margin"],
     creatureRows().map((r) => [r.name, r.tier, r.enemyLevel, r.hp, f(r.ttkMin), f(r.ttkMedian), f(r.ttkMax), f(r.killsPlayerS, 1), r.packSize, f(r.margin)]));
   table("Bosses: two on-level players, median starter weapon, 70% uptime", ["Boss", "Lv", "HP₂", "Kill (min)"], bossRows().map((b) => [b.id, b.level, b.hp2, f(b.killMin, 1)]));
+  const rg = regenSafety();
+  table(`Out-of-combat regeneration (#77): ${REGEN.PER_SEC * 100}% of max HP a second after ${REGEN.DELAY_S} s without damage taken or dealt`, ["Number", "Value", "Must be"], [
+    ["Longest pause between a hostile creature's attacks", `${f(rg.creatureGapS)} s (${rg.creatureGapId})`, `< ${REGEN.DELAY_S} s`],
+    ["Slowest starter weapon's time between attacks", `${f(rg.starterSwingS)} s`, `< ${REGEN.DELAY_S} s`],
+    ["0 to full health", `${f(rg.fullS, 0)} s`, "≥ 60 s"],
+    ["HP it would add while the quickest regular kills an idle player (if it ran)", `${f(rg.regenInFightShare * 100, 0)}% of max`, "never runs in a fight"],
+  ]);
   const prog = progression();
   table("Progression along the intended route (20 s between kills; missions credited at their usual level)",
     ["Level", "Area", "XP/min", "Coins/min", "Minutes", "Reached at", "Coins at start"],

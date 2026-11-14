@@ -41,7 +41,7 @@ export const NET = {
 // 7: the 2026-11-13 run, shared by all of its lanes: the wild sites (D-world-1..3: nine sites whose
 // walls and steps the server blocks movement, shots and NPC sight at, which an older client neither
 // has nor draws, and `you.sites`), out-of-combat regeneration decided by the server, the relaxed
-// tutorial's steps, and the residents' `speak` / `speech` messages.
+// tutorial's steps, the tracked mission (`track`), and the residents' `speak` / `speech` messages.
 export const PROTOCOL_VERSION = 7;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
@@ -173,6 +173,8 @@ export type ClientMessages = {
    * answers. Agents only; at most one line every 2 s.
    */
   speak: SpeakMsg;
+  /** The mission the player tracks (#69; null: none chosen). The hunt pointer's `huntTargets` follow it. Session-only, at most 5 quest ops a second. */
+  track: { id: string | null };
 };
 
 export interface SpeakMsg {

@@ -277,9 +277,11 @@ export function huntCredit(def: MissionDef, counts: readonly number[] | undefine
 }
 
 /**
- * The mission the HUD tracker marks as tracked and the mission pointer follows: the first open one
- * given out on `body`, else the first open one anywhere.
+ * The mission the HUD tracker marks as tracked and the mission pointer follows: the one the player
+ * chose (`chosen`, #69) while it is still open, else the first open one given out on `body`, else
+ * the first open one anywhere.
  */
-export function trackedMission<T extends { id: string; done: boolean }>(missions: readonly T[], body: BodyId): T | null {
-  return missions.find((m) => !m.done && MISSION_BY_ID.get(m.id)?.body === body) ?? missions.find((m) => !m.done) ?? null;
+export function trackedMission<T extends { id: string; done: boolean }>(missions: readonly T[], body: BodyId, chosen: string | null = null): T | null {
+  const pick = chosen ? missions.find((m) => m.id === chosen && !m.done && MISSION_BY_ID.has(m.id)) : undefined;
+  return pick ?? missions.find((m) => !m.done && MISSION_BY_ID.get(m.id)?.body === body) ?? missions.find((m) => !m.done) ?? null;
 }

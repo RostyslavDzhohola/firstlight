@@ -110,6 +110,12 @@ export class DevOutbox implements Mailer {
   lastCode(email: string): string | null {
     return this.last.get(email.toLowerCase())?.otp ?? null;
   }
+
+  /** The code "sent" to `email` within `maxAgeMs` (#84: a local server shows it on the card, since no mail went out). */
+  recentCode(email: string, now = Date.now(), maxAgeMs = 5 * 60_000): string | null {
+    const e = this.last.get(email.toLowerCase());
+    return e && now - e.at <= maxAgeMs ? e.otp : null;
+  }
 }
 
 /** Production without a Resend key: every send fails, so the UI shows "Saving is temporarily unavailable". */

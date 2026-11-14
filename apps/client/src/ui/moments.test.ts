@@ -25,16 +25,17 @@ describe("the banners' words", () => {
     expect(nextSpell(9)).toBeNull();
   });
 
-  it("a level-up says the level and what comes next; a spell level adds its own banner with the key", () => {
+  it("a level-up says the level, what it changed (#79) and what comes next; a spell level adds its own banner with the key", () => {
     expect(levelMoments(4, 4)).toEqual([]);
     expect(levelMoments(3, 2)).toEqual([]);
     const plain = levelMoments(3, 4);
     expect(plain).toHaveLength(1);
-    expect(plain[0]).toMatchObject({ kind: "level", kicker: "Level up", title: "Level 4", reward: "More health and damage · Wishfall at level 6" });
+    expect(plain[0]).toMatchObject({ kind: "level", kicker: "Level up", title: "Level 4" });
+    expect(plain[0]!.reward).toMatch(/^\+\d+ max HP, \+3% damage · Frostbloom \d+ → \d+ · Wishfall at level 6$/);
     const withSpell = levelMoments(2, 3);
     expect(withSpell.map((x) => x.kind)).toEqual(["level", "spell"]);
     expect(withSpell[1]).toMatchObject({ kicker: "New spell", title: "Frostbloom", key: "F", sprite: "spell-frostbloom" });
-    expect(levelMoments(9, 10)[0]!.reward).toBe("More health and damage");
+    expect(levelMoments(9, 10)[0]!.reward).toMatch(/^\+\d+ max HP, \+3% damage · .*Wishfall \d+ → \d+ · Glasswing Ward \d+ → \d+$/);
   });
 
   it("names the items a mission paid (its toast is covered), from the payload or the catalogue", () => {

@@ -1,11 +1,11 @@
-// Onboarding (SPEC §6.12, content.md §1.1): the server counts training-dummy hits in Portus, pays
-// 3 × 10 + 20 = 50 XP and the Spark medal once per account, and a skip pays nothing more.
+// Onboarding (SPEC §6.12, content.md §1.1, #68): one training swing in Portus finishes the attack
+// lesson (a dummy in reach falls with it), pays 50 XP in all and the Spark medal once per account,
+// and a skip pays nothing more.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES } from "@firstlight/shared";
 import { dummyPos, ONBOARDING, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
 import { offsetDir, placeDir } from "@firstlight/shared/content/places";
-import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,15 +43,6 @@ function inFront(i: number, metres: number): [number, number, number] {
   return ground("portus", dir);
 }
 
-/** A spot on the line from dummy `a` to dummy `b` (fraction `k`, 0 = at `a`), `forward` m toward the plaza. */
-function between(a: number, b: number, k: number, forward: number): [number, number, number] {
-  const da = TRAINING_DUMMIES[a]!, db = TRAINING_DUMMIES[b]!;
-  const e = da.east + (db.east - da.east) * k, n = da.north + (db.north - da.north) * k;
-  const l = Math.hypot(e, n);
-  return ground("portus", offsetDir(placeDir("portus_plaza"), e - (e / l) * forward, n - (n / l) * forward, BODIES.portus.radius));
-}
-const dist = (p: { x: number; y: number; z: number }, q: readonly number[]) => Math.hypot(p.x - q[0]!, p.y - q[1]!, p.z - q[2]!);
-
 /** Camera-style ray from 1.6 m above our feet toward the dummy's chest (or `away` from it). */
 function aim(b: Bot, i: number, away = false) {
   const p = me(b);
@@ -66,16 +57,9 @@ function aim(b: Bot, i: number, away = false) {
   return { ox: o[0]!, oy: o[1]!, oz: o[2]!, dx: d[0]! / dl, dy: d[1]! / dl, dz: d[2]! / dl };
 }
 
-/** Hit dummy `i` until it's down, waiting out the weapon's attack rate between swings. */
-async function knockDown(b: Bot, i: number, weaponId: string) {
-  const gap = WEAPON_BY_ID.get(weaponId)!.tiers[0].rate * 1000 + 60;
-  for (let n = 0; n < HITS; n++) {
-    // Already down (an earlier hit counted): stop, or the extra swing would go to the next dummy.
-    if ((b.you.onboarding?.hits[i] ?? HITS) >= HITS) break;
-    b.send("train", aim(b, i));
-    await until(`hit ${n + 1} on dummy ${i}`, () => b.you.onboarding === undefined || b.you.onboarding.hits[i] >= n + 1, 3000);
-    await sleep(gap);
-  }
+/** One training swing at dummy `i` (or `away` from it). */
+function swing(b: Bot, i: number, away = false) {
+  b.send("train", aim(b, i, away));
 }
 
 const totalXp = (b: Bot) => b.you.xp + (b.you.level > 1 ? 50 : 0); // level 2 starts at 50
@@ -89,87 +73,45 @@ describe("onboarding", () => {
     expect(c.you.onboarding).toBeUndefined();
   });
 
-  it("counts melee hits on the server, at the weapon's rate, and pays 10 XP per dummy", async () => {
-    const b = await bot("swordling", "portus", "admin", { starter: 1 }); // Brother Ash: Sunbrand
-    await tpAndWait(b, inFront(0, 1.3));
-    b.send("train", aim(b, 0));
-    b.send("train", aim(b, 0)); // too soon after the first: not counted
-    await until("first hit", () => b.you.onboarding?.hits[0] === 1);
-    await sleep(600);
-    expect(b.you.onboarding.hits[0]).toBe(1);
-    expect(b.last("train")).toEqual({ dummy: 0, hits: 1, down: false });
-    await knockDown(b, 0, "sunbrand");
-    await until("down", () => b.you.onboarding.hits[0] === HITS);
-    expect(b.last("train")).toEqual({ dummy: 0, hits: HITS, down: true });
-    expect(b.you.xp).toBe(ONBOARDING.DUMMY_XP);
-    // Out of reach: no hit.
-    await tpAndWait(b, inFront(1, 8));
-    await sleep(500);
-    b.send("train", aim(b, 1));
-    await sleep(400);
-    expect(b.you.onboarding.hits[1]).toBe(0);
-  });
-
-  it("counts ranged hits along the aim ray and ignores misses", async () => {
-    const b = await bot("gunner", "portus", "admin", { starter: 3 }); // Unit 7: Pocket Carbine
-    await tpAndWait(b, inFront(1, 8));
-    b.send("train", aim(b, 1, true));
-    await sleep(400);
-    expect(b.you.onboarding.hits).toEqual([0, 0, 0]);
-    b.send("train", aim(b, 1));
-    await until("hit", () => b.you.onboarding.hits[1] === 1);
-    expect(me(b).hp).toBe(me(b).maxHp); // nobody got hurt: it's a safe zone
-  });
-
-  // e2e: Kappa's Riverstaff hits didn't count on a standing dummy with a knocked-down one next to
-  // the player (the nearest dummy in reach took them, down or not). Dummies stand 2.5 m apart; the
-  // melee reaches (plus the training slack) are 2.4–3.8 m, so both are in reach here.
-  for (const [who, starter, slot, weapon] of [["Kappa", 2, 0, "riverstaff"], ["Brother Ash", 1, 0, "sunbrand"], ["fists", 3, 1, "fists"]] as const) {
-    it(`${who} (${weapon}): with dummy 0 down and nearer, a swing at dummy 1 counts on dummy 1`, async () => {
-      const b = await bot(`melee_${weapon}`, "portus", "admin", { starter });
-      if (slot !== 0) {
-        b.send("equip", { slot });
-        await until("fists in hand", () => b.you.selected === slot);
-      }
-      await tpAndWait(b, inFront(0, 1.3));
-      await knockDown(b, 0, weapon);
-      await until("dummy 0 down", () => b.you.onboarding.hits[0] === HITS);
-      await tpAndWait(b, between(0, 1, 0.25, 1.4)); // in front of the row: both ahead, both in reach
-      expect(dist(me(b), feet(0))).toBeLessThan(dist(me(b), feet(1))); // the down one is nearer
-      await sleep(WEAPON_BY_ID.get(weapon)!.tiers[0].rate * 1000 + 60);
-      b.send("train", aim(b, 1));
-      await until("a hit on dummy 1", () => b.you.onboarding.hits[1] === 1);
-      expect(b.you.onboarding.hits[0]).toBe(HITS);
-    });
-  }
-
-  it("a shot at a standing dummy through a knocked-down one counts on the standing one", async () => {
-    const b = await bot("gunner_row", "portus", "admin", { starter: 3 }); // Unit 7: Pocket Carbine
-    await tpAndWait(b, inFront(0, 6));
-    await knockDown(b, 0, "carbine");
-    await until("dummy 0 down", () => b.you.onboarding.hits[0] === HITS);
-    // On the row's line, 2 m beyond dummy 0: the ray to dummy 1 passes through dummy 0's spot.
-    await tpAndWait(b, between(0, 1, -0.8, 0));
-    await sleep(400);
-    b.send("train", aim(b, 1));
-    await until("a hit on dummy 1", () => b.you.onboarding.hits[1] === 1);
-  });
-
-  it("finishing pays 50 XP in all, level 2 and the Spark medal, once per account", async () => {
+  it("one swing that misses everything still finishes it: 50 XP, level 2 and the Spark medal, once per account", async () => {
     const b = await bot("graduate", "portus", "admin", { starter: 3 });
-    for (let i = 0; i < N; i++) {
-      await tpAndWait(b, inFront(i, 6));
-      await knockDown(b, i, "carbine");
-    }
+    await tpAndWait(b, inFront(1, 30)); // well away from the dummies (#68: any swing counts)
+    swing(b, 1, true);
     await until("done", () => b.you.onboarding === undefined && b.count("onboarding") > 0);
     expect(b.last("onboarding")).toEqual({ state: "done", xp: 50 });
+    expect(b.count("train")).toBe(0); // nothing was hit
     await until("spark", () => b.you.medals.includes("spark"));
     expect(b.you.level).toBe(2);
     expect(totalXp(b)).toBe(50);
+    expect(me(b).hp).toBe(me(b).maxHp); // nobody got hurt: it's a safe zone
     await safeLeave(b.room);
     const again = await bot("graduate", "portus");
     expect(again.you.onboarding).toBeUndefined();
     expect(again.you.level).toBe(2);
+  });
+
+  it("a melee swing in reach knocks that dummy down with the one hit, and the total is still 50 XP", async () => {
+    const b = await bot("swordling", "portus", "admin", { starter: 1 }); // Brother Ash: Sunbrand
+    await tpAndWait(b, inFront(0, 1.3));
+    swing(b, 0);
+    swing(b, 0); // too soon after the first: ignored
+    await until("done", () => b.count("onboarding") > 0);
+    expect(b.last("train")).toEqual({ dummy: 0, hits: HITS, down: true });
+    expect(b.count("train")).toBe(1);
+    expect(b.last("onboarding")).toEqual({ state: "done", xp: 50 });
+    expect(progressStore.current.stat("swordling", dummyStat(0))).toBe(1);
+    await until("level 2", () => b.you.level === 2);
+    expect(totalXp(b)).toBe(50);
+  });
+
+  it("a shot along the aim ray knocks down the dummy it hits", async () => {
+    const b = await bot("gunner", "portus", "admin", { starter: 3 }); // Unit 7: Pocket Carbine
+    await tpAndWait(b, inFront(1, 8));
+    swing(b, 1);
+    await until("done", () => b.count("onboarding") > 0);
+    expect(b.last("train")).toEqual({ dummy: 1, hits: HITS, down: true });
+    await until("level 2", () => b.you.level === 2);
+    expect(totalXp(b)).toBe(50);
   });
 
   it("skip ends it for good with no completion XP or medal", async () => {
@@ -182,20 +124,10 @@ describe("onboarding", () => {
     b.send("train", aim(b, 0));
     await sleep(300);
     expect(b.count("train")).toBe(0);
+    expect(b.count("onboarding")).toBe(1);
     await safeLeave(b.room);
     const again = await bot("skipper", "portus");
     expect(again.you.onboarding).toBeUndefined();
-  });
-
-  it("keeps knocked-down dummies across a rejoin (no second payout)", async () => {
-    const b = await bot("returner", "portus", "admin", { starter: 3 });
-    await tpAndWait(b, inFront(2, 6));
-    await knockDown(b, 2, "carbine");
-    await until("paid", () => b.you.xp === ONBOARDING.DUMMY_XP);
-    await safeLeave(b.room);
-    const again = await bot("returner", "portus");
-    expect(again.you.onboarding).toEqual({ hits: [0, 0, HITS] });
-    expect(again.you.xp).toBe(ONBOARDING.DUMMY_XP);
   });
 
   it("isn't offered to characters that have already lived (died before, or past level 1)", async () => {
@@ -214,14 +146,21 @@ describe("onboarding", () => {
     const e = await bot("climber", "portus");
     expect(e.you.onboarding).toBeUndefined();
   });
+
+  it("an account whose dummies were all paid before an interrupted finish completes on its next join", async () => {
+    const b = await bot("interrupted", "portus");
+    await safeLeave(b.room);
+    for (let i = 0; i < N; i++) progressStore.current.addStat("interrupted", dummyStat(i), 1);
+    const again = await bot("interrupted", "portus");
+    await until("done", () => again.count("onboarding") > 0);
+    expect(again.last("onboarding")).toEqual({ state: "done", xp: 50 });
+    expect(progressStore.current.stat("interrupted", ONBOARDING.STAT)).toBe(1);
+  });
 });
 
 describe("dying mid-tutorial (D-fixes-2)", () => {
-  it("keeps the tutorial and its knocked-down dummies after the rebirth in Portus", async () => {
+  it("keeps the tutorial after the rebirth in Portus, and its one swing still lands on level 2", async () => {
     const b = await bot("faller", "portus", "admin", { starter: 3 });
-    await tpAndWait(b, inFront(2, 6));
-    await knockDown(b, 2, "carbine");
-    await until("paid", () => b.you.xp === ONBOARDING.DUMMY_XP);
     // Out in the wild (Arcadia here), killed, reborn: the rebirth sends the client to Portus.
     await safeLeave(b.room);
     const out = await bot("faller", "arcadia");
@@ -235,14 +174,10 @@ describe("dying mid-tutorial (D-fixes-2)", () => {
     await safeLeave(out.room);
     expect(characterRepo.current.load("faller")!.deaths).toBe(1);
     const again = await bot("faller", "portus");
-    expect(again.you.onboarding).toEqual({ hits: [0, 0, HITS] });
+    expect(again.you.onboarding).toEqual({ hits: [0, 0, 0] });
     expect(again.you.level).toBe(1);
-    expect(again.you.xp).toBe(0);
-    // Finishing it tops the reborn character up to the tutorial's total (D-fixes-4): level 2, saving unlocked.
-    for (const i of [0, 1]) {
-      await tpAndWait(again, inFront(i, 6));
-      await knockDown(again, i, "carbine");
-    }
+    await tpAndWait(again, inFront(2, 6));
+    swing(again, 2);
     await until("done", () => again.count("onboarding") > 0);
     await until("level 2", () => again.you.level === 2);
     expect(again.last("onboarding")).toEqual({ state: "done", xp: TUTORIAL_TOTAL_XP });
@@ -268,59 +203,54 @@ describe("dying mid-tutorial (D-fixes-2)", () => {
 });
 
 describe("completionXp (D-fixes-4)", () => {
-  it("pays the usual 20 to a never-died trainee and tops a reborn one up to the 50 XP total", () => {
+  it("tops a level-1 trainee up to the 50 XP total, whatever a dummy already paid", () => {
     expect(TUTORIAL_TOTAL_XP).toBe(50);
     expect(completionXp(1, 3 * ONBOARDING.DUMMY_XP)).toBe(ONBOARDING.DONE_XP);
     expect(completionXp(1, 3 * ONBOARDING.DUMMY_XP + 15)).toBe(ONBOARDING.DONE_XP);
     expect(completionXp(1, 0)).toBe(50);
-    expect(completionXp(1, 20)).toBe(30);
+    expect(completionXp(1, ONBOARDING.DUMMY_XP)).toBe(40);
     expect(completionXp(2, 0)).toBe(ONBOARDING.DONE_XP);
   });
 });
 
 const onboardingOf = (b: Bot) => serverRoom(b).systems.find((x): x is OnboardingSystem => x instanceof OnboardingSystem)!;
 
+function sqliteStores() {
+  const db = openGameDb(join(mkdtempSync(join(tmpdir(), "fl-onb-")), "game.db"));
+  const repo = new SqliteCharacterRepo(db);
+  characterRepo.current = repo;
+  pileStore.current = new SqlitePileStore(db);
+  progressStore.current = new SqliteProgressStore(db);
+  return { repo, store: progressStore.current };
+}
+
 describe("onboarding rewards are atomic (SQLite, D26)", () => {
   it("a failed save leaves no payout flag, completion, XP or medal behind, and a retry pays exactly once", async () => {
-    const db = openGameDb(join(mkdtempSync(join(tmpdir(), "fl-onb-")), "game.db"));
-    const repo = new SqliteCharacterRepo(db);
-    characterRepo.current = repo;
-    pileStore.current = new SqlitePileStore(db);
-    progressStore.current = new SqliteProgressStore(db);
-    const store = progressStore.current;
+    const { repo, store } = sqliteStores();
     const b = await bot("fragile", "portus", "admin", { starter: 3 });
-    for (const i of [0, 1]) {
-      await tpAndWait(b, inFront(i, 6));
-      await knockDown(b, i, "carbine");
-    }
-    await until("two paid", () => b.you.xp === 2 * ONBOARDING.DUMMY_XP);
     await tpAndWait(b, inFront(2, 6));
-    for (let n = 1; n < HITS; n++) {
-      await sleep(300);
-      b.send("train", aim(b, 2));
-      await until(`hit ${n}`, () => b.you.onboarding.hits[2] === n);
-    }
     // The payout transaction's character save (the one carrying the new XP) fails once.
     const save = repo.save.bind(repo);
     let failing = true;
     repo.save = (uid: string, c: CharacterData) => {
-      if (failing && uid === "fragile" && c.xp > 2 * ONBOARDING.DUMMY_XP) throw new Error("disk I/O error (injected)");
+      if (failing && uid === "fragile" && c.xp > 0) throw new Error("disk I/O error (injected)");
       save(uid, c);
     };
+    swing(b, 2);
+    await until("the hit undone", () => b.count("train") === 1);
+    expect(b.last("train")).toEqual({ dummy: 2, hits: 0, down: false });
     await sleep(300);
-    b.send("train", aim(b, 2));
-    await sleep(600);
-    expect(b.you.onboarding.hits[2]).toBe(HITS - 1); // the hit is undone
+    expect(b.you.onboarding.hits[2]).toBe(0);
     expect(b.count("onboarding")).toBe(0);
-    expect(b.last("train")).toEqual({ dummy: 2, hits: HITS - 1, down: false });
     expect(store.stat("fragile", dummyStat(2))).toBe(0);
     expect(store.stat("fragile", ONBOARDING.STAT)).toBe(0);
     expect(store.medals("fragile")).not.toContain("spark");
-    expect(repo.load("fragile")!.xp).toBe(2 * ONBOARDING.DUMMY_XP);
+    expect(repo.load("fragile")!.xp).toBe(0);
     expect(b.you.medals).not.toContain("spark");
     // Retry once saving works again: everything lands together, once.
     failing = false;
-    b.send("train", aim(b, 2));
+    await sleep(300);
+    swing(b, 2);
     await until("done", () => b.count("onboarding") === 1 && b.you.onboarding === undefined);
     expect(b.last("onboarding")).toEqual({ state: "done", xp: 50 });
     expect(store.stat("fragile", dummyStat(2))).toBe(1);
@@ -333,28 +263,10 @@ describe("onboarding rewards are atomic (SQLite, D26)", () => {
 });
 
 describe("onboarding completion pays once (SQLite, F12 final B2)", () => {
-  async function trainee(uid: string) {
-    const db = openGameDb(join(mkdtempSync(join(tmpdir(), "fl-onb-")), "game.db"));
-    const repo = new SqliteCharacterRepo(db);
-    characterRepo.current = repo;
-    pileStore.current = new SqlitePileStore(db);
-    progressStore.current = new SqliteProgressStore(db);
-    const b = await bot(uid, "portus", "admin", { starter: 3 });
-    for (const i of [0, 1]) {
-      await tpAndWait(b, inFront(i, 6));
-      await knockDown(b, i, "carbine");
-    }
-    await tpAndWait(b, inFront(2, 6));
-    for (let n = 1; n < HITS; n++) {
-      await sleep(300);
-      b.send("train", aim(b, 2));
-      await until(`hit ${n}`, () => b.you.onboarding.hits[2] === n);
-    }
-    return { b, repo, store: progressStore.current };
-  }
-
   it("a write failing after the completion committed can't leave the trainee behind to be paid again", async () => {
-    const { b, repo, store } = await trainee("doubled");
+    const { repo, store } = sqliteStores();
+    const b = await bot("doubled", "portus", "admin", { starter: 3 });
+    await tpAndWait(b, inFront(2, 6));
     // The completion's save goes through; every later save fails (the probe's second write).
     const save = repo.save.bind(repo);
     let committed = false;
@@ -363,14 +275,13 @@ describe("onboarding completion pays once (SQLite, F12 final B2)", () => {
       save(uid, c);
       if (c.xp >= 50) committed = true;
     };
-    await sleep(300);
-    b.send("train", aim(b, 2));
+    swing(b, 2);
     await until("done", () => b.count("onboarding") === 1);
     expect(store.stat("doubled", ONBOARDING.STAT)).toBe(1);
     expect(onboardingOf(b).trainees.has("doubled")).toBe(false);
     // Another training attack after the cooldown: nothing more is paid.
     await sleep(600);
-    b.send("train", aim(b, 2));
+    swing(b, 1);
     await sleep(400);
     repo.save = save;
     expect(store.stat("doubled", ONBOARDING.STAT)).toBe(1);
@@ -380,15 +291,16 @@ describe("onboarding completion pays once (SQLite, F12 final B2)", () => {
   }, 30_000);
 
   it("a trainee still active after its completion committed is retired without a second payout", async () => {
-    const { b, repo, store } = await trainee("leftover");
-    await sleep(300);
-    b.send("train", aim(b, 2));
+    const { repo, store } = sqliteStores();
+    const b = await bot("leftover", "portus", "admin", { starter: 3 });
+    await tpAndWait(b, inFront(2, 6));
+    swing(b, 2);
     await until("done", () => b.count("onboarding") === 1);
     expect(repo.load("leftover")!.xp).toBe(50);
-    // As if the after-commit step had failed before retiring it: the trainee is back, all down.
+    // As if the after-commit step had failed before retiring it: the trainee is back.
     const sys = onboardingOf(b);
     sys.trainees.set("leftover", { sessionId: b.id, hits: [HITS, HITS, HITS], lastAt: 0 });
-    b.send("train", aim(b, 2));
+    swing(b, 2);
     await until("retired", () => !sys.trainees.has("leftover"));
     await sleep(200);
     expect(store.stat("leftover", ONBOARDING.STAT)).toBe(1);
@@ -401,10 +313,8 @@ describe("onboarding in a staged Portus copy (F12 final Opus SF3)", () => {
   it("still earns the Spark medal (onboarding is offered once)", async () => {
     const b = await bot("staged_newbie", "portus", "admin", { starter: 3 });
     copyRestrictions.current.set(roomCopyKey(serverRoom(b)), { stagedUntil: Date.now() + 30 * 60_000, assistedUntil: 0 });
-    for (let i = 0; i < N; i++) {
-      await tpAndWait(b, inFront(i, 6));
-      await knockDown(b, i, "carbine");
-    }
+    await tpAndWait(b, inFront(0, 6));
+    swing(b, 0);
     await until("done", () => b.count("onboarding") === 1);
     expect(progressStore.current.stat("staged_newbie", ONBOARDING.STAT)).toBe(1);
     expect(progressStore.current.medals("staged_newbie")).toContain("spark");

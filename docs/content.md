@@ -39,7 +39,7 @@ The models behind the tables were computed in this session. Section 1.1 gives th
 **Formula (new):** `XP_to_next(L) = round_to_5(50 × L^1.5)` for L = 1…19. Total to cap: **33,570 XP**.
 
 **Model assumptions (new):** 2.5 effective kills/min including travel; tier mix ×1.15; on-level kill
-XP `10 + 5E`; onboarding pays **50 XP** (3 dummies × 10 + 20 on completion; a character reborn mid-tutorial is topped up to 50 at completion, D-fixes-4), so **level 2 lands at
+XP `10 + 5E`; onboarding pays **50 XP** (since #68 the attack lesson is one left click: a training dummy it reaches falls for 10 XP and the completion tops a level-1 trainee up to 50, D-fixes-4; a swing that reaches no dummy pays the 50 at completion), so **level 2 lands at
 the end of the ~60 s tutorial**. That is also the moment the game offers "save your character" (D).
 Mission XP is credited at the level it is usually done. Boss XP is excluded, so it only speeds things up.
 
@@ -131,6 +131,7 @@ removes every coin (D), so prices are set for one life.
 |---|---:|---|
 | Small Tonic (potion) | 10 | +40 HP over 3 s; 0.4 s drink; move at 70% while drinking; stack 10; 8 s shared tonic cooldown; damage does not interrupt (new) |
 | Large Tonic (potion) | 35 | +120 HP over 4 s; otherwise as above (new) |
+| Regeneration (no item, #77) | free | **1% of max HP a second** once you have neither taken nor dealt damage for **10 s** (the combat tag: `REGEN` in `progression.ts`); any hit or attack stops it. 0 to full: 100 s. Decided on the server; `pnpm balance` checks it never runs inside a creature fight (longest pause between a hostile's attacks 5.0 s, slowest starter swing 0.45 s) |
 | Weapon T1 / T2 / T3 (standard families) | 60 / 300 / 900 | [r2-05] |
 | Stillshot Rifle, Comet Launcher T1 / T2 / T3 | 90 / 450 / 1,350 | ×1.5 heavy-weapon premium (new) |
 | Scrapburst Grenade T1 / T2 / T3 (each) | 15 / 40 / 90 | (new) |

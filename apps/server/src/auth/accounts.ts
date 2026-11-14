@@ -332,6 +332,16 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     },
     mountAfterJson(app) {
       mountAccountRoutes(app, accounts, cfg);
+      // #84: outside production, with no mail key, no email goes out: the save and sign-in cards ask
+      // here for the code the dev outbox kept and show it. Never mounted in production (no dev
+      // outbox there, and the flag is checked again), so a code can't leak from a live server.
+      const outbox = devOutbox;
+      if (outbox && !cfg.production) {
+        app.get("/api/account/dev-code", (req, res) => {
+          const email = typeof req.query.email === "string" ? req.query.email.trim() : "";
+          res.json({ code: email ? outbox.recentCode(email) : null });
+        });
+      }
     },
     close() {
       closed = true;
