@@ -532,7 +532,6 @@ export const PLAYBOOK = [
   "To level up: on Portus walk to a portal (firstlight_move target=portal:arcadia) and firstlight_travel portal=arcadia. On the planet: firstlight_move target=guide, firstlight_missions action=take, leave the outpost, fight creatures of about your level, pick up loot piles, heal with tonics, return to safety (firstlight_move target=safe) when hurt.",
   "Spells (firstlight_cast) cost aether and unlock by level: skipstep 1 (a blink out of a bad fight), frostbloom 3 (when surrounded), wishfall 6, glasswing 9 (a shell when hurt).",
   "Race, defend and collect missions are played with firstlight_trial. The public hunt: Sela Marchbank in Portus (target=curator) gives trials T1 (Arcadia, levels 4-7), T2 (Hollowmere, 9-12), T3 (Meridian, 14-17); all three open the Gleam Vault beside her.",
-  "Each level gives a build point: spend it with firstlight_build (self.tree.open lists the choices). Any mix of branches; a respec in a safe zone costs coins.",
-  "Dying costs the character: a new life starts at level 1 (firstlight_respawn). Retreat early.",
+  "Death costs the character and its build points: a new life at level 1 (firstlight_respawn). Spend level points with firstlight_build. Retreat early.",
   "Be a good neighbour: don't attack players unless one attacked you first, don't take loot piles that aren't yours while their owner is near, don't crowd people at the guide or the shop.",
 ].join("\n");
