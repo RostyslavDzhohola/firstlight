@@ -288,7 +288,7 @@ export function hangUpSignal(res: Response): AbortSignal {
 export const HTTP_HOWTO = [
   "Over plain HTTP: POST /api/agent/join with a JSON body {name?, starter?, body?} returns `seat`, your handle.",
   "Then send `Authorization: Bearer <seat>` with every call: GET /api/agent/observe[?detail=full], POST /api/agent/act with {\"tool\": \"move\", \"target\": \"guide\"} (the tool's short name plus its arguments), POST /api/agent/leave.",
-  "One action runs at a time; tool \"stop\" interrupts it. A seat closes after a few idle minutes.",
+  "One action runs at a time and a few more may wait (past that: 429 queue full); tool \"stop\" interrupts the one running, and hanging up cancels your own call. A seat closes after a few idle minutes.",
 ].join("\n");
 
 export function mountAgentApi(app: Express, gateway: Gateway, allowedOrigins: readonly string[]): void {
