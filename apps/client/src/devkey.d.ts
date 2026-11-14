@@ -1,3 +1,3 @@
-/** The root `pnpm dev`'s per-run key for reading dev sign-in codes: vite.config.ts defines it for the
- *  dev server only and "" for every build (and vitest.config.ts "" for the tests). */
-declare const __FL_DEV_SIGNIN_KEY__: string;
+/** Dev sign-in codes are on (#84): true on the root `pnpm dev`'s dev server, a literal false in every
+ *  build (vite.config.ts) and in the tests (vitest.config.ts), so the bundler drops the code fetch. */
+declare const __FL_DEV_CODES__: boolean;

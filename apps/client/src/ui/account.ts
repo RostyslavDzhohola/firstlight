@@ -244,9 +244,9 @@ function emailFlow(container: HTMLElement, o: FlowOpts): void {
     const status = el("div", "fl-status", container);
     status.setAttribute("role", "status");
     // #84: a local server sent no email: say so and fill the code in (never in a production build:
-    // the build's literal "" key lets the bundler drop this and devCode's fetch, see dev-code.test.ts).
+    // the build's literal false lets the bundler drop this and devCode's fetch, see dev-code.test.ts).
     const showDevCode = async () => {
-      if (!__FL_DEV_SIGNIN_KEY__) return;
+      if (!__FL_DEV_CODES__) return;
       const c = await devCode(email);
       if (!c || !container.contains(fine)) return;
       fine.textContent = `Local server: no email was sent. Your code is ${c}; it's filled in for you.`;

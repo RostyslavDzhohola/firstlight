@@ -181,19 +181,30 @@ export async function sendEmailCode(email: string): Promise<Result> {
 }
 
 
+let devKeyAsk: Promise<string> | null = null;
+/** This run's dev sign-in key, which the Vite dev server gives only to this machine's own pages (vite.config.ts). */
+function devSigninKey(): Promise<string> {
+  devKeyAsk ??= fetch("/@firstlight/dev-key", { cache: "no-store" })
+    .then((r) => (r.ok ? r.text() : ""))
+    .catch(() => "");
+  return devKeyAsk;
+}
+
 /**
  * #84: a local server without a mail key sends no email; it keeps the code and hands it to the card
  * (GET /api/account/dev-code) when asked with this run's key, which only the root `pnpm dev` gives
- * the server and this dev page. Production builds have no key, so this returns before the fetch
- * (which the bundler drops). The queued send for a returning player's address goes out just after
- * the answer, so this tries a few times.
+ * the server and the Vite dev server (and Vite only to this machine's pages). In every build
+ * __FL_DEV_CODES__ is a literal false, so this returns before any fetch (which the bundler drops).
+ * The queued send for a returning player's address goes out just after the answer, so this tries a
+ * few times.
  */
 export async function devCode(email: string, tries = 6): Promise<string | null> {
-  // A literal "" in every build (vite.config.ts), so the bundler drops the rest of this function.
-  if (!__FL_DEV_SIGNIN_KEY__ || import.meta.env.PROD) return null;
+  if (!__FL_DEV_CODES__ || import.meta.env.PROD) return null;
+  const key = await devSigninKey();
+  if (!key) return null;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(`${config.apiUrl}/api/account/dev-code?email=${encodeURIComponent(email.trim())}`, { headers: { "x-firstlight-dev-key": __FL_DEV_SIGNIN_KEY__ } });
+      const res = await fetch(`${config.apiUrl}/api/account/dev-code?email=${encodeURIComponent(email.trim())}`, { headers: { "x-firstlight-dev-key": key } });
       if (!res.ok) return null; // not a local server
       const j = (await res.json()) as { code?: string | null };
       if (j.code) return j.code;

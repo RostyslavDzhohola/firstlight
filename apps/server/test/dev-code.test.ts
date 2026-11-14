@@ -219,7 +219,7 @@ describe("the switch", () => {
     try {
       const built = textFiles(out).filter((f) => f.endsWith(".js") || f.endsWith(".html"));
       expect(built.some((f) => f.endsWith(".js"))).toBe(true);
-      const hits = built.filter((f) => /dev-code|x-firstlight-dev-key|__FL_DEV_SIGNIN_KEY__/.test(readFileSync(f, "utf8")) || readFileSync(f, "utf8").includes(KEY));
+      const hits = built.filter((f) => /dev-code|dev-key|__FL_DEV/.test(readFileSync(f, "utf8")) || readFileSync(f, "utf8").includes(KEY));
       expect(hits).toEqual([]);
     } finally {
       if (was === undefined) delete process.env.DEV_SIGNIN_KEY;
@@ -227,10 +227,12 @@ describe("the switch", () => {
       rmSync(out, { recursive: true, force: true });
     }
   });
-  it("the dev client sends the key, which Vite gives only to the dev server, never to a build", () => {
+  it("the dev client sends the key, which the Vite dev server hands only to this machine's pages, never in a module or a build", () => {
     const vite = readFileSync(new URL("../../client/vite.config.ts", import.meta.url), "utf8");
-    expect(vite).toMatch(/__FL_DEV_SIGNIN_KEY__:\s*JSON\.stringify\(command === "serve"/);
+    expect(vite).toMatch(/__FL_DEV_CODES__:\s*JSON\.stringify\(command === "serve"/);
+    expect(vite).toMatch(/apply: "serve"/);
     const auth = readFileSync(new URL("../../client/src/net/auth.ts", import.meta.url), "utf8");
     expect(auth).toMatch(/"x-firstlight-dev-key"/);
+    expect(auth).toMatch(/"\/@firstlight\/dev-key"/);
   });
 });
