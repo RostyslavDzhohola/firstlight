@@ -84,6 +84,11 @@ export const FUNNEL_LIMITS = {
   errorRetentionDays: 30,
   maxPending: 5_000,
   flushMs: 1_000,
+  /** Rows per write transaction, and the time one flush may hold the event loop before it yields. */
+  flushSlice: 200,
+  flushBudgetMs: 4,
+  /** Flush attempts a queued row gets (each failed one waits twice as long) before it is dropped. */
+  flushTries: 12,
 };
 
 export interface FunnelRow {
@@ -161,29 +166,42 @@ export function resetFunnelBudgets(db?: Db): void {
 }
 
 // ---- the write queue ----------------------------------------------------------------------------
+//
+// The room tick and the requests only queue (memory). One timer writes the queue in small
+// transactions (FUNNEL_LIMITS.flushSlice rows) on a connection told not to wait for a lock
+// (busy_timeout 0), and yields after flushBudgetMs: a locked or slow database makes it stop at once
+// and try again later (backoff doubling from flushMs), so the simulation never waits on funnel storage
+// for more than a slice (review round two, finding 5). A row that can't be written stays queued; after
+// flushTries attempts (about four minutes of backoff) it is dropped. Every retry and drop is counted (funnelQueueState, /stats), so an
+// accepted step is never lost without a trace (finding 7). Only close() writes with the normal lock
+// wait, everything that is left.
 
-type Pending =
+type Pending = (
   | { db: Db; kind: "step"; row: { subject: string; step: string; at: number; value: number | null; detail: string | null; kind: FunnelKind } }
-  | { db: Db; kind: "error"; row: Required<ClientErrorRow> };
+  | { db: Db; kind: "error"; row: Required<ClientErrorRow> }
+) & { tries: number };
 const pending: Pending[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
-let droppedWrites = 0;
+/** Writes refused because the queue was full (the caller was told), retried attempts, dropped rows. */
+const queueStats = { dropped: 0, retries: 0, lost: 0, lastError: "" };
+/** Consecutive failed flush attempts (the backoff). */
+let failures = 0;
 
-function schedule(): void {
+function schedule(ms = FUNNEL_LIMITS.flushMs): void {
   if (timer) return;
   timer = setTimeout(() => {
     timer = null;
     flushFunnel();
-  }, FUNNEL_LIMITS.flushMs);
+  }, ms);
   timer.unref?.();
 }
 
-function enqueue(p: Pending): boolean {
+function enqueue(p: Omit<Pending, "tries">): boolean {
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
-    droppedWrites++;
+    queueStats.dropped++;
     return false;
   }
-  pending.push(p);
+  pending.push({ ...p, tries: 0 } as Pending);
   schedule();
   return true;
 }
@@ -210,7 +228,7 @@ export function queueStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
   const row = normalise(r, now);
   if (pendingIndex(db, row.subject, row.step) >= 0) return true; // already on its way
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
-    droppedWrites++;
+    queueStats.dropped++;
     return false;
   }
   if (!takeBudget(db, row.subject.startsWith("v:") ? "visitRows" : "accountRows", now)) return false;
@@ -227,7 +245,7 @@ export function recordStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
 /** Queue a client error report (budgeted per day). */
 export function queueClientError(db: Db, e: ClientErrorRow, now = Date.now()): boolean {
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
-    droppedWrites++;
+    queueStats.dropped++;
     return false;
   }
   if (!takeBudget(db, "errors", now)) return false;
@@ -247,45 +265,128 @@ export function queueClientError(db: Db, e: ClientErrorRow, now = Date.now()): b
   });
 }
 
-/** Write what is queued (for one database, or all), each database in one transaction. Never throws. */
-export function flushFunnel(only?: Db): number {
+function writeRow(db: Db, p: Pending): number {
+  if (p.kind === "step") return stmt(db, INSERT_STEP).run(p.row.subject, p.row.step, p.row.at, p.row.value, p.row.detail, p.row.kind).changes;
+  return stmt(db, INSERT_ERROR).run(p.row.at, p.row.sig, p.row.message, p.row.stack, p.row.build, p.row.tier, p.row.backend, p.row.kind).changes;
+}
+
+/** A lock held by another connection (or this one's open transaction): try again later, nothing is wrong with the rows. */
+const locked = (err: unknown) => /^SQLITE_(BUSY|LOCKED)/.test(String((err as { code?: unknown }).code ?? ""));
+
+/** Rows that can't be written any more: counted as lost (with the reason) and logged. */
+function drop(rows: Pending[], err: unknown, gone: Set<Pending>): void {
+  if (!rows.length) return;
+  queueStats.lastError = String((err as Error)?.message ?? err).slice(0, 120);
+  queueStats.lost += rows.length;
+  for (const p of rows) gone.add(p);
+  console.warn(`funnel: ${rows.length} queued write(s) dropped: ${queueStats.lastError}`);
+}
+
+/** One failed attempt for `rows`: each spends a try; out of tries it is dropped, else it waits (a retry). */
+function attemptFailed(rows: Pending[], err: unknown, gone: Set<Pending>): void {
+  queueStats.lastError = String((err as Error)?.message ?? err).slice(0, 120);
+  const out: Pending[] = [];
+  for (const p of rows) if (++p.tries >= FUNNEL_LIMITS.flushTries) out.push(p);
+  if (out.length < rows.length) queueStats.retries++;
+  drop(out, err, gone);
+}
+
+/** Take `gone` out of the queue in one pass. */
+function forget(gone: Set<Pending>): void {
+  if (!gone.size) return;
+  const keep = pending.filter((p) => !gone.has(p));
+  pending.length = 0;
+  pending.push(...keep);
+}
+
+/**
+ * Write what is queued (for one database, or all) in slices of FUNNEL_LIMITS.flushSlice rows, each
+ * its own transaction, without waiting for a lock: a lock stops the attempt at once (every waiting
+ * row of that database spends one of its flushTries and the next attempt backs off), and after
+ * flushBudgetMs it stops and goes on after the event loop had its turn. `final` (shutdown): wait for
+ * locks as usual and write everything; what still fails is counted as lost. Never throws. Returns
+ * the rows written.
+ */
+export function flushFunnel(only?: Db, opts: { final?: boolean } = {}): number {
   if (!only && timer) {
     clearTimeout(timer);
     timer = null;
   }
   if (!pending.length) return 0;
-  const take = only ? pending.filter((p) => p.db === only) : pending.slice();
-  if (!take.length) return 0;
-  const left = only ? pending.filter((p) => p.db !== only) : [];
-  pending.length = 0;
-  pending.push(...left);
-  const byDb = new Map<Db, Pending[]>();
-  for (const p of take) {
-    let list = byDb.get(p.db);
-    if (!list) byDb.set(p.db, (list = []));
-    list.push(p);
-  }
+  const final = !!opts.final;
+  const started = performance.now();
+  const gone = new Set<Pending>();
   let written = 0;
-  for (const [db, list] of byDb) {
-    if (!db.open) continue;
-    try {
-      db.transaction(() => {
-        for (const p of list) {
-          if (p.kind === "step") written += stmt(db, INSERT_STEP).run(p.row.subject, p.row.step, p.row.at, p.row.value, p.row.detail, p.row.kind).changes;
-          else written += stmt(db, INSERT_ERROR).run(p.row.at, p.row.sig, p.row.message, p.row.stack, p.row.build, p.row.tier, p.row.backend, p.row.kind).changes;
-        }
-      })();
-    } catch (err) {
-      console.warn(`funnel: ${list.length} queued write(s) lost: ${(err as Error).message}`);
+  let stalled = false;
+  let outOfTime = false;
+  const dbs = only ? [only] : [...new Set(pending.map((p) => p.db))];
+  for (const db of dbs) {
+    const mine = pending.filter((p) => p.db === db);
+    if (!mine.length) continue;
+    if (!db.open) {
+      drop(mine, new Error("database closed"), gone);
+      continue;
     }
+    const wait = final ? null : (db.pragma("busy_timeout", { simple: true }) as number);
+    if (wait !== null) db.pragma("busy_timeout = 0");
+    try {
+      for (let i = 0; i < mine.length; i += FUNNEL_LIMITS.flushSlice) {
+        if (!final && performance.now() - started >= FUNNEL_LIMITS.flushBudgetMs) {
+          outOfTime = true;
+          break;
+        }
+        const part = mine.slice(i, i + FUNNEL_LIMITS.flushSlice);
+        try {
+          let n = 0;
+          db.transaction(() => {
+            for (const p of part) n += writeRow(db, p);
+          })();
+          written += n;
+          for (const p of part) gone.add(p);
+        } catch (err) {
+          if (!final && locked(err)) {
+            attemptFailed(mine.slice(i), err, gone);
+            stalled = true;
+            break; // this database is busy: the rest waits for the next attempt
+          }
+          // Not a lock (or shutdown): write row by row; a row that fails spends a try.
+          for (const p of part) {
+            try {
+              written += writeRow(db, p);
+              gone.add(p);
+            } catch (e) {
+              if (final) drop([p], e, gone);
+              else attemptFailed([p], e, gone);
+            }
+          }
+          if (!final && part.some((p) => !gone.has(p))) stalled = true;
+        }
+      }
+    } finally {
+      if (wait !== null && db.open) db.pragma(`busy_timeout = ${wait}`);
+    }
+    if (outOfTime) break;
   }
-  if (pending.length) schedule();
+  forget(gone);
+  if (final) {
+    // Shutdown: whatever is left for these databases can't be written any more.
+    const lost = new Set<Pending>();
+    drop(pending.filter((p) => dbs.includes(p.db)), new Error(queueStats.lastError || "not written at shutdown"), lost);
+    forget(lost);
+    return written;
+  }
+  failures = stalled ? failures + 1 : 0;
+  if (pending.length) schedule(stalled ? Math.min(FUNNEL_LIMITS.flushMs * 2 ** (failures - 1), 30_000) : outOfTime ? 0 : FUNNEL_LIMITS.flushMs);
   return written;
 }
 
-/** Writes waiting for the next flush, and writes dropped because the queue was full (since start). */
-export function funnelQueueState(): { pending: number; dropped: number } {
-  return { pending: pending.length, dropped: droppedWrites };
+/**
+ * The queue since start: writes waiting, refused because the queue was full (the caller knew),
+ * flush attempts that found the database locked or failing and kept their rows (retries), and
+ * accepted rows dropped after FUNNEL_LIMITS.flushTries attempts (lost), with the last error.
+ */
+export function funnelQueueState(): { pending: number; dropped: number; retries: number; lost: number; lastError: string } {
+  return { pending: pending.length, ...queueStats };
 }
 
 function pendingIndex(db: Db, subject: string, step: string): number {
@@ -322,9 +423,16 @@ export const visitSubject = (visitId: string) => `v:${visitId}`;
  * the account already has a step, the account's earlier row stays. Queued rows are written first.
  */
 export function moveFunnel(db: Db, fromUserId: string, toUserId: string): void {
-  flushFunnel(db);
   const from = accountSubject(fromUserId);
   const to = accountSubject(toUserId);
+  // Queued rows move in memory (no flush: the queue never waits for a lock); a step the account
+  // already has keeps its row (INSERT OR IGNORE, and the duplicate in the queue goes).
+  for (let i = pending.length - 1; i >= 0; i--) {
+    const p = pending[i]!;
+    if (p.db !== db || p.kind !== "step" || p.row.subject !== from) continue;
+    if (pendingIndex(db, to, p.row.step) >= 0) pending.splice(i, 1);
+    else p.row.subject = to;
+  }
   stmt(db, "UPDATE OR IGNORE funnel_step SET subject = ? WHERE subject = ?").run(to, from);
   stmt(db, "DELETE FROM funnel_step WHERE subject = ?").run(from);
 }

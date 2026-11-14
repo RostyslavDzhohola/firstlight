@@ -77,6 +77,12 @@ function stepRows(steps: readonly string[], pick: (r: FunnelReport) => Record<st
   return steps.map((s) => `<tr><td>${esc(STEP_NAMES[s] ?? s)}</td>${cell(w.day, s)}${cell(w.week, s)}${cell(w.all, s)}</tr>`).join("");
 }
 
+/** The funnel's write queue since the server started: what waits, what was retried, what was lost (db/funnel.ts). */
+export function funnelQueueLine(q: ReturnType<typeof funnelWindows>["limits"]["queue"]): string {
+  const bad = q.lost > 0 || q.dropped > 0;
+  return `<p class="muted"${bad ? ' style="color:var(--bad)"' : ""} data-funnel-queue>Funnel writes since start: ${q.pending} waiting, ${q.retries} retried (database busy), ${q.lost} lost after retries, ${q.dropped} refused (queue full)${q.lastError ? `; last error: ${esc(q.lastError)}` : ""}.</p>`;
+}
+
 function funnelSection(f: ReturnType<typeof funnelWindows>): string {
   const w = f.windows;
   const kpiRows = f.kpis.all.map((k, i) => `<tr><td>${esc(k.label)}</td><td class="muted">${k.source === "server" ? "server" : "page"}</td><td class="muted">${esc(k.target)}</td>${kpiCell(f.kpis.day[i]!)}${kpiCell(f.kpis.week[i]!)}${kpiCell(k)}</tr>`).join("");
@@ -94,7 +100,8 @@ function funnelSection(f: ReturnType<typeof funnelWindows>): string {
 <section><h2>Launch KPIs (#85): new visits and characters</h2>
 <table><tr><th>KPI</th><th>Source</th><th>Target</th><th class="num">Last day</th><th class="num">7 days</th><th class="num">All time</th></tr>${kpiRows}</table>
 <p class="muted">A window holds the visits and new characters whose first step falls in it; each share counts those that reached both of its steps. Source "server": the server decided both steps (a visit's join comes from its token at /api/play); "page": the numerator is what the page reported. People only: our test visits and accounts (${w.all.apart.test}) and AI agents (${w.all.apart.agent}) are counted apart. Characters made before the funnel existed are not new ones. Raw steps are kept ${f.limits.retentionDays} days, older days as daily totals (their medians are medians of daily medians).</p>
-${capped.length ? `<p style="color:var(--bad)">Today's funnel cap reached (${esc(capped.join(", "))}): later steps today are not recorded, so today's figures are partial.</p>` : ""}</section>
+${capped.length ? `<p style="color:var(--bad)">Today's funnel cap reached (${esc(capped.join(", "))}): later steps today are not recorded, so today's figures are partial.</p>` : ""}
+${funnelQueueLine(f.limits.queue)}</section>
 <div class="grid2">
 <section><h2>First visit, step by step</h2><table>${head}${stepRows(VISIT_FUNNEL, (r) => r.visits, w)}</table></section>
 <section><h2>New characters, step by step</h2><table>${head}${stepRows(ACCOUNT_FUNNEL, (r) => r.accounts, w)}</table></section>

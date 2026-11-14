@@ -4,6 +4,11 @@
 // The ship-readiness review's probes (docs/reviews/2026-11-13-ship-readiness-gpt-6.1-sol.md) each
 // have a test here: findings 1, 2, 3, 5 and 9.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { monitorEventLoopDelay } from "node:perf_hooks";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import { newCharacter } from "@firstlight/shared/content/character";
@@ -21,11 +26,12 @@ import {
   funnelReport,
   funnelWindows,
   hasStep,
+  queueStep,
   recordStep,
   resetFunnelBudgets,
   rollupFunnel,
 } from "../src/db/funnel.ts";
-import { stmt } from "../src/db/game-db.ts";
+import { openGameDb, stmt } from "../src/db/game-db.ts";
 import { characterRepo } from "../src/world/characters.ts";
 import { Browser, ORIGIN, startAuthServer, type AuthServer } from "./auth-helpers.ts";
 import { safeLeave, waitFor } from "./helpers.ts";
@@ -451,4 +457,107 @@ describe("the funnel's cohorts", () => {
     recordStep(s.accounts.db, { subject: accountSubject("player1"), step: "saved" });
     expect(funnelReport(s.accounts.db).accounts).toEqual({ new: 1, join: 1, saved: 1 });
   });
+});
+
+// Review round two, findings 5 and 7: the flush ran up to 5,000 inserts in one callback on the game's
+// thread, waited the connection's five-second busy timeout on a locked database, and then lost every
+// accepted row without a count. Measured here: another connection holds the write lock.
+describe("funnel writes never hold the game's thread, and an accepted step is never lost unseen", () => {
+  const LOCKED_MS = 600;
+  async function lockedDb() {
+    const dir = mkdtempSync(join(tmpdir(), "fl-funnel-lock-"));
+    const path = join(dir, "game.db");
+    const db = openGameDb(path);
+    const other = new Database(path);
+    other.pragma("busy_timeout = 0");
+    return { db, other, done: () => (other.close(), db.close(), rmSync(dir, { recursive: true, force: true })) };
+  }
+  const count = (db: Database.Database) => (db.prepare("SELECT COUNT(*) AS n FROM funnel_step WHERE subject LIKE 'u:lock%'").get() as { n: number }).n;
+  const tick = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+
+  it("a locked database: every flush attempt returns at once, the rows wait and are all written once it is free", async () => {
+    Object.assign(FUNNEL_LIMITS, { accountRowsPerDay: 1e6, flushMs: 20, maxPending: 5_000 });
+    const { db, other, done } = await lockedDb();
+    try {
+      resetFunnelBudgets(db);
+      const before = funnelQueueState();
+      for (let i = 0; i < 5_000; i++) expect(queueStep(db, { subject: `u:lock${i}`, step: "join" })).toBe(true);
+      other.exec("BEGIN IMMEDIATE"); // a write lock someone else holds (a backup, the metrics tool, a long save)
+      const h = monitorEventLoopDelay({ resolution: 1 });
+      h.enable();
+      await tick(10); // the monitor measures between its own samples: let it take one before the first attempt
+      // A few attempts by hand (each timed), then the timer keeps trying with its backoff.
+      const attempts: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const t0 = performance.now();
+        expect(flushFunnel(db)).toBe(0);
+        attempts.push(performance.now() - t0);
+        await tick(20);
+      }
+      await tick(LOCKED_MS);
+      h.disable();
+      const stallMs = h.max / 1e6;
+      console.log(`funnel flush, database locked: attempts ${attempts.map((t) => t.toFixed(1)).join(", ")} ms; longest event-loop stall over ${LOCKED_MS} ms of retries ${stallMs.toFixed(1)} ms`);
+      // The old flush waited the five-second busy timeout here, then lost every row.
+      expect(Math.max(...attempts)).toBeLessThan(20);
+      expect(stallMs).toBeLessThan(250); // a busy machine adds its own pauses; ours are the attempts above
+      const q = funnelQueueState();
+      expect(q.pending).toBe(5_000);
+      expect(q.retries).toBeGreaterThan(before.retries);
+      expect(q.lost).toBe(before.lost);
+      // Free again: written in small slices, the loop never held long, nothing lost.
+      other.exec("ROLLBACK");
+      const free = monitorEventLoopDelay({ resolution: 1 });
+      free.enable();
+      await tick(10);
+      await waitFor(() => funnelQueueState().pending === 0, 15_000);
+      free.disable();
+      console.log(`funnel flush of 5,000 rows, database free: longest event-loop stall ${(free.max / 1e6).toFixed(1)} ms`);
+      expect(free.max / 1e6).toBeLessThan(250);
+      expect(count(db)).toBe(5_000);
+      expect(funnelQueueState().lost).toBe(before.lost);
+      // And one slice-limited attempt is short: queue again and time a single flush by hand.
+      for (let i = 0; i < 5_000; i++) queueStep(db, { subject: `u:lock${i}`, step: "kill" });
+      const t1 = performance.now();
+      flushFunnel(db);
+      const one = performance.now() - t1;
+      console.log(`one flush attempt with 5,000 rows waiting: ${one.toFixed(1)} ms, ${funnelQueueState().pending} left for the next`);
+      expect(one).toBeLessThan(30);
+      expect(funnelQueueState().pending).toBeGreaterThan(0); // it yielded instead of writing them all
+      await waitFor(() => funnelQueueState().pending === 0, 15_000);
+      expect(count(db)).toBe(10_000);
+      expect(funnelQueueState().lost).toBe(before.lost);
+    } finally {
+      try {
+        other.exec("ROLLBACK");
+      } catch {}
+      done();
+    }
+  }, 60_000);
+
+  it("a database that stays locked: rows are retried a bounded number of times, then dropped, and /stats shows it", async () => {
+    Object.assign(FUNNEL_LIMITS, { accountRowsPerDay: 1e6, flushMs: 5, flushTries: 3 });
+    const { db, other, done } = await lockedDb();
+    try {
+      resetFunnelBudgets(db);
+      const before = funnelQueueState();
+      for (let i = 0; i < 10; i++) queueStep(db, { subject: `u:lockgone${i}`, step: "join" });
+      other.exec("BEGIN IMMEDIATE");
+      await waitFor(() => funnelQueueState().pending === 0, 10_000);
+      const q = funnelQueueState();
+      expect(q.lost - before.lost).toBeGreaterThanOrEqual(10);
+      expect(q.retries - before.retries).toBeGreaterThanOrEqual(2); // two attempts kept the rows, the third dropped them
+      expect((db.prepare("SELECT COUNT(*) AS n FROM funnel_step WHERE subject LIKE 'u:lockgone%'").get() as { n: number }).n).toBe(0);
+      expect(q.lastError).toMatch(/locked|busy/i);
+      other.exec("ROLLBACK");
+      const html = (await import("../src/ops/stats.ts")).funnelQueueLine(q);
+      expect(html).toContain(`${q.lost} lost after retries`);
+      expect(html).toContain(`${q.retries} retried`);
+    } finally {
+      try {
+        other.exec("ROLLBACK");
+      } catch {}
+      done();
+    }
+  }, 30_000);
 });
