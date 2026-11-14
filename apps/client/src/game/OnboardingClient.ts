@@ -30,7 +30,7 @@ import type { StepId } from "./onboardingSteps.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Time the end card stays up, counted only while the game is on screen and playable (doneCardTimer.ts). */
-const DONE_CARD_MS = 8000;
+const DONE_CARD_MS = 15000; // long enough to read where to go next (#68); the compass keeps pointing after
 /** How often the card's time is checked after this system is gone (the portal travel). */
 const LINGER_POLL_MS = 100;
 const NO_KEYS: ReadonlySet<string> = new Set();

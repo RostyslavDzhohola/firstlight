@@ -9,6 +9,7 @@ import type { Terrain } from "@firstlight/shared";
 import { dummyPos, TRAINING_DUMMIES } from "@firstlight/shared/content/onboarding";
 import { stepsFor } from "../game/frameClock.ts";
 import { makeLabel } from "./Portals.ts";
+import { applyLabelFade } from "../render/labelFade.ts";
 
 const DOWN_ANGLE = 1.2; // radians leaned back once knocked down
 const SPRING = 90;
@@ -106,7 +107,7 @@ export class TrainingDummies {
       const label = makeLabel("Training dummies", TARGET);
       label.scale.set(4.2, 0.77, 1);
       label.position.copy(mid.pos).addScaledVector(mid.pos.clone().normalize(), 3);
-      const m = label.material as THREE.SpriteNodeMaterial;
+      const m = applyLabelFade(label.material as THREE.SpriteNodeMaterial); // shrinks and fades up close, like the keepers' names
       this.mats.push(m);
       if (m.map) this.textures.push(m.map);
       this.group.add(label);
