@@ -16,7 +16,7 @@
 //   pnpm metrics --markdown run.json [--skip <regex>]   a run as a markdown table
 // Options: --gfx webgpu|webgl (browser groups, default webgpu), --tier <tier>, --bodies portus,arcadia,
 //   --viewport 1920x1080 --dpr 2 (frame: a real window's size, #87), --heapprof (frame: allocation sites in the raw report), --flags a=b,c (extra URL flags),
-//   --seconds N (frame run length, default 20), --bots 1,25,50,100, --out <file>, --no-build, --json.
+//   --seconds N (frame run length, default 20), --bots 1,25,50,80, --out <file>, --no-build, --json.
 // Browser groups use the journeys' stack on E2E_PORT/E2E_CLIENT_PORT (default 2612/5212); the server group
 // runs its own server on METRICS_SERVER_PORT (default 2622). Headless and muted, like every test browser.
 
