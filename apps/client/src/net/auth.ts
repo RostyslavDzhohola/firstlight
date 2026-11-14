@@ -180,16 +180,20 @@ export async function sendEmailCode(email: string): Promise<Result> {
   return { ok: false, message: SEND_MESSAGE[failure], failure };
 }
 
+
 /**
  * #84: a local server without a mail key sends no email; it keeps the code and hands it to the card
- * (GET /api/account/dev-code, never mounted in production). Production builds never ask. The queued
- * send for a returning player's address goes out just after the answer, so this tries a few times.
+ * (GET /api/account/dev-code) when asked with this run's key, which only the root `pnpm dev` gives
+ * the server and this dev page. Production builds have no key, so this returns before the fetch
+ * (which the bundler drops). The queued send for a returning player's address goes out just after
+ * the answer, so this tries a few times.
  */
 export async function devCode(email: string, tries = 6): Promise<string | null> {
-  if (import.meta.env.PROD) return null;
+  // A literal "" in every build (vite.config.ts), so the bundler drops the rest of this function.
+  if (!__FL_DEV_SIGNIN_KEY__ || import.meta.env.PROD) return null;
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(`${config.apiUrl}/api/account/dev-code?email=${encodeURIComponent(email.trim())}`);
+      const res = await fetch(`${config.apiUrl}/api/account/dev-code?email=${encodeURIComponent(email.trim())}`, { headers: { "x-firstlight-dev-key": __FL_DEV_SIGNIN_KEY__ } });
       if (!res.ok) return null; // not a local server
       const j = (await res.json()) as { code?: string | null };
       if (j.code) return j.code;

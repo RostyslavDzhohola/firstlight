@@ -22,14 +22,14 @@ export function createPlayGate(production: boolean) {
   const all = new WindowLimiter(PLAY_GATE.globalCalls, PLAY_GATE.windowMs, 1);
   return {
     /**
-     * Spend one request of the budgets; false when either is spent. `local` (the caller is this
-     * machine by its socket, `loopbackCaller`) has no address budget outside production.
+     * Spend one request of the budgets; false when either is spent. `exempt` (an in-process test
+     * server's loopback caller, GameOptions.loopbackExempt) has no address budget outside production.
      */
-    admit(ip: string | null, local = false, now = Date.now()): boolean {
+    admit(ip: string | null, exempt = false, now = Date.now()): boolean {
       byIp.max = PLAY_GATE.ipCalls;
       all.max = PLAY_GATE.globalCalls;
       if (!all.take("all", now)) return false;
-      if (!production && local) return true;
+      if (!production && exempt) return true;
       return byIp.take(ip ? banKey(ip) : "unknown", now);
     },
   };

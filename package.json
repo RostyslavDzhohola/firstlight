@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.25.0",
   "engines": { "node": "24.x" },
   "scripts": {
-    "dev": "pnpm --parallel --filter @firstlight/server --filter @firstlight/client dev",
+    "dev": "node tools/dev.ts",
     "build": "pnpm --filter @firstlight/client build",
     "test": "vitest run",
     "typecheck": "pnpm -r --parallel typecheck",

@@ -26,9 +26,15 @@ function dataFast(env: Record<string, string>): Plugin {
 /** The build id client error reports carry (#85): VITE_BUILD_ID, else the deploy's commit, else "dev". */
 const BUILD_ID = (process.env.VITE_BUILD_ID || process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 8) || "dev").slice(0, 40);
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode, command }) => ({
   plugins: [dataFast({ ...loadEnv(mode, process.cwd(), "VITE_"), ...(process.env as Record<string, string>) })],
-  define: { "import.meta.env.VITE_BUILD_ID": JSON.stringify(BUILD_ID) },
+  define: {
+    "import.meta.env.VITE_BUILD_ID": JSON.stringify(BUILD_ID),
+    // The root `pnpm dev`'s per-run key for reading dev sign-in codes (tools/dev.ts, net/auth.ts
+    // devCode). The dev server's pages only: a build gets "" whatever the environment holds, so the
+    // key and the code fetch behind it are never in a production bundle.
+    __FL_DEV_SIGNIN_KEY__: JSON.stringify(command === "serve" ? (process.env.DEV_SIGNIN_KEY ?? "") : ""),
+  },
   server: {
     port: Number(process.env.CLIENT_PORT ?? 5173),
     host: true,

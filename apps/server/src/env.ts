@@ -39,6 +39,9 @@ export const env = {
   /** #84: GET /api/account/dev-code hands the save and sign-in cards the code the dev outbox kept.
    *  Off unless DEV_SIGNIN_CODES=1 (`pnpm dev` sets it); loopback callers only; production refuses to boot with it. */
   devCodeRoute: process.env.DEV_SIGNIN_CODES === "1",
+  /** The root `pnpm dev`'s per-run key (tools/dev.ts): the dev client sends it to read a code. Without
+   *  it the dev-code route is not mounted at all; production refuses to boot with it. */
+  devSigninKey: process.env.DEV_SIGNIN_KEY ?? "",
   /** M11 extra #2 (SPEC §6.14): horses. On in dev and production; FEATURE_HORSES=0 turns them off
    *  (no whistle sales, H refused, clients told through `you.horses`). Mutable for tests. */
   horses: process.env.FEATURE_HORSES !== "0",
@@ -69,6 +72,7 @@ export function productionConfigProblems(e: Record<string, string | undefined> =
   const problems: string[] = [];
   if (e.ALLOW_DEV_GUESTS === "1") problems.push("ALLOW_DEV_GUESTS must not be set in production");
   if (e.DEV_SIGNIN_CODES === "1") problems.push("DEV_SIGNIN_CODES must not be set in production (it serves sign-in codes)");
+  if (e.DEV_SIGNIN_KEY) problems.push("DEV_SIGNIN_KEY must not be set in production (it unlocks sign-in codes)");
   for (const k of ["ORIGIN_SECRET", "BETTER_AUTH_URL", "CLIENT_ORIGIN", "BETTER_AUTH_SECRET", "AUTH_DB_PATH", "GAME_DB_PATH"]) if (!e[k]) problems.push(`${k} is required in production`);
   return problems;
 }
