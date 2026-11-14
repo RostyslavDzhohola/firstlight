@@ -13,8 +13,9 @@ import { config } from "../../config.ts";
 import type { StarterTextures } from "./assets.ts";
 import { avatarMaterial, setAvatarPalette } from "./material.ts";
 
-/** Weapon ids drawn from a sculpted GLB once loaded (files under `<assetBase>/weapons/<id>…`). */
-export const SCULPTED_WEAPONS: readonly string[] = ["emberglass", "axe", "longbow"];
+import { SCULPTED_WEAPONS } from "./sculptedIds.ts";
+
+export { SCULPTED_WEAPONS };
 
 interface Sculpted {
   geometry: THREE.BufferGeometry;

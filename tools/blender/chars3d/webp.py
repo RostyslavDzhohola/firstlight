@@ -5,7 +5,8 @@
 #                                                               albedo keeps its alpha (accent mask)
 #   python3 -I webp.py --albedo <raw dir> <out dir> kappa_b ... albedo only (the second looks share the
 #                                                               client's flat normal map)
-#   python3 -I webp.py --ui <render dir> <out dir>              hero_*.png / portrait_*.png renders
+#   python3 -I webp.py --ui <render dir> <out dir>              hero_*.png / portrait_*.png renders, and
+#                                                               props3d's icon_*.png
 
 import os
 import sys
@@ -16,7 +17,7 @@ from PIL import Image
 def ui(src, out):
     os.makedirs(out, exist_ok=True)
     for f in sorted(os.listdir(src)):
-        if not (f.startswith("hero_") or f.startswith("portrait_") or f.startswith("lineup")) or not f.endswith(".png"):
+        if not (f.startswith("hero_") or f.startswith("portrait_") or f.startswith("lineup") or f.startswith("icon_")) or not f.endswith(".png"):
             continue
         im = Image.open(os.path.join(src, f)).convert("RGBA")
         path = os.path.join(out, f[:-4] + ".webp")

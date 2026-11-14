@@ -7,6 +7,8 @@
 #       compare:    for each prop, today's model and the new one side by side, same scale
 #       hand:       --shots char:clip:frame,... each prop held in the right-hand socket, game look
 #                   (--today: today's model instead); one render per shot, stitched
+#       icon:       per prop a square inventory icon on a transparent ground, tip to the top right
+#                   (--out names a folder: icon_<prop>.png; webp.py --ui makes the client's WebP)
 #
 # Looks as chars3d/render.py: studio (Principled) or game (the client's toon avatar shading). Props use
 # the avatar material plus their own glow: albedo alpha = 1 - glow, and the painted colour glows.
@@ -189,6 +191,27 @@ def main():
         span = (h if sc.render.resolution_y >= sc.render.resolution_x else width) * 1.08
         sc.camera = bl.camera("cam", (width / 2 - 0.03, 0, (z0 + z1) / 2), (0, -1, 0.04), 8.0, lens=50, ortho=span)
         bl.render(a.out)
+        print("RENDER DONE", a.out, flush=True)
+        return
+
+    if a.mode == "icon":
+        stage(a.look, a.res, a.res)
+        sc.render.film_transparent = True
+        os.makedirs(a.out, exist_ok=True)
+        for n in names:
+            for o in list(bpy.data.objects):
+                if o.type == "MESH":
+                    bpy.data.objects.remove(o)
+            objs = load_prop(a.dir, n, a.look, max(a.pal, 0))
+            v = view_of(n)
+            # upright, a quarter turn to show the face, then tipped 45° about the view axis
+            M0 = Matrix.Rotation(math.radians(45), 4, "Y") @ Matrix.Rotation(math.radians(-30), 4, "Z") @ hold.display_matrix(v["up"], v["side"])
+            lo, hi = bounds(objs, M0, False)
+            c = (lo + hi) / 2
+            place(objs, Matrix.Translation((-c[0], -c[1], -c[2])) @ M0, False)
+            span = float(max(hi[0] - lo[0], hi[2] - lo[2])) * 1.06
+            sc.camera = bl.camera("cam_icon", (0, 0, 0), (0, -1, 0.0), 8.0, lens=50, ortho=span)
+            bl.render(os.path.join(a.out, f"icon_{n}.png"))
         print("RENDER DONE", a.out, flush=True)
         return
 

@@ -101,6 +101,8 @@ const sph = (r: number, w = 10, h = 8) => new THREE.SphereGeometry(r, w, h);
 const torus = (r: number, t: number, seg = 12) => new THREE.TorusGeometry(r, t, 5, seg);
 
 const H = Math.PI / 2;
+/** How far the code-built bow's string stands off its grip (m, weapon +X). */
+const BOW_BRACE = 0.1;
 
 function design(id: string): Piece[] {
   switch (id) {
@@ -190,15 +192,17 @@ function design(id: string): Piece[] {
         P(box(0.06, 0.07, 0.2), "wood", [0, 0.01, -0.1]),
       ];
     case "longbow": {
+      // Limbs along +Z like the staffs (#56): the clips then hold it upright in aim and shoot, its back
+      // (-X) to the target and the string (+X) towards the archer. The braced limbs bend towards the string.
       const pts: THREE.Vector3[] = [];
       for (let i = 0; i <= 12; i++) {
         const t = i / 12 - 0.5;
-        pts.push(new THREE.Vector3(0, t * 1.5, -0.12 * Math.cos(t * Math.PI) + 0.05));
+        pts.push(new THREE.Vector3(BOW_BRACE * (1 - Math.cos(t * Math.PI)), 0, t * 1.5));
       }
       return [
         P(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.014, 5), "wood"),
-        P(cylZ(0.002, 0.002, 1.44, 3), "cord", [0, 0, -0.08], [H, 0, 0]),
-        P(cylZ(0.02, 0.02, 0.12, 8), "leather", [0, 0, 0.0], [H, 0, 0]),
+        P(cylZ(0.002, 0.002, 1.44, 3), "cord", [BOW_BRACE * 0.97, 0, 0]),
+        P(cylZ(0.02, 0.02, 0.12, 8), "leather"),
       ];
     }
     case "stillshot":

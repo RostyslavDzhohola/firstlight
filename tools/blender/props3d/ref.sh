@@ -20,5 +20,5 @@ for k in ("albedo", "normal"):
     im = Image.open(f"{sys.argv[1]}/{sys.argv[3]}_{k}.webp")
     im.convert("RGBA" if k == "albedo" else "RGB").save(f"{sys.argv[2]}/{sys.argv[3]}_{k}.png")' "$CH" "$REF" "$n"
 done
-(cd "$ROOT" && FL_DUMP_WEAPONS="$REF/today_weapons.json" pnpm vitest run apps/client/src/render/avatars/weapons.dump.test.ts >/dev/null)
+(cd "$ROOT" && FL_DUMP_WEAPONS="$REF/today_weapons.json" pnpm vitest run apps/client/src/render/avatars/weapons.test.ts >/dev/null)
 ls "$REF"

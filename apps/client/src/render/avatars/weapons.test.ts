@@ -1,7 +1,7 @@
 // Today's code-built held items as data, for the props tools (tools/blender/props3d: the "today"
 // previews, compare renders and clip checks rebuild them in Blender). Run with an output path to
 // write the dump (tools/blender/props3d/ref.sh does):
-//   FL_DUMP_WEAPONS=/tmp/fl-props/ref/today_weapons.json pnpm vitest run apps/client/src/render/avatars/weapons.dump.test.ts
+//   FL_DUMP_WEAPONS=/tmp/fl-props/ref/today_weapons.json pnpm vitest run apps/client/src/render/avatars/weapons.test.ts
 // Without it, the test only checks that every modelled item dumps.
 
 import { writeFileSync } from "node:fs";
@@ -60,5 +60,16 @@ describe("today's held items as data (props tools reference)", () => {
     for (const id of ["emberglass", "axe", "longbow", "sunbrand", "riverstaff"]) expect(all[id]?.length).toBeGreaterThan(0);
     const path = process.env.FL_DUMP_WEAPONS;
     if (path) writeFileSync(path, JSON.stringify(all));
+  });
+});
+
+describe("today's Yew Longbow stands upright in the hand (#56)", () => {
+  it("runs its limbs along weapon +Z, with the string on +X (towards the archer)", () => {
+    const box = new THREE.Box3().setFromObject(weaponModel("longbow", 0)!);
+    const size = box.getSize(new THREE.Vector3());
+    expect(size.z).toBeGreaterThan(1.3); // the limbs
+    expect(size.y).toBeLessThan(0.06); // flat across the hand's up axis
+    expect(box.min.x).toBeGreaterThan(-0.03); // the back faces -X, the string sits at +X
+    expect(box.max.x).toBeGreaterThan(0.08);
   });
 });

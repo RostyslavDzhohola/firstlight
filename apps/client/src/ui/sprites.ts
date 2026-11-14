@@ -4,6 +4,7 @@
 
 import { lookId, STARTER_LOOKS } from "@firstlight/shared/content/weapons";
 import { config } from "../config.ts";
+import { SCULPTED_WEAPONS } from "../render/avatars/sculptedIds.ts";
 
 export const SPRITE_PALETTE: Readonly<Record<string, string>> = {
   "K": "#1d1512",
@@ -947,7 +948,11 @@ export const STARTER_PORTRAIT = ["head-hexwick", "head-ash", "head-kappa", "head
 /** Every look's portrait (STARTER_LOOKS ids). */
 const PORTRAIT_IDS = STARTER_LOOKS.flatMap((ls) => ls.map((l) => l.id));
 
+/** Items drawn with a render of their sculpted model (`.px-icon-<id>`) instead of their pixel map. */
+const ICON_IDS: ReadonlySet<string> = new Set(SCULPTED_WEAPONS);
+
 export function itemSprite(id: string | null | undefined): string {
+  if (id && ICON_IDS.has(id)) return `icon-${id}`;
   return (id && ITEM_SPRITE[id]) || "chest";
 }
 
@@ -995,6 +1000,7 @@ export function installSprites(doc: Document = document): void {
   const style = doc.createElement("style");
   style.dataset.flSprites = "";
   style.textContent = Object.keys(SPRITES).map((n) => `.px-${n}{--i:${spriteUrl(n)}}`).join("\n") + "\n" +
-    PORTRAIT_IDS.map((id) => `.px-portrait-${id}{--i:url("${config.assetBase}/characters/portrait_${id}.webp");image-rendering:auto;background-size:cover}`).join("\n");
+    PORTRAIT_IDS.map((id) => `.px-portrait-${id}{--i:url("${config.assetBase}/characters/portrait_${id}.webp");image-rendering:auto;background-size:cover}`).join("\n") + "\n" +
+    [...ICON_IDS].map((id) => `.px-icon-${id}{--i:url("${config.assetBase}/weapons/icon_${id}.webp");image-rendering:auto;background-size:contain}`).join("\n");
   doc.head.appendChild(style);
 }
