@@ -60,7 +60,7 @@ describe("lookFromStick", () => {
 });
 
 describe("the pad layout (D-controls-5)", () => {
-  const codes = new Set([...PAD_LAYOUT.values()].flatMap((a: PadAction) => (a.kind === "key" ? [a.code] : [])));
+  const codes = new Set([...PAD_LAYOUT.values()].flatMap((a: PadAction) => (a.kind === "key" ? [a.code] : a.kind === "tapHold" ? [a.tap, a.hold] : [])));
 
   it("maps the brief's buttons", () => {
     expect(PAD_LAYOUT.get(BTN.A)).toEqual({ kind: "key", code: "Space" });
@@ -88,7 +88,7 @@ describe("the pad layout (D-controls-5)", () => {
     // Pause-menu rows for pads and touch (controls.ts): journal, tutorial checklist (and inventory, map, players again).
     const viaMenu = ["KeyJ", "KeyT"];
     // Keyboard-only by choice: photo, screenshot, perf/admin overlays, the phrase wheel, invites, voice.
-    const keyboardOnly = ["KeyP", "Backquote", "KeyG", "KeyY", "KeyN", "KeyV", "KeyB", "KeyW", "KeyA", "KeyS", "KeyD"];
+    const keyboardOnly = ["KeyP", "Backquote", "KeyG", "KeyY", "KeyN", "KeyK", "KeyB", "KeyW", "KeyA", "KeyS", "KeyD"];
     for (const b of BINDINGS) {
       const ok = codes.has(b.code) || viaContext.includes(b.code) || viaMenu.includes(b.code) || keyboardOnly.includes(b.code);
       expect(ok, `${b.code} (${b.what})`).toBe(true);

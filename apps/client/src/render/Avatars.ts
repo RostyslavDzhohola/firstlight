@@ -148,6 +148,49 @@ const _m = new THREE.Matrix4();
 const _d = new THREE.Vector3();
 /** The rez light leans from the palette's accent towards this. */
 const _rezTint = new THREE.Color(0xbfefff);
+/** The first-person head cut reaches this far (m) past the head's own vertices (and the crown and face sockets). */
+const HEAD_CUT_MARGIN = 0.04;
+/**
+ * Per model (MODEL_FILES index): the sphere round every vertex the head carries (hair, ears, a hat's
+ * brim, a beak): its centre in the Head bone's space and its radius in model units. Measured once from
+ * the rest pose (headCutOf).
+ */
+const HEAD_CUTS = new Map<number, { centre: THREE.Vector3; r: number } | null>();
+
+/**
+ * The sphere round the vertices skinned mostly (half or more) to `head` or the bones under it, in the
+ * model at rest (unscaled, identity transform): centre in `head`'s space, radius in model units.
+ */
+function headCutOf(model: THREE.Object3D, head: THREE.Object3D): { centre: THREE.Vector3; r: number } | null {
+  const pts: THREE.Vector3[] = [];
+  const box = new THREE.Box3();
+  model.traverse((o) => {
+    const sm = o as THREE.SkinnedMesh;
+    if (!sm.isSkinnedMesh || !sm.skeleton) return;
+    const mine = new Set<number>();
+    sm.skeleton.bones.forEach((b, i) => {
+      for (let p: THREE.Object3D | null = b; p; p = p.parent) if (p === head) return void mine.add(i);
+    });
+    const pos = sm.geometry.getAttribute("position");
+    const si = sm.geometry.getAttribute("skinIndex");
+    const sw = sm.geometry.getAttribute("skinWeight");
+    if (!pos || !si || !sw || !mine.size) return;
+    for (let v = 0; v < pos.count; v++) {
+      let w = 0;
+      for (let k = 0; k < 4; k++) if (mine.has(si.getComponent(v, k))) w += sw.getComponent(v, k);
+      if (w < 0.5) continue;
+      // Skinned where the bones are now (the rest pose), then into the model's space.
+      const q = sm.getVertexPosition(v, new THREE.Vector3()).applyMatrix4(sm.matrixWorld);
+      pts.push(q);
+      box.expandByPoint(q);
+    }
+  });
+  if (!pts.length) return null;
+  const c = box.getCenter(new THREE.Vector3());
+  let r = 0;
+  for (const q of pts) r = Math.max(r, q.distanceTo(c));
+  return { centre: head.worldToLocal(c), r };
+}
 /** A move of more than this in one frame is a teleport (m): the fastest horse covers under 1 m. */
 export const TELEPORT_M = 8;
 
@@ -310,6 +353,11 @@ export class AvatarView {
   /** Smoothed ground speed (m/s) from this avatar's own successive positions. */
   get groundSpeed(): number {
     return this.speed;
+  }
+
+  /** The body moved here without walking (a Skipstep blink): no teleport rez-in, no speed spike from the distance (#78). */
+  blinked() {
+    this.havePrev = false;
   }
 
   /** PlayerState.flags (PF): DEAD, BLOCKING, SWIMMING, SCOPED override the animation state. */
@@ -535,6 +583,26 @@ export class AvatarView {
     return this.sockets.get(slot);
   }
 
+  /**
+   * First person (D-view-fp-1, game/view.ts): the eye (the face socket: the eye line, at the front of
+   * the face) into `eye`, and a sphere round the whole head (crown, back and face, with a margin for
+   * hair and hats) into `centre`; returns its radius. 0 without the skinned model (capsule, far LOD).
+   */
+  firstPersonHead(eye: THREE.Vector3, centre: THREE.Vector3): number {
+    const face = this.sockets.get("face");
+    const crown = this.sockets.get("head");
+    const bone = crown?.parent;
+    if (!this.model || this.lod === "far" || !face || !crown || !bone) return 0;
+    bone.updateWorldMatrix(true, true);
+    face.getWorldPosition(eye);
+    crown.getWorldPosition(_d);
+    const cut = HEAD_CUTS.get(this.modelIdx);
+    if (cut) centre.copy(cut.centre).applyMatrix4(bone.matrixWorld);
+    else bone.getWorldPosition(centre).add(_d).multiplyScalar(0.5);
+    const scale = MODEL_SCALE[this.modelIdx] ?? 1;
+    return Math.max(centre.distanceTo(_d), centre.distanceTo(eye), (cut?.r ?? 0) * scale) + HEAD_CUT_MARGIN;
+  }
+
   /** Place at a planet-space position, standing on local up, facing a tangent direction. */
   set(x: number, y: number, z: number, fx: number, fy: number, fz: number, anim: number, dt: number) {
     // ground speed from successive positions (tangential only), smoothed
@@ -734,6 +802,9 @@ export class AvatarView {
       bone.add(sock);
       this.sockets.set(name, sock);
     }
+    // The first-person head cut's sphere, once per model (only the local player's avatar uses it).
+    const head = bones.get("Head");
+    if (head && !HEAD_CUTS.has(this.modelIdx)) HEAD_CUTS.set(this.modelIdx, headCutOf(model, head));
     model.scale.setScalar(s);
     model.updateMatrixWorld(true);
   }
@@ -823,7 +894,9 @@ export class AvatarView {
         else { name = "sprint"; ts = clamp(sp / (CLIP_SPEED.sprint! * this.stride), 0.85, 1.3 / this.stride); }
         break;
       case ANIM.JUMP: name = "jump_air"; break;
-      case ANIM.FALL: name = "fall"; break;
+      // A hop's way down keeps the jump clip (it reaches its landing as a 0.73 s hop lands); the long
+      // fall's flail only once the clip has run out, off a ledge (#78: every hop flailed half-way).
+      case ANIM.FALL: name = this.currentName === "jump_air" && !!this.current?.isRunning() ? "jump_air" : "fall"; break;
       case ANIM.SWIM:
         if (sp > 0.6) { name = "swim"; ts = clamp(sp / CLIP_SPEED.swim!, 0.7, 1.6); } else name = "swim_idle";
         break;

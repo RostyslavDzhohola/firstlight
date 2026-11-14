@@ -536,14 +536,16 @@ describe("third-person camera and structures (D42)", () => {
     run(pc, fakeInput(["KeyW"]), 3);
     cf.copy(toward(26.2, -30));
     const cam = new THREE.PerspectiveCamera();
-    for (let i = 0; i < 10; i++) pc.placeCamera(cam);
+    for (let i = 0; i < 30; i++) pc.placeCamera(cam);
     const head = pc.pos.clone().addScaledVector(pc.pos.clone().normalize(), 1.65);
-    const v = cam.position.clone().sub(head);
-    const l = v.length();
-    const wall = town.raycast(head.x, head.y, head.z, v.x / l, v.y / l, v.z / l, 5);
+    const back = toward(26.2, 30);
+    const wall = town.raycast(head.x, head.y, head.z, back.x, back.y, back.z, 5);
     expect(wall, "the wall is close behind the head").toBeLessThan(1.2);
-    // The lens sits short of the wall along its line from the head, with room to spare.
-    expect(wall - l).toBeGreaterThan(0.15);
+    // Squeezed that close, the camera frames from the eyes instead (CLOSE_IN, #34): at the head, looking
+    // away from the wall, the lens out of it.
+    expect(pc.closeBlend).toBe(1);
+    expect(cam.position.distanceTo(head)).toBeLessThan(0.5);
+    expect(cam.getWorldDirection(new THREE.Vector3()).dot(back)).toBeLessThan(-0.5);
     expect(town.footing(cam.position.x, cam.position.y, cam.position.z, 0, { radius: 0.01, height: 0.01, step: 0 }).inside).toBe(false);
   });
 });

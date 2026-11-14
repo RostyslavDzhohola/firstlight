@@ -19,7 +19,8 @@ export function bindUi(game: Game): void {
   const controls = (s: UiSettings) => {
     game.input.sensitivity = BASE_SENSITIVITY * s.sensitivity;
     game.input.invertY = s.invertY;
-    game.combat.baseFov = s.fov;
+    game.combat.baseFov = s.view === "first" ? s.fovFirst : s.fov;
+    game.setView(s.view);
   };
   controls(uiSettings.get());
   uiSettings.onChange(controls);

@@ -72,6 +72,10 @@ interface PadState {
   sprinting: boolean;
   selectAt: number;
   selectTab: boolean;
+  /** A tapHold button held down: since when, and whether its hold already fired. */
+  holdAt: number;
+  holdBtn: number;
+  holdDone: boolean;
 }
 
 type Edge = { pad: PadLike; b: Btn; down: boolean };
@@ -131,7 +135,7 @@ export class GamepadSource {
 
   private stateOf(index: number): PadState {
     let st = this.state.get(index);
-    if (!st) this.state.set(index, (st = { source: `${SOURCE}:${index}`, index, prev: new Array<boolean>(17).fill(false), cur: new Array<boolean>(17).fill(false), mx: 0, my: 0, held: new Map(), sprinting: false, selectAt: 0, selectTab: false }));
+    if (!st) this.state.set(index, (st = { source: `${SOURCE}:${index}`, index, prev: new Array<boolean>(17).fill(false), cur: new Array<boolean>(17).fill(false), mx: 0, my: 0, held: new Map(), sprinting: false, selectAt: 0, selectTab: false, holdAt: 0, holdBtn: -1, holdDone: false }));
     return st;
   }
 
@@ -269,6 +273,11 @@ export class GamepadSource {
       st.selectTab = true;
       this.keyDown(st, "Tab", BTN.SELECT);
     }
+    if (st.holdAt && !st.holdDone && now - st.holdAt >= SELECT_HOLD_MS) {
+      st.holdDone = true;
+      const a = PAD_LAYOUT.get(st.holdBtn as Btn);
+      if (a?.kind === "tapHold") this.tap(st, a.hold);
+    }
   }
 
   private act(st: PadState, a: PadAction, b: Btn, down: boolean, now: number): void {
@@ -297,6 +306,17 @@ export class GamepadSource {
           if (st.selectTab) this.keyUpFrom(st, BTN.SELECT);
           else this.tap(st, "KeyM");
           st.selectTab = false;
+        }
+        return;
+      case "tapHold":
+        if (down) {
+          st.holdAt = now;
+          st.holdBtn = b;
+          st.holdDone = false;
+        } else if (st.holdAt && st.holdBtn === b) {
+          if (!st.holdDone) this.tap(st, a.tap);
+          st.holdAt = 0;
+          st.holdDone = false;
         }
         return;
       default:
@@ -343,6 +363,8 @@ export class GamepadSource {
     this.setSprint(st, false);
     st.selectAt = 0;
     st.selectTab = false;
+    st.holdAt = 0;
+    st.holdDone = false;
     input.setMove(st.source, 0, 0);
     if (cancel) input.cancelButtons(st.source);
     else input.setButtons(st.source, false, false);

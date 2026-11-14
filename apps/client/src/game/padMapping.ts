@@ -36,7 +36,9 @@ export type PadAction =
   /** Left stick click: sprint until the stick is let go (the key is held as Shift). */
   | { kind: "sprint" }
   /** Select: a tap opens the map (M), a hold peeks the players list (Tab held). */
-  | { kind: "select" };
+  | { kind: "select" }
+  /** A tap (let go before SELECT_HOLD_MS) sends `tap`; held that long, `hold` instead, once. */
+  | { kind: "tapHold"; tap: string; hold: string };
 
 /**
  * The final layout (D-controls-5). D-pad left/up/right/down cast the spellbar's four slots left to
@@ -59,7 +61,8 @@ export const PAD_LAYOUT: ReadonlyMap<Btn, PadAction> = new Map<Btn, PadAction>([
   [BTN.START, { kind: "key", code: "Escape" }],
   [BTN.SELECT, { kind: "select" }],
   [BTN.LS, { kind: "sprint" }],
-  [BTN.RS, { kind: "key", code: "KeyI" }],
+  // R3: a tap opens the inventory, a hold switches first / third person (V, D-view-fp-1).
+  [BTN.RS, { kind: "tapHold", tap: "KeyI", hold: "KeyV" }],
 ]);
 
 /** Triggers count as pressed past this (they are analog 0..1). */
@@ -184,6 +187,8 @@ export function padGlyph(cap: string, family: PadFamily): string | null {
     case "J":
     case "T":
       return f.START;
+    case "V":
+      return `${f.RS === "RS" ? "RS ●" : f.RS} hold`;
     default:
       return null;
   }
@@ -229,6 +234,8 @@ export function touchGlyph(cap: string): string | null {
       return "Spell";
     case "M":
       return "Map";
+    case "V":
+      return "View";
     case "ESC":
     case "ESCAPE":
     case "I":
@@ -248,7 +255,7 @@ export function padControls(family: PadFamily): { title: string; rows: [string, 
   return [
     { title: "Move", rows: [["LS", "Move (push lightly to walk)"], [f.RS === "RS" ? "RS" : "R-stick", "Look"], [f.A, "Jump"], [f.LS === "LS" ? "LS ●" : f.LS, "Sprint (click the stick)"], [f.B, "Dodge-roll"]] },
     { title: "Fight", rows: [[f.RT, "Attack"], [f.LT, "Aim · block · draw · charge"], [`${f.LB} · ${f.RB}`, "Previous · next weapon"], [f.X, "Reload (nothing to use nearby)"]] },
-    { title: "World", rows: [[f.X, "Interact · pick up · ride"], [f.Y, "Whistle a horse"], [f.SELECT, "Map"], [`${f.SELECT} hold`, "Players"], [f.RS === "RS" ? "RS ●" : f.RS, "Inventory"], [f.START, "Menu · journal · tutorial"]] },
+    { title: "World", rows: [[f.X, "Interact · pick up · ride"], [f.Y, "Whistle a horse"], [f.SELECT, "Map"], [`${f.SELECT} hold`, "Players"], [f.RS === "RS" ? "RS ●" : f.RS, "Inventory"], [`${f.RS === "RS" ? "RS ●" : f.RS} hold`, "First / third person"], [f.START, "Menu · journal · tutorial"]] },
     { title: "Spells", rows: [["D← · D↑ · D→ · D↓", "The spellbar, left to right"]] },
     { title: "Menus", rows: [["D-pad · LS", "Move the focus"], [f.A, "Choose"], [f.B, "Back"]] },
   ];

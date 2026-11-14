@@ -3,7 +3,7 @@
 // `window.__fl` doesn't exist. It reads game state for the journeys; it changes nothing in the game.
 //
 // window.__fl
-//   snapshot()            plain JSON: stage, body, player (position, heading, animation), zone (server flag,
+//   snapshot()            plain JSON: stage, body, player (position, heading, animation, first/third view), zone (server flag,
 //                         HUD label, local ring test), nearby NPCs (kind, hostile, distance, on screen, aim),
 //                         weapon and hotbar, the last server `denied`, pointer lock, onboarding step, open
 //                         menus/panels/overlays, portals, training dummies, the guide's missions and where
@@ -117,6 +117,10 @@ interface GameLike {
     swimming: boolean;
     frozen: boolean;
     mounted: boolean;
+    /** First / third person (game/view.ts): the choice, what the camera does now, and how far in it is. */
+    view?: string;
+    viewNow?: string;
+    viewBlend?: number;
     getStructures?(): RayCollider | null;
     getColliders?(): RayCollider | null;
     getNature?(): RayCollider | null;
@@ -778,6 +782,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         swimming: p.swimming,
         frozen: p.frozen,
         mounted: p.mounted,
+        view: p.view ?? null,
+        viewNow: p.viewNow ?? null,
+        viewBlend: p.viewBlend ?? null,
         name: me?.name ?? null,
         starter: me?.starter ?? null,
         hp: me?.hp ?? null,
