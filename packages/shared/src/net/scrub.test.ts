@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeThrown, SCRUB_INPUT, scrubReport, scrubStack, scrubText } from "./scrub.ts";
+import { CREDENTIAL_KEYS, describeThrown, SCRUB_INPUT, scrubReport, scrubStack, scrubText } from "./scrub.ts";
 
 describe("error report scrubbing (review 2026-11-13 ship #3)", () => {
   it("a URL keeps its origin and, for a script, its file and position; never its query, fragment, path token or credentials", () => {
@@ -64,6 +64,35 @@ describe("error report scrubbing (review 2026-11-13 ship #3)", () => {
     // A cut through the middle of an email leaves no part of it.
     const cut = `${"y".repeat(SCRUB_INPUT - 8)} alice@example.com`;
     expect(scrubText(cut)).not.toMatch(/ali|@/);
+  });
+
+  // Review round three, finding 5: any word ending in a sensitive suffix counted as a credential key,
+  // so diagnostic codes were erased.
+  it("redacts the listed credential keys only: diagnostic codes stay readable", () => {
+    expect(scrubText("HTTP status_code=INVALID_ARGUMENT")).toBe("HTTP status_code=INVALID_ARGUMENT");
+    expect(scrubText("shader code: WGSLValidationError")).toBe("shader code: WGSLValidationError");
+    expect(scrubText("error code: E_DEVICE_LOST, close code: 1006")).toBe("error code: E_DEVICE_LOST, close code: 1006");
+    expect(scrubText("Duplicate key: playerName")).toBe("Duplicate key: playerName");
+    // The listed keys, any case, with `_`, `-` or nothing between their words, `=` or `:`.
+    expect(scrubText("client_secret=s3cr3tvalue X-Api-Key: abcdef123 refresh-token=qwertyuiop otp: 123456 authorization: dXNlcjpwYXNz")).toBe(
+      "client_secret=[redacted] X-Api-Key: [redacted] refresh-token=[redacted] otp: [redacted] authorization: [redacted]",
+    );
+    expect(scrubText("SessionId=abcdefgh PASSWORD: hunter2hunter2 apikey=zzzzzzzz")).toBe("SessionId=[redacted] PASSWORD: [redacted] apikey=[redacted]");
+    expect(CREDENTIAL_KEYS).not.toContain("code");
+    expect(CREDENTIAL_KEYS).not.toContain("key");
+  });
+
+  // Review round three, nit 6: the URL's trailing "]" check scanned back for "[" once per bracket.
+  it("trims a URL's trailing brackets in linear time", () => {
+    const s = `https://x.test/a${"]".repeat(SCRUB_INPUT - 96)}`; // inside the input bound
+    let best = Infinity;
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now();
+      expect(scrubText(s)).toBe(`https://x.test/…${"]".repeat(SCRUB_INPUT - 96)}`);
+      best = Math.min(best, performance.now() - t0);
+    }
+    expect(best).toBeLessThan(2); // quadratic: about 5 ms
+    expect(scrubText("[https://x.test/a] and (https://x.test/b])")).toBe("[https://x.test/…] and (https://x.test/…])");
   });
 
   // Review round two, finding 4: the email rule was quadratic on a long run without "@" (16,000
