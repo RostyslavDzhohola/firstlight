@@ -6,6 +6,7 @@ import type { BodyId } from "@firstlight/shared";
 import { NET, PROTOCOL_VERSION, type InputMsg, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
 import { getPlayToken, invalidatePlayToken } from "./auth.ts";
+import { beacon } from "./beacon.ts";
 
 export interface Snapshot {
   t: number; // local receive time (ms)
@@ -120,7 +121,8 @@ export class Net {
       const res = await fetch(`${config.apiUrl}/api/play`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ body, v: PROTOCOL_VERSION, ...opts }),
+        // The funnel's visit token (net/beacon.ts), so the server can see this visit join a world (#85).
+        body: JSON.stringify({ body, v: PROTOCOL_VERSION, ...opts, visit: beacon().currentToken() ?? undefined }),
         signal: AbortSignal.timeout(20_000), // a server that never answers fails the arrival (retry/reconnect), not a spinner
       });
       if (res.status === 401 && !retried401) {

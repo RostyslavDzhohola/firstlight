@@ -20,9 +20,9 @@ import { funnelStep, installErrorReporting, markPlay } from "./net/beacon.ts";
 // Flat surfaces, or the old blurred look with ?blur=1 (D-ui-1): before anything else draws.
 applyUiLook(document.documentElement, location.search);
 
-// Our own funnel and error reports (#85, net/beacon.ts): uncaught errors, then "opened the page".
+// Our own funnel and error reports (#85, net/beacon.ts): the server issues this page's visit (and
+// records "opened the page" then), and uncaught errors are reported under it.
 installErrorReporting();
-funnelStep("page");
 if (innerWidth < 760) funnelStep("narrow", innerWidth); // a phone or a narrow window: how many get that far
 
 // Playwright journeys only (?e2e): window.__fl, a separate chunk that is never fetched otherwise.

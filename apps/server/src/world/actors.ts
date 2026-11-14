@@ -99,6 +99,8 @@ export interface PlayerActor {
   npcFx?: NpcMoveFx;
   /** In an admin sandbox (sandbox.ts, D-admin-3): a copy of the character in a private room; never saved. */
   sandbox?: Sandbox;
+  /** This join made the character (no saved one): the funnel's new-character cohort (world/funnel.ts). */
+  charCreated?: boolean;
   /** Moving into a sandbox (adminMode.ts): leaving out of a fight before then is a handoff, not a linger. */
   toSandboxUntil?: number;
   /**

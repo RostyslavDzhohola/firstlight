@@ -23,6 +23,8 @@ import { createPlayGate, playBodyRefusal } from "./world/playGate.ts";
 import type { VerifyContext } from "./auth/identity.ts";
 import { createGateway, mountAgentApi, type Gateway, type GatewayOptions } from "./agents/gateway.ts";
 import { mountMcp } from "./agents/mcpHttp.ts";
+import { mountFunnelIngest } from "./ops/funnel.ts";
+import { expectVisit } from "./world/funnel.ts";
 
 export interface GameOptions {
   port: number;
@@ -119,6 +121,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     next();
   });
 
+  // The funnel's page endpoints read their own small bodies, so they go before the JSON parser (D-ship-6).
+  mountFunnelIngest(app);
   opts.mountBeforeJson?.(app);
   app.use(express.json({ limit: "32kb" }));
 
@@ -279,6 +283,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
         opts.limits,
       );
       if (result.ok) pendingSeats.bind(claim, result.reservation.sessionId, result.reservation.roomId);
+      // The funnel (#85): the page's visit, so the room can record that this visit joined a world.
+      if (result.ok && !sandbox) expectVisit(result.reservation.sessionId, req.body.visit);
       else pendingSeats.release(claim);
       if (agent && !result.ok) releaseAgentSlot(identity.agentClaim);
       res.json(result);

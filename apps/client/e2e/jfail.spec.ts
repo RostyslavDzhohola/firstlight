@@ -202,25 +202,30 @@ test.describe("Jfail a stranger's worst moments", () => {
     expect(realErrors(consoleErrors), "no console errors").toEqual([]);
   });
 
-  test("Jfail.8 · the funnel: the page reports its first-time steps to our own server, once each", { tag: ["@Jfail", "@Jfail.8"] }, async ({ player, page }) => {
+  test("Jfail.8 · the funnel: the server issues the visit, the page reports its first-time steps under it, once each", { tag: ["@Jfail", "@Jfail.8"] }, async ({ player, page }) => {
     const posted: { visit: string; steps: { step: string; value?: number; detail?: string }[] }[] = [];
+    const visits: { auto?: boolean; prev?: string }[] = [];
     page.on("request", (r) => {
-      if (r.url().startsWith(`${API_ORIGIN}/api/funnel`) && r.method() === "POST") posted.push(JSON.parse(r.postData() ?? "{}"));
+      if (r.method() !== "POST") return;
+      if (r.url().startsWith(`${API_ORIGIN}/api/funnel`)) posted.push(JSON.parse(r.postData() ?? "{}"));
+      if (r.url().startsWith(`${API_ORIGIN}/api/visit`)) visits.push(JSON.parse(r.postData() ?? "{}"));
     });
     await player.playAsNewGuest({ starter: "Hexwick" });
     await player.waitInWorld(120_000, "portus");
-    await expect.poll(() => posted.flatMap((p) => p.steps.map((s) => s.step)), { timeout: 15_000, message: "page, play, pick and world reported" }).toEqual(expect.arrayContaining(["page", "play", "pick", "world"]));
+    await expect.poll(() => posted.flatMap((p) => p.steps.map((s) => s.step)), { timeout: 15_000, message: "play, pick and world reported" }).toEqual(expect.arrayContaining(["play", "pick", "world"]));
     const steps = posted.flatMap((p) => p.steps);
     const world = steps.find((s) => s.step === "world")!;
     expect(world.value, "seconds from Play to the world").toBeGreaterThan(0);
     expect(world.detail, "the renderer and tier picked").toMatch(player.gfx === "webgpu" ? /^webgpu\// : /^webgl2\//);
-    expect(new Set(posted.map((p) => p.visit)).size, "one visit id").toBe(1);
-    expect(steps.filter((s) => s.step === "page"), "each step once").toHaveLength(1);
-    // A reload is the same browser: nothing it already reported goes again.
+    expect(visits, "one visit asked for, as an automated (test) one").toEqual([{ auto: true }]);
+    expect(new Set(posted.map((p) => p.visit)).size, "one visit token").toBe(1);
+    expect(steps.filter((s) => s.step === "play"), "each step once").toHaveLength(1);
+    // A reload is the same browser: the same visit, and nothing it already reported goes again.
     const before = posted.length;
     await page.reload();
     await page.waitForFunction(() => !!(window as unknown as { __fl?: unknown }).__fl);
     await page.waitForTimeout(2500);
-    expect(posted.slice(before).flatMap((p) => p.steps.map((s) => s.step)), "nothing resent after a reload").not.toContain("page");
+    expect(visits, "no new visit after a reload").toHaveLength(1);
+    expect(posted.slice(before).flatMap((p) => p.steps.map((s) => s.step)), "nothing resent after a reload").not.toContain("play");
   });
 });
