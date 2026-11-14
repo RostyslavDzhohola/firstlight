@@ -607,9 +607,10 @@ export function weaponTierFor(level: number, roll: number): 1 | 2 | 3 {
   return roll < 0.4 ? 2 : 3;
 }
 
-/** The 16 weapon families that drop (everything but fists, radio, tonics, the whistle and hidden
- *  specials). Appended: the Ember Kunai drops like every other starter weapon. */
-export const DROP_WEAPONS = ["sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "grenade", "patchkit", "bubble", "kunai"] as const;
+/** The 19 weapon families that drop (everything but fists, radio, tonics, the whistle and hidden
+ *  specials). Appended: the Ember Kunai drops like every other starter weapon, then the three sculpted
+ *  families of 2026-11-13. */
+export const DROP_WEAPONS = ["sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "grenade", "patchkit", "bubble", "kunai", "boarspear", "crossbow", "lantern"] as const;
 
 export const PLANET_TONIC: Record<PlanetId, { id: string; chance: number }> = {
   arcadia: { id: "tonic_small", chance: 1 / 10 },
@@ -641,6 +642,8 @@ export interface CampChest {
   weapons: number;
   tonics: number;
   cosmetic?: { id: string; chance: number };
+  /** A rare find on top of the rest (a wild site's signature weapon), its tier by the site's level. */
+  rare?: { id: string; chance: number };
 }
 
 // ------------------------------------------------------------------------------------------ bosses

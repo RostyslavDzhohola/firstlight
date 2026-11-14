@@ -41,7 +41,9 @@ export const NET = {
 // 7: the 2026-11-13 run, shared by all of its lanes: the wild sites (D-world-1..3: nine sites whose
 // walls and steps the server blocks movement, shots and NPC sight at, which an older client neither
 // has nor draws, and `you.sites`), out-of-combat regeneration decided by the server, the relaxed
-// tutorial's steps, the tracked mission (`track`), and the residents' `speak` / `speech` messages.
+// tutorial's steps, the tracked mission (`track`), the residents' `speak` / `speech` messages, the moon
+// Lumen (D-sky-1..3: a fifth body id in travel, its own gravity the server validates jumps and falls
+// against, three creature kinds, mission L1) and three weapon families appended to the catalogue.
 export const PROTOCOL_VERSION = 7;
 
 // ---- HTTP: entering the world -------------------------------------------------------------

@@ -1,0 +1,130 @@
+# FIRSTLIGHT sculpted props: clip check for a held prop. Plays shipped clips on a shipped character with
+# the prop in the right-hand socket (as the client mounts it) and measures how deep the prop's vertices
+# go into capsules around the body under the clothes (chars3d/clip_check.py's BODY, minus the holding
+# arm). Measured in model space, reported in game metres (x the client's model scale, chars3d/render.py
+# SCALE). Run it on today's model too: a flag both share is a shared symptom of the mount and the clip
+# (not proof of its cause); a flag only the new model has is the model's.
+#
+#   blender -b --disable-autoexec --factory-startup --python-exit-code 1 --python prop_check.py -- \
+#       --char hexwick --prop emberglass [--dir <build dir> | --today] --clips idle,walk,cast --out <json>
+#
+# Our own code: MIT.
+
+import argparse
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "chars3d"))
+sys.path.insert(0, HERE)
+
+import bpy  # noqa: E402
+import numpy as np  # noqa: E402
+
+import bl  # noqa: E402
+import hold  # noqa: E402
+from clip_check import BODY, seg_dist  # noqa: E402
+from clips import Clips  # noqa: E402
+from render import SCALE  # noqa: E402
+
+F = np.float32
+HOLDING_ARM = {"upperarm_r", "forearm_r"}
+
+
+def surface_samples(o, step=0.015):
+    """Points over every triangle, no further apart than `step`. Vertices alone miss long faces:
+    today's procedural shafts are cylinders with vertices only at their two ends."""
+    me = o.data
+    me.calc_loop_triangles()
+    co = np.empty(len(me.vertices) * 3, F)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    tri = np.empty(len(me.loop_triangles) * 3, np.int32)
+    me.loop_triangles.foreach_get("vertices", tri)
+    A, Bv, Cv = (co[tri.reshape(-1, 3)[:, k]] for k in range(3))
+    L = np.maximum(np.maximum(np.linalg.norm(Bv - A, axis=1), np.linalg.norm(Cv - Bv, axis=1)),
+                   np.linalg.norm(A - Cv, axis=1))
+    n = np.ceil(L / step).astype(int)
+    out = [co]
+    for k in np.unique(n[n > 1]):
+        sel = n == k
+        ij = np.array([(i, j) for i in range(k + 1) for j in range(k + 1 - i)], F) / F(k)
+        u, v = ij[:, 0], ij[:, 1]
+        P = (A[sel, None, :] * (1 - u - v)[None, :, None] + Bv[sel, None, :] * u[None, :, None]
+             + Cv[sel, None, :] * v[None, :, None])
+        out.append(P.reshape(-1, 3))
+    return np.concatenate(out)
+
+
+def main():
+    argv = sys.argv[sys.argv.index("--") + 1:]
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--char", required=True)
+    ap.add_argument("--prop", required=True)
+    ap.add_argument("--dir", default="")
+    ap.add_argument("--today", action="store_true")
+    ap.add_argument("--chars", default="/tmp/fl-props/ref")
+    ap.add_argument("--clips", required=True)
+    ap.add_argument("--step", type=int, default=2)
+    ap.add_argument("--tol", type=float, default=0.02)
+    ap.add_argument("--rot", default="", help="x,y,z degrees: a further rotation in the socket (glTF axes, Euler XYZ)")
+    ap.add_argument("--gun", action="store_true", help="held like a gun (GUN_GRIP)")
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args(argv)
+    bl.reset()
+    clips = Clips(os.path.join(a.chars, "starters_anims.glb"))
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=os.path.join(a.chars, f"{a.char}.glb"))
+    new = set(bpy.data.objects) - before
+    arm = next(o for o in new if o.type == "ARMATURE")
+    for o in new:
+        if o.type == "MESH":  # only the skeleton matters here; skinning every frame is slow
+            bpy.data.objects.remove(o, do_unlink=True)
+    if a.today:
+        objs = hold.today_meshes("/tmp/fl-props/ref/today_weapons.json", a.prop)
+    else:
+        b0 = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=os.path.join(a.dir, f"{a.prop}.glb"))
+        objs = [o for o in set(bpy.data.objects) - b0 if o.type == "MESH"]
+    hold.hold(arm, objs, weapon_space_data=a.today, gun=a.gun, extra=hold.euler_gltf(a.rot) if a.rot else None)
+    local = [(o, surface_samples(o)) for o in objs]
+    mw = arm.matrix_world
+    s = SCALE.get(a.char, 1.0)
+    report = {"char": a.char, "prop": a.prop, "model": "today" if a.today else "new", "tol_m": a.tol, "rot": a.rot,
+              "model_scale": s, "clips": {}}
+    total = 0
+    for clip in a.clips.split(","):
+        f0, f1 = clips.frames(clip)
+        worst = {}
+        for f in range(f0, f1 + 1, a.step):
+            clips.pose([arm], clip, f)
+            W = np.concatenate([co @ np.array(o.matrix_world, F)[:3, :3].T + np.array(o.matrix_world, F)[:3, 3]
+                                for o, co in local])
+            for name, b0n, b1, r in BODY:
+                if name in HOLDING_ARM:
+                    continue
+                pa = np.array(mw @ arm.pose.bones[b0n].head, F)
+                if isinstance(b1, tuple):
+                    pb_ = arm.pose.bones[b1[0]]
+                    y = (mw.to_3x3() @ pb_.matrix.col[1].xyz).normalized()
+                    pb = pa + np.array(y, F) * F(b1[1])
+                else:
+                    pb = np.array(mw @ arm.pose.bones[b1].head, F)
+                d = float((r - seg_dist(W, pa, pb)).max()) * s
+                if d > worst.get(name, (-9, 0))[0]:
+                    worst[name] = (d, f)
+        flags = sorted(({"body": n, "depth_m": round(d, 3), "frame": f} for n, (d, f) in worst.items() if d > a.tol),
+                       key=lambda x: -x["depth_m"])
+        total += len(flags)
+        report["clips"][clip] = {"frames": f1 - f0 + 1, "flags": flags}
+        print("PROPCHECK", a.prop, report["model"], clip, "OK" if not flags else flags[:3], flush=True)
+    report["flags_total"] = total
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    with open(a.out, "w") as fh:
+        json.dump(report, fh, indent=1)
+    print("PROPCHECK DONE", a.prop, report["model"], total, "flags", flush=True)
+
+
+if __name__ == "__main__":
+    main()

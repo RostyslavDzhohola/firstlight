@@ -133,7 +133,7 @@ removes every coin (D), so prices are set for one life.
 | Large Tonic (potion) | 35 | +120 HP over 4 s; otherwise as above (new) |
 | Regeneration (no item, #77) | free | **1% of max HP a second** once you have neither taken nor dealt damage for **10 s** (the combat tag: `REGEN` in `progression.ts`); any hit or attack stops it. 0 to full: 100 s. Decided on the server; `pnpm balance` checks it never runs inside a creature fight (longest pause between a hostile's attacks 5.0 s, slowest starter swing 0.45 s). **Held for a whole boss fight and a whole defend attempt** (`REGEN.PAUSED_IN`, D-fixplay-2): their own pauses reach the delay (Tidewrath and the Receiver hold their attacks through an 8 s plate window: 10.4 s; the Hollow King's longest gap 9.0 s; H4's waves 23 s apart, T2's 25 s), so a boss's fighters (inside its arena, or hit it in the last few seconds) and a defend runner don't regenerate until 10 s after the encounter lets them go. The race (T1) and collect (T3) trials raise no encounter of their own: ordinary rule. `pnpm balance` lists every boss and trial and fails if one reaches the delay without being held |
 | Weapon T1 / T2 / T3 (standard families) | 60 / 300 / 900 | [r2-05] |
-| Stillshot Rifle, Comet Launcher T1 / T2 / T3 | 90 / 450 / 1,350 | ×1.5 heavy-weapon premium (new) |
+| Stillshot Rifle, Comet Launcher, Windlass Crossbow T1 / T2 / T3 | 90 / 450 / 1,350 | ×1.5 heavy-weapon premium (new; the crossbow 2026-11-13) |
 | Scrapburst Grenade T1 / T2 / T3 (each) | 15 / 40 / 90 | (new) |
 | Patchkit T1 / T2 / T3 (each) | 25 / 60 / 120 | (new) |
 | Prism Bubble T1 / T2 / T3 | 120 / 400 / 1,000 | (new) |
@@ -307,6 +307,15 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Ember Seal** (the kunai's alt; not an item) | I | 1 | **30** (24 under D-balance-3, restored by D-balance-7) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal; **no weak-point bonus (×1.0, an explosive, D-balance-8)** | heavy | – |
 | | II | 6 | **40** (32 under D-balance-3, restored); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
 | | III | 12 | **42** (was 52, D-balance-3, kept); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
+| **Winged Boarspear** short spear (melee; new 2026-11-13, sculpted) | I | 1 | 22 | 0.60 | 3.2 m | melee thrust: arc 40°, ≤ 2 targets (a line), windup 0.15 | none | knockback 1 m; RMB brace (block) 40% | light | 60 |
+| | II | 6 | 30 | 0.60 | 3.2 m | same | none | block 45% | light | 300 |
+| | III | 12 | 39 | 0.60 | 3.2 m | same | none | block 50% | light | 900 |
+| **Windlass Crossbow** heavy crossbow (ranged; new 2026-11-13, sculpted) | I | 1 | 50 body; head ×1.5 = 75 | 1.90 (reload) | 90 m | projectile 70 m/s, gravity 3 | mag 1, reload 1.9 s | RMB aim 2×; a burst family (§2.5, D-weapons-2): two bolts kill | light | 90 |
+| | II | 6 | 68 (head 102) | 1.80 | same | same | reload 1.8 s | | light | 450 |
+| | III | 12 | 84 (head 126) | 1.70 | same | same | reload 1.7 s | | light | 1,350 |
+| **Shepherd's Lantern** lantern staff (magic; new 2026-11-13, sculpted) | I | 1 | 17 | 0.55 | 30 m | projectile 22 m/s, straight (a slow drifting light) | heat 8 | pierces 2 (passes through a line of foes) | light | 60 |
+| | II | 6 | 23 | 0.55 | same | same | heat 9 | pierce 3 | light | 300 |
+| | III | 12 | 30 | 0.55 | same | same | heat 10 | pierce 4 | light | 900 |
 
 ### 2.4 Starter weapons (D)
 
@@ -624,12 +633,12 @@ Built places out in the wilds, three per planet, each with a level band, a guard
 | Bellwether Watch | Arcadia | watchtower (climb to the lookout, 6 m) | 2–3 | Linewyrm L3 | 2 Hopbit L2, 1 Sparkfly L3 | 25 · 0 · 1 | 15 |
 | Emberfall Keep | Arcadia | ruin | 4–5 | Pixel Lancer L5 | 1 Bomblet L4, 1 Hopbit L4, 1 Linewyrm L5 | 45 · 1 · 1 | 40 |
 | Skyhook Arch | Arcadia | landmark (24 m rock arch) | 6–7 | Cabinet Golem L7 | 2 Pixel Lancer L6, 2 Sparkfly L6, 1 Bomblet L7 | 80 · 1 · 2 · Voxel Visor 1/12 | 75 |
-| The Lantern Shrine | Hollowmere | shrine | 7–8 | Cantor L8 | 3 Bonewalker L7, 2 Marsh Wisp L7 | 70 · 0 · 1 | 95 |
+| The Lantern Shrine | Hollowmere | shrine | 7–8 | Cantor L8 | 3 Bonewalker L7, 2 Marsh Wisp L7 | 70 · 0 · 1 · rare: Shepherd's Lantern 1/6 | 95 |
 | The Sunken Barrow | Hollowmere | cave you walk into | 9–11 | Crypt Sentinel L11 | 3 Bonewalker L10, 2 Bone Archer L9 | 120 · 1 · 2 | 135 |
 | The Hollow Elm | Hollowmere | landmark (37 m dead tree) | 12–13 | Crypt Sentinel L13 | 1 Cantor L12, 2 Bone Archer L12, 3 Gnawer L12 | 200 · 1 · 2 · Crowbeak Mask 1/12 | 210 |
 | Relay Mast Four | Meridian | watchtower (climb to the deck, 6 m) | 13–14 | Enforcer L14 | 3 Associate L13, 1 Collector L13 | 150 · 1 · 1 | 235 |
 | The Foreclosed Depot | Meridian | ruin | 15–17 | Compliance Officer L17 | 2 Enforcer L16, 3 Associate L15, 1 Auditor L16 | 260 · 1 · 2 | 290 |
-| The Long Haul wreck | Meridian | landmark (40 m freighter hull) | 19–20 | Compliance Officer L20 | 2 Enforcer L19, 2 Auditor L19, 1 Collector L20 | 420 · 2 · 2 | 415 |
+| The Long Haul wreck | Meridian | landmark (40 m freighter hull) | 19–20 | Compliance Officer L20 | 2 Enforcer L19, 2 Auditor L19, 1 Collector L20 | 420 · 2 · 2 · rare: Windlass Crossbow 1/6 | 415 |
 
 **On the route (`pnpm balance`, review 2026-11-13 finding 3).** The balance model's route does each site
 once at its band's lower level: the discovery, one clear of the guardian and its pack (each kill at the
@@ -1219,6 +1228,7 @@ not a trademark search.
 | AI residents (2026-11-12, `tools/agent/residents.ts`) | Brindle_Oake, Tamsin_Hollis, Marlo_Thistle, Juniper_Fenn, Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_Reed, Wendell_Crane, Odessa_Larch, Ptolemy_Birch, Isla_Thornby | OK (ordinary given names with plant, bird and tree surnames; none shares a word with a name already in the game, which `apps/server/test/residents.test.ts` checks). Rejected: "Fennick Shaw" (one step from a Star Wars bounty hunter), "Odessa Quill" (a Marvel surname), "Juniper Vane" (too close to Juno Vale, the Portus keeper), anything with "Wren" (the example player name) |
 | Wild sites (2026-11-13, §3.7) | Bellwether Watch, Emberfall Keep, Skyhook Arch, the Lantern Shrine, the Sunken Barrow, the Hollow Elm, Relay Mast Four, the Foreclosed Depot, the Long Haul wreck | OK. Plain English words and compounds; "skyhook" and "long haul" are generic terms, not titles; none names a known game, film or franchise place. |
 | Lumen (lane sky, 2026-11-13) | Lumen, the Dustborn, Glimmerhop, Dustmoth, Cratermaw, Surveyor Odile, Moonfall Pad, the Hush, the Quietfall Wreck, The Thing in the Wreck | Original or ordinary words; "Lumen" is a common Latin word for light (also a unit of light), no franchise moon or character of that name known to us. Reasoned check only |
+| Weapons (2026-11-13, lane weapons) | Winged Boarspear, Windlass Crossbow, Shepherd's Lantern | OK: ordinary words for real tools (a boar spear has wings; a windlass spans a crossbow; a shepherd carries a lantern on a crook). Rejected "Mothlight" (an experimental film title) and "Thornreach" (too close to Thornwood). The looks avoid the red-tasselled opera spear, repeating and wrist crossbows, a crozier spiral and any soul-in-a-lantern or green ring-lantern (recipe headers in `tools/blender/props3d/items`). |
 
 ---
 

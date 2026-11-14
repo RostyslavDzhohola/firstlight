@@ -18,6 +18,7 @@ import { avatarMaterial, PALETTES, proxyMaterial, setAvatarPalette } from "./ava
 import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { hideBareBones } from "./bareBones.ts";
 import { weaponModel } from "./avatars/weapons.ts";
+import { SCULPTED_WEAPONS } from "./avatars/sculptedIds.ts";
 import { keptSamples } from "./warmup.ts";
 import { CUT_GONE, CUT_IDLE, rezActive, rezAdmits, rezBody, rezFxMesh, rezMode, rezPose, rezSwitch, returnRezLight, takeRezLight, type RezBody, type RezFx, type RezKind, type RezPose } from "./rez.ts";
 
@@ -1038,6 +1039,13 @@ export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3)
         v.attach("hand_l", weaponModel("stormcoil", palette));
         parts.push(v.root);
         return v;
+      });
+      // Every sculpted item is its own toon material (its own textures): the ones no sample holds
+      // go on the samples' backs, so none of them builds on first sight either (D-weapons-1).
+      const held = new Set<string>(WARMUP_ITEMS);
+      SCULPTED_WEAPONS.filter((id) => !held.has(id)).forEach((id, i) => {
+        const v = warmupViews[i % warmupViews.length];
+        if (v) v.attach(i < warmupViews.length ? "back" : "belt", weaponModel(id, i % PALETTES.length));
       });
       // Starter 0 → trim colour i: all six proxy + trim materials.
       for (let i = 0; i < PALETTES.length; i++) parts.push(capsule(i, 0));

@@ -42,6 +42,8 @@ Code is MIT (`LICENSE`), our own art CC BY 4.0 (`LICENSE-ART`).
   `tools/balance` the balance model (D-balance-1): `pnpm balance` prints weapon DPS, PvP and PvE
   time-to-kill, the XP/coin route and the starter checks from the real catalogues, and exits 1 when a
   number leaves its band (Vitest project `balance` runs the same checks).
+- `tools/blender/chars3d` (characters) and `tools/blender/props3d` (weapons, held props): models
+  sculpted in code. To make or change one, follow `.claude/skills/models-as-code/SKILL.md`.
 
 ## Commands
 

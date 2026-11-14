@@ -175,7 +175,7 @@ export function checks(): Check[] {
 }
 
 function classOf(f: Family): string {
-  return f === "kunai" ? "ranged" : ["sunbrand", "riverstaff", "axe", "hammer"].includes(f) ? "melee" : ["hexquill", "emberglass", "stormcoil"].includes(f) ? "magic" : "ranged";
+  return f === "kunai" ? "ranged" : ["sunbrand", "riverstaff", "axe", "hammer", "boarspear"].includes(f) ? "melee" : ["hexquill", "emberglass", "stormcoil", "lantern"].includes(f) ? "magic" : "ranged";
 }
 
 function planetOf(npcId: string): string {

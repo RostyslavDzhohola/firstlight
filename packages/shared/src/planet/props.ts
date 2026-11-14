@@ -35,7 +35,8 @@ const outpostAt: [number, number] = [0, 0];
  * v5: the planets' pad-0 outposts (D42): their apron, paths, structures and trees kept clear
  * (outpostGround.ts).
  * v6: round 2: the outposts' walls, gates, gate paths and new buildings kept clear too (D-b2-1).
- * v7: the wild sites (planet/wildSites.ts) keep a clearing round their footprints (D-world-2).
+ * v7: the wild sites (planet/wildSites.ts) keep a clearing round their footprints (D-world-2); Lumen's
+ * props and breakables, and the clearing round Arcadia's second portal (D-sky-3).
  */
 export const PROPS_VERSION = 7;
 

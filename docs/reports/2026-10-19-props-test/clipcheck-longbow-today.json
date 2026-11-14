@@ -1,0 +1,161 @@
+{
+ "char": "ninja",
+ "prop": "longbow",
+ "model": "today",
+ "tol_m": 0.02,
+ "model_scale": 0.96,
+ "clips": {
+  "idle": {
+   "frames": 76,
+   "flags": []
+  },
+  "walk": {
+   "frames": 41,
+   "flags": [
+    {
+     "body": "thigh_r",
+     "depth_m": 0.067,
+     "frame": 32
+    },
+    {
+     "body": "thigh_l",
+     "depth_m": 0.065,
+     "frame": 14
+    }
+   ]
+  },
+  "run": {
+   "frames": 29,
+   "flags": [
+    {
+     "body": "thigh_l",
+     "depth_m": 0.067,
+     "frame": 22
+    },
+    {
+     "body": "thigh_r",
+     "depth_m": 0.064,
+     "frame": 4
+    },
+    {
+     "body": "pelvis",
+     "depth_m": 0.031,
+     "frame": 8
+    }
+   ]
+  },
+  "sprint": {
+   "frames": 21,
+   "flags": [
+    {
+     "body": "thigh_l",
+     "depth_m": 0.067,
+     "frame": 16
+    },
+    {
+     "body": "thigh_r",
+     "depth_m": 0.063,
+     "frame": 6
+    },
+    {
+     "body": "pelvis",
+     "depth_m": 0.049,
+     "frame": 8
+    },
+    {
+     "body": "calf_l",
+     "depth_m": 0.029,
+     "frame": 12
+    }
+   ]
+  },
+  "jump": {
+   "frames": 41,
+   "flags": [
+    {
+     "body": "thigh_r",
+     "depth_m": 0.039,
+     "frame": 0
+    }
+   ]
+  },
+  "fall": {
+   "frames": 76,
+   "flags": []
+  },
+  "land": {
+   "frames": 39,
+   "flags": [
+    {
+     "body": "thigh_r",
+     "depth_m": 0.067,
+     "frame": 28
+    },
+    {
+     "body": "thigh_l",
+     "depth_m": 0.063,
+     "frame": 22
+    },
+    {
+     "body": "calf_r",
+     "depth_m": 0.045,
+     "frame": 12
+    },
+    {
+     "body": "calf_l",
+     "depth_m": 0.034,
+     "frame": 14
+    }
+   ]
+  },
+  "roll": {
+   "frames": 45,
+   "flags": [
+    {
+     "body": "calf_r",
+     "depth_m": 0.047,
+     "frame": 22
+    },
+    {
+     "body": "calf_l",
+     "depth_m": 0.044,
+     "frame": 18
+    },
+    {
+     "body": "pelvis",
+     "depth_m": 0.031,
+     "frame": 26
+    }
+   ]
+  },
+  "hit": {
+   "frames": 11,
+   "flags": [
+    {
+     "body": "thigh_l",
+     "depth_m": 0.063,
+     "frame": 2
+    },
+    {
+     "body": "thigh_r",
+     "depth_m": 0.062,
+     "frame": 6
+    },
+    {
+     "body": "pelvis",
+     "depth_m": 0.032,
+     "frame": 6
+    }
+   ]
+  },
+  "aim": {
+   "frames": 6,
+   "flags": []
+  },
+  "shoot": {
+   "frames": 20,
+   "flags": []
+  }
+ },
+ "flags_total": 20
+}
