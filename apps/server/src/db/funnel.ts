@@ -7,12 +7,23 @@
 //
 // Bounded by construction (D-ship-6): every write goes through a daily budget per side (visits,
 // accounts, errors) and a bounded queue that one timer flushes in a single transaction, off the room
-// tick and the request; raw rows are kept FUNNEL_LIMITS.retentionDays and then folded into
-// `funnel_day` aggregates. The raw tables therefore never hold more than the caps × retention.
+// tick and the request; raw rows are kept FUNNEL_LIMITS.retentionDays (longer than a visit lives) and
+// then folded into `funnel_day` aggregates: a visit's rows are deleted, an account's are kept and
+// marked `folded` (a character can come back any time; their number is bounded by accounts, and a
+// deleted account's go). The raw tables therefore never hold more than the caps × retention plus a
+// few rows per existing account.
 
+import { VISIT_TOKEN } from "../auth/visitToken.ts";
 import { stmt, type Db } from "./game-db.ts";
 
 const DAY = 86_400_000;
+
+/**
+ * The longest a visit can still take steps after its first row (review round two, #8): renewable for
+ * RENEW_MS after it began, each token live for TOKEN_TTL_MS, plus the minute of clock slack visitLive
+ * allows. Raw rows are kept at least this long, so a visit whose rows are folded can never act again.
+ */
+export const VISIT_LIFE_DAYS = Math.ceil((VISIT_TOKEN.RENEW_MS + VISIT_TOKEN.TOKEN_TTL_MS + 60_000) / DAY);
 
 export type FunnelKind = "person" | "test" | "agent";
 
@@ -69,21 +80,28 @@ export function pageStepAllowed(step: string): boolean {
 /**
  * The funnel's hard limits (D-ship-6). Per UTC day: visits issued, raw rows on each side, error
  * reports; past a cap the write is dropped (and /stats says the day was capped). Raw rows are kept
- * `retentionDays` (enough for the 7-day return check), error reports `errorRetentionDays`. The
- * queue holds at most `maxPending` writes between flushes. Worst case under a sustained flood the
- * raw table holds (visitRowsPerDay + accountRowsPerDay) × (retentionDays + 1) rows (~1.8 M, a few
- * hundred MB at most) and client_error errorsPerDay × errorRetentionDays; `funnel_day` grows by about
- * a hundred small rows a day. Mutable for tests.
+ * `retentionDays` (longer than a visit can act, VISIT_LIFE_DAYS), error reports `errorRetentionDays`.
+ * The queue holds at most `maxPending` writes between flushes. Worst case under a sustained flood the
+ * raw table holds visitRowsPerDay × (retentionDays + 1) visit rows (~1.3 M) plus the account rows,
+ * which stay while the account exists (at most one per account and step, ~10 per account), and
+ * client_error errorsPerDay × errorRetentionDays; `funnel_day` grows by about a hundred small rows a
+ * day. Mutable for tests.
  */
 export const FUNNEL_LIMITS = {
   visitsPerDay: 5_000,
   visitRowsPerDay: 40_000,
   accountRowsPerDay: 40_000,
   errorsPerDay: 1_000,
-  retentionDays: 21,
+  /** Longer than a visit lives (VISIT_LIFE_DAYS); rollupFunnel never uses less whatever this says. */
+  retentionDays: VISIT_LIFE_DAYS + 1,
   errorRetentionDays: 30,
   maxPending: 5_000,
   flushMs: 1_000,
+  /** Rows per write transaction, and the time one flush may hold the event loop before it yields. */
+  flushSlice: 200,
+  flushBudgetMs: 4,
+  /** Flush attempts a queued row gets (each failed one waits twice as long) before it is dropped. */
+  flushTries: 12,
 };
 
 export interface FunnelRow {
@@ -161,29 +179,42 @@ export function resetFunnelBudgets(db?: Db): void {
 }
 
 // ---- the write queue ----------------------------------------------------------------------------
+//
+// The room tick and the requests only queue (memory). One timer writes the queue in small
+// transactions (FUNNEL_LIMITS.flushSlice rows) on a connection told not to wait for a lock
+// (busy_timeout 0), and yields after flushBudgetMs: a locked or slow database makes it stop at once
+// and try again later (backoff doubling from flushMs), so the simulation never waits on funnel storage
+// for more than a slice (review round two, finding 5). A row that can't be written stays queued; after
+// flushTries attempts (about four minutes of backoff) it is dropped. Every retry and drop is counted (funnelQueueState, /stats), so an
+// accepted step is never lost without a trace (finding 7). Only close() writes with the normal lock
+// wait, everything that is left.
 
-type Pending =
+type Pending = (
   | { db: Db; kind: "step"; row: { subject: string; step: string; at: number; value: number | null; detail: string | null; kind: FunnelKind } }
-  | { db: Db; kind: "error"; row: Required<ClientErrorRow> };
+  | { db: Db; kind: "error"; row: Required<ClientErrorRow> }
+) & { tries: number };
 const pending: Pending[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
-let droppedWrites = 0;
+/** Writes refused because the queue was full (the caller was told), retried attempts, dropped rows. */
+const queueStats = { dropped: 0, retries: 0, lost: 0, lastError: "" };
+/** Consecutive failed flush attempts (the backoff). */
+let failures = 0;
 
-function schedule(): void {
+function schedule(ms = FUNNEL_LIMITS.flushMs): void {
   if (timer) return;
   timer = setTimeout(() => {
     timer = null;
     flushFunnel();
-  }, FUNNEL_LIMITS.flushMs);
+  }, ms);
   timer.unref?.();
 }
 
-function enqueue(p: Pending): boolean {
+function enqueue(p: Omit<Pending, "tries">): boolean {
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
-    droppedWrites++;
+    queueStats.dropped++;
     return false;
   }
-  pending.push(p);
+  pending.push({ ...p, tries: 0 } as Pending);
   schedule();
   return true;
 }
@@ -210,7 +241,7 @@ export function queueStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
   const row = normalise(r, now);
   if (pendingIndex(db, row.subject, row.step) >= 0) return true; // already on its way
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
-    droppedWrites++;
+    queueStats.dropped++;
     return false;
   }
   if (!takeBudget(db, row.subject.startsWith("v:") ? "visitRows" : "accountRows", now)) return false;
@@ -227,7 +258,7 @@ export function recordStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
 /** Queue a client error report (budgeted per day). */
 export function queueClientError(db: Db, e: ClientErrorRow, now = Date.now()): boolean {
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
-    droppedWrites++;
+    queueStats.dropped++;
     return false;
   }
   if (!takeBudget(db, "errors", now)) return false;
@@ -247,45 +278,132 @@ export function queueClientError(db: Db, e: ClientErrorRow, now = Date.now()): b
   });
 }
 
-/** Write what is queued (for one database, or all), each database in one transaction. Never throws. */
-export function flushFunnel(only?: Db): number {
+function writeRow(db: Db, p: Pending): number {
+  if (p.kind === "step") return stmt(db, INSERT_STEP).run(p.row.subject, p.row.step, p.row.at, p.row.value, p.row.detail, p.row.kind).changes;
+  return stmt(db, INSERT_ERROR).run(p.row.at, p.row.sig, p.row.message, p.row.stack, p.row.build, p.row.tier, p.row.backend, p.row.kind).changes;
+}
+
+/** A lock held by another connection (or this one's open transaction): try again later, nothing is wrong with the rows. */
+const locked = (err: unknown) => /^SQLITE_(BUSY|LOCKED)/.test(String((err as { code?: unknown }).code ?? ""));
+
+/** Rows that can't be written any more: counted as lost (with the reason) and logged. */
+function drop(rows: Pending[], err: unknown, gone: Set<Pending>): void {
+  if (!rows.length) return;
+  queueStats.lastError = String((err as Error)?.message ?? err).slice(0, 120);
+  queueStats.lost += rows.length;
+  for (const p of rows) gone.add(p);
+  console.warn(`funnel: ${rows.length} queued write(s) dropped: ${queueStats.lastError}`);
+}
+
+/** One failed attempt for `rows`: each spends a try; out of tries it is dropped, else it waits (a retry). */
+function attemptFailed(rows: Pending[], err: unknown, gone: Set<Pending>): void {
+  queueStats.lastError = String((err as Error)?.message ?? err).slice(0, 120);
+  const out: Pending[] = [];
+  for (const p of rows) if (++p.tries >= FUNNEL_LIMITS.flushTries) out.push(p);
+  if (out.length < rows.length) queueStats.retries++;
+  drop(out, err, gone);
+}
+
+/** Take `gone` out of the queue in one pass. */
+function forget(gone: Set<Pending>): void {
+  if (!gone.size) return;
+  const keep = pending.filter((p) => !gone.has(p));
+  pending.length = 0;
+  pending.push(...keep);
+}
+
+/**
+ * Write what is queued (for one database, or all) in slices of FUNNEL_LIMITS.flushSlice rows, each
+ * its own transaction, without waiting for a lock: a lock stops the attempt at once (every waiting
+ * row of that database spends one of its flushTries and the next attempt backs off), and after
+ * flushBudgetMs it stops and goes on after the event loop had its turn. `final` (shutdown): wait for
+ * locks as usual and write everything; what still fails is counted as lost. Never throws. Returns
+ * the rows written.
+ */
+export function flushFunnel(only?: Db, opts: { final?: boolean } = {}): number {
   if (!only && timer) {
     clearTimeout(timer);
     timer = null;
   }
-  if (!pending.length) return 0;
-  const take = only ? pending.filter((p) => p.db === only) : pending.slice();
-  if (!take.length) return 0;
-  const left = only ? pending.filter((p) => p.db !== only) : [];
-  pending.length = 0;
-  pending.push(...left);
-  const byDb = new Map<Db, Pending[]>();
-  for (const p of take) {
-    let list = byDb.get(p.db);
-    if (!list) byDb.set(p.db, (list = []));
-    list.push(p);
+  if (!pending.length) {
+    failures = 0;
+    return 0;
   }
+  const final = !!opts.final;
+  const started = performance.now();
+  const gone = new Set<Pending>();
   let written = 0;
-  for (const [db, list] of byDb) {
-    if (!db.open) continue;
-    try {
-      db.transaction(() => {
-        for (const p of list) {
-          if (p.kind === "step") written += stmt(db, INSERT_STEP).run(p.row.subject, p.row.step, p.row.at, p.row.value, p.row.detail, p.row.kind).changes;
-          else written += stmt(db, INSERT_ERROR).run(p.row.at, p.row.sig, p.row.message, p.row.stack, p.row.build, p.row.tier, p.row.backend, p.row.kind).changes;
-        }
-      })();
-    } catch (err) {
-      console.warn(`funnel: ${list.length} queued write(s) lost: ${(err as Error).message}`);
+  let stalled = false;
+  let outOfTime = false;
+  const dbs = only ? [only] : [...new Set(pending.map((p) => p.db))];
+  for (const db of dbs) {
+    const mine = pending.filter((p) => p.db === db);
+    if (!mine.length) continue;
+    if (!db.open) {
+      drop(mine, new Error("database closed"), gone);
+      continue;
     }
+    const wait = final ? null : (db.pragma("busy_timeout", { simple: true }) as number);
+    if (wait !== null) db.pragma("busy_timeout = 0");
+    try {
+      for (let i = 0; i < mine.length; i += FUNNEL_LIMITS.flushSlice) {
+        // At least one slice per attempt, however slow the machine is; then the time budget.
+        if (!final && written + gone.size > 0 && performance.now() - started >= FUNNEL_LIMITS.flushBudgetMs) {
+          outOfTime = true;
+          break;
+        }
+        const part = mine.slice(i, i + FUNNEL_LIMITS.flushSlice);
+        try {
+          let n = 0;
+          db.transaction(() => {
+            for (const p of part) n += writeRow(db, p);
+          })();
+          written += n;
+          for (const p of part) gone.add(p);
+        } catch (err) {
+          if (!final && locked(err)) {
+            attemptFailed(mine.slice(i), err, gone);
+            stalled = true;
+            break; // this database is busy: the rest waits for the next attempt
+          }
+          // Not a lock (or shutdown): write row by row; a row that fails spends a try.
+          for (const p of part) {
+            try {
+              written += writeRow(db, p);
+              gone.add(p);
+            } catch (e) {
+              if (final) drop([p], e, gone);
+              else attemptFailed([p], e, gone);
+            }
+          }
+          if (!final && part.some((p) => !gone.has(p))) stalled = true;
+        }
+      }
+    } finally {
+      if (wait !== null && db.open) db.pragma(`busy_timeout = ${wait}`);
+    }
+    if (outOfTime) break;
   }
-  if (pending.length) schedule();
+  forget(gone);
+  if (final) {
+    // Shutdown: whatever is left for these databases can't be written any more.
+    const lost = new Set<Pending>();
+    drop(pending.filter((p) => dbs.includes(p.db)), new Error(queueStats.lastError || "not written at shutdown"), lost);
+    forget(lost);
+    return written;
+  }
+  failures = stalled ? failures + 1 : 0;
+  if (pending.length) schedule(stalled ? Math.min(FUNNEL_LIMITS.flushMs * 2 ** (failures - 1), 30_000) : outOfTime ? 0 : FUNNEL_LIMITS.flushMs);
   return written;
 }
 
-/** Writes waiting for the next flush, and writes dropped because the queue was full (since start). */
-export function funnelQueueState(): { pending: number; dropped: number } {
-  return { pending: pending.length, dropped: droppedWrites };
+/**
+ * The queue since start: writes waiting, refused because the queue was full (the caller knew),
+ * flush attempts that found the database locked or failing and kept their rows (retries), and
+ * accepted rows dropped after FUNNEL_LIMITS.flushTries attempts (lost), with the last error.
+ */
+export function funnelQueueState(): { pending: number; dropped: number; retries: number; lost: number; lastError: string } {
+  return { pending: pending.length, ...queueStats };
 }
 
 function pendingIndex(db: Db, subject: string, step: string): number {
@@ -322,9 +440,16 @@ export const visitSubject = (visitId: string) => `v:${visitId}`;
  * the account already has a step, the account's earlier row stays. Queued rows are written first.
  */
 export function moveFunnel(db: Db, fromUserId: string, toUserId: string): void {
-  flushFunnel(db);
   const from = accountSubject(fromUserId);
   const to = accountSubject(toUserId);
+  // Queued rows move in memory (no flush: the queue never waits for a lock); a step the account
+  // already has keeps its row (INSERT OR IGNORE, and the duplicate in the queue goes).
+  for (let i = pending.length - 1; i >= 0; i--) {
+    const p = pending[i]!;
+    if (p.db !== db || p.kind !== "step" || p.row.subject !== from) continue;
+    if (pendingIndex(db, to, p.row.step) >= 0) pending.splice(i, 1);
+    else p.row.subject = to;
+  }
   stmt(db, "UPDATE OR IGNORE funnel_step SET subject = ? WHERE subject = ?").run(to, from);
   stmt(db, "DELETE FROM funnel_step WHERE subject = ?").run(from);
 }
@@ -333,6 +458,14 @@ export function moveFunnel(db: Db, fromUserId: string, toUserId: string): void {
 
 /** The effective kind on read: an account our tools flagged after its rows were written is a test one. */
 const KIND_SQL = `CASE WHEN f.subject LIKE 'u:%' AND EXISTS (SELECT 1 FROM test_account t WHERE t.user_id = substr(f.subject, 3)) THEN 'test' ELSE f.kind END`;
+
+const hasFoldedColumn = new WeakMap<Db, boolean>();
+/** `f.folded`, or 0 on a game.db from before migration 13 (`pnpm metrics --funnel-db` opens old copies read-only). */
+function foldedSql(db: Db): string {
+  let has = hasFoldedColumn.get(db);
+  if (has === undefined) hasFoldedColumn.set(db, (has = !!db.prepare("SELECT 1 FROM pragma_table_info('funnel_step') WHERE name = 'folded'").get()));
+  return has ? "f.folded" : "0";
+}
 
 export interface FunnelStepCount {
   step: string;
@@ -388,16 +521,18 @@ const PAIR_IDS = ["gets_in", "gets_in_page", "tutorial", "mission", "level5", "b
  */
 export function funnelReport(db: Db, since = 0, now = Date.now(), until = Number.MAX_SAFE_INTEGER): FunnelReport {
   flushFunnel(db); // queued rows count too
+  // Subjects whose cohort day was folded (funnel_day holds them) are left out, whatever they did since.
   const rows = stmt(
     db,
-    `WITH f AS (SELECT subject, step, at, value, detail, ${KIND_SQL} AS kind FROM funnel_step f),
-          cohort AS (SELECT subject FROM f GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MIN(kind = 'person') = 1)
+    `WITH f AS (SELECT subject, step, at, value, detail, ${KIND_SQL} AS kind, ${foldedSql(db)} AS folded FROM funnel_step f),
+          cohort AS (SELECT subject FROM f GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MIN(kind = 'person') = 1 AND MAX(folded) = 0)
      SELECT f.subject, f.step, f.at, f.value, f.detail FROM f JOIN cohort USING (subject)`,
   ).all(since, until) as { subject: string; step: string; at: number; value: number | null; detail: string | null }[];
   const apartRows = stmt(
     db,
-    `WITH f AS (SELECT subject, at, ${KIND_SQL} AS kind FROM funnel_step f)
-     SELECT kind, COUNT(DISTINCT subject) AS n FROM f WHERE at >= ? AND at < ? AND kind != 'person' GROUP BY kind`,
+    `WITH f AS (SELECT subject, at, ${KIND_SQL} AS kind, ${foldedSql(db)} AS folded FROM funnel_step f),
+          live AS (SELECT subject FROM f GROUP BY subject HAVING MAX(folded) = 0)
+     SELECT kind, COUNT(DISTINCT subject) AS n FROM f JOIN live USING (subject) WHERE at >= ? AND at < ? AND kind != 'person' GROUP BY kind`,
   ).all(since, until) as { kind: string; n: number }[];
   const out: FunnelReport = {
     since,
@@ -486,14 +621,21 @@ export function funnelReport(db: Db, since = 0, now = Date.now(), until = Number
 const dayKey = (day: number) => new Date(day * DAY).toISOString().slice(0, 10);
 
 /**
- * Fold every cohort day older than the retention into `funnel_day` and delete its raw rows (daily
- * housekeeping). A subject belongs to the day of its first row; its later rows go with it.
+ * Fold every cohort day older than the retention into `funnel_day` (daily housekeeping). A subject
+ * belongs to the day of its first row; its later rows go with it. A subject that can still act is
+ * never forgotten (review round two, #8), by construction: raw rows are kept longer than a visit can
+ * take steps (VISIT_LIFE_DAYS, whatever FUNNEL_LIMITS says), so a folded visit's rows are deleted;
+ * an account can come back any time, so a folded account's rows stay, marked `folded` (its first
+ * join and steps stay known, and reports leave it out: its day is in funnel_day). Their number is
+ * bounded by accounts: when an account is deleted (guest pruning) its rows go here too.
  */
 export function rollupFunnel(db: Db, now = Date.now()): number {
   flushFunnel(db);
-  const cutoff = Math.floor(now / DAY) * DAY - FUNNEL_LIMITS.retentionDays * DAY;
-  const days = (stmt(db, "SELECT DISTINCT first / 86400000 AS d FROM (SELECT MIN(at) AS first FROM funnel_step GROUP BY subject) WHERE first < ? ORDER BY d").all(cutoff) as { d: number }[]).map((r) => Math.floor(r.d));
+  const keepDays = Math.max(FUNNEL_LIMITS.retentionDays, VISIT_LIFE_DAYS);
+  const cutoff = Math.floor(now / DAY) * DAY - keepDays * DAY;
+  const days = (stmt(db, "SELECT DISTINCT first / 86400000 AS d FROM (SELECT MIN(at) AS first FROM funnel_step GROUP BY subject HAVING MAX(folded) = 0) WHERE first < ? ORDER BY d").all(cutoff) as { d: number }[]).map((r) => Math.floor(r.d));
   const put = stmt(db, "INSERT INTO funnel_day (day, metric, num, den, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT (day, metric) DO UPDATE SET num = num + excluded.num, den = den + excluded.den, value = COALESCE(excluded.value, value)");
+  const cohort = "SELECT subject FROM funnel_step GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MAX(folded) = 0";
   for (const d of days) {
     const since = d * DAY;
     const r = funnelReport(db, since, now, since + DAY);
@@ -507,9 +649,12 @@ export function rollupFunnel(db: Db, now = Date.now()): number {
       if (r.firstSessionN) put.run(key, "median:first_session", r.firstSessionN, 0, r.medianFirstSessionMs);
       if (r.apart.test) put.run(key, "apart:test", r.apart.test, 0, null);
       if (r.apart.agent) put.run(key, "apart:agent", r.apart.agent, 0, null);
-      stmt(db, "DELETE FROM funnel_step WHERE subject IN (SELECT subject FROM funnel_step GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ?)").run(since, since + DAY);
+      stmt(db, `DELETE FROM funnel_step WHERE subject LIKE 'v:%' AND subject IN (${cohort})`).run(since, since + DAY);
+      stmt(db, `UPDATE funnel_step SET folded = 1 WHERE subject LIKE 'u:%' AND subject IN (${cohort})`).run(since, since + DAY);
     })();
   }
+  // A folded account that no longer exists can't come back: its rows go.
+  stmt(db, "DELETE FROM funnel_step WHERE subject IN (SELECT DISTINCT subject FROM funnel_step f WHERE f.folded = 1 AND f.subject LIKE 'u:%' AND NOT EXISTS (SELECT 1 FROM account a WHERE a.user_id = substr(f.subject, 3)))").run();
   return days.length;
 }
 

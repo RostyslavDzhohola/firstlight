@@ -9,7 +9,8 @@
 // without storage still makes only one. Each step is sent until the server acknowledges it: steps
 // wait in a small pending list (kept in storage across pages), are marked sent only when the answer
 // names them, and a failed or rate-limited post is retried a few times with a backoff; whatever is
-// left goes on the next page. Error reports are scrubbed here before sending (shared/net/scrub.ts)
+// left goes on the next page. Sent and pending steps belong to one visit id: a new visit starts with
+// nothing sent, and a step an old visit left pending never goes out under another visit's token. Error reports are scrubbed here before sending (shared/net/scrub.ts)
 // and once per kind per page session.
 //
 // Off without a server (`?offline`, `?bench`), with Do Not Track or Global Privacy Control, and when
@@ -36,8 +37,11 @@ export interface BeaconEnv {
 }
 
 const VISIT_KEY = "fl.visit.v2";
-const SENT_KEY = "fl.funnel.v2";
-const PENDING_KEY = "fl.funnel.pending";
+/** {visit, sent, pending}: what the server acknowledged and what waits, for one visit id (review round two #9). */
+const STATE_KEY = "fl.funnel.v3";
+/** Earlier versions' browser-wide keys: their pending steps are adopted by the next visit, then they go. */
+const OLD_SENT_KEY = "fl.funnel.v2";
+const OLD_PENDING_KEY = "fl.funnel.pending";
 /** Kinds of errors one page session reports at most. */
 export const MAX_ERROR_KINDS = 8;
 /** Steps waiting for an acknowledgement at most (more are dropped). */
@@ -58,14 +62,24 @@ interface Token {
   exp: number;
 }
 
+/** A step waiting for an acknowledgement, and the visit it belongs to (none yet: this page's visit, once known). */
+interface Pend extends Step {
+  v?: string;
+}
+
+/** The visit's id inside a server token (`v1.<id>.…`); the whole token for anything else. */
+const visitIdOf = (token: string) => token.split(".")[1] || token;
+
 export class Beacon {
   private token: Token | null = null;
   /** The last token this browser had (for renewing it). */
   private prev: string | null = null;
   private asking: Promise<string | null> | null = null;
   private off = false;
-  private pending: Step[] | null = null;
-  private sent: Set<string> | null = null;
+  /** Sent and pending steps, kept for one visit id (`visit`): a new visit starts with nothing sent. */
+  private state: { visit: string | null; sent: Set<string>; pending: Pend[] } | null = null;
+  /** This page's visit id, once a live token says which. */
+  private pageVisit: string | null = null;
   private timer = false;
   private flushing: Promise<void> | null = null;
   private retries = 0;
@@ -96,13 +110,16 @@ export class Beacon {
   start(): void {
     if (!this.env.enabled) return;
     void this.visit();
-    if (this.pendingList().length) this.schedule(0);
+    if (this.st().pending.length) this.schedule(0);
   }
 
   /** The visit token if this page has a live one (memory, then storage), without asking the server. */
   currentToken(): string | null {
     if (!this.env.enabled) return null;
-    if (this.token && this.token.exp > this.env.now()) return this.token.token;
+    if (this.token && this.token.exp > this.env.now()) {
+      this.learn(this.token.token);
+      return this.token.token;
+    }
     let t: Token | null = null;
     try {
       const v: unknown = JSON.parse(this.read(VISIT_KEY) ?? "null");
@@ -113,6 +130,7 @@ export class Beacon {
     if (t) this.prev ??= t.token;
     if (t && t.exp > this.env.now()) {
       this.token = t;
+      this.learn(t.token);
       return t.token;
     }
     return null;
@@ -133,6 +151,7 @@ export class Beacon {
         this.token = { token: j.visit, exp: typeof j.exp === "number" ? j.exp : this.env.now() + 3_600_000 };
         this.prev = j.visit;
         this.write(VISIT_KEY, JSON.stringify(this.token));
+        this.learn(j.visit);
         return j.visit;
       } finally {
         this.asking = null;
@@ -147,46 +166,87 @@ export class Beacon {
     this.write(VISIT_KEY, "null");
   }
 
-  private sentSet(): Set<string> {
-    if (this.sent) return this.sent;
-    let list: unknown = [];
-    try {
-      list = JSON.parse(this.read(SENT_KEY) ?? "[]");
-    } catch {
-      /* corrupt */
+  /** The stored state (once per page), adopting what an earlier version left pending. */
+  private st(): { visit: string | null; sent: Set<string>; pending: Pend[] } {
+    if (this.state) return this.state;
+    const parse = (key: string): unknown => {
+      try {
+        return JSON.parse(this.read(key) ?? "null");
+      } catch {
+        return null; // corrupt
+      }
+    };
+    const steps = (list: unknown): Pend[] =>
+      (Array.isArray(list) ? list : []).filter((x): x is Pend => !!x && typeof x === "object" && typeof (x as Pend).step === "string" && ((x as Pend).v === undefined || typeof (x as Pend).v === "string")).slice(0, MAX_PENDING);
+    const raw = parse(STATE_KEY) as { visit?: unknown; sent?: unknown; pending?: unknown } | null;
+    if (raw && typeof raw === "object") {
+      this.state = {
+        visit: typeof raw.visit === "string" ? raw.visit : null,
+        sent: new Set(Array.isArray(raw.sent) ? raw.sent.filter((x): x is string => typeof x === "string") : []),
+        pending: steps(raw.pending),
+      };
+    } else {
+      // An earlier version's browser-wide lists: their pending steps go to this page's visit (the
+      // server ignores a step a visit already has); their sent list belonged to no visit in particular.
+      this.state = { visit: null, sent: new Set(), pending: steps(parse(OLD_PENDING_KEY)).map(({ v: _v, ...x }) => x) };
+      try {
+        this.env.store?.removeItem(OLD_SENT_KEY);
+        this.env.store?.removeItem(OLD_PENDING_KEY);
+      } catch {
+        /* storage unavailable */
+      }
     }
-    this.sent = new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : []);
-    return this.sent;
-  }
-
-  private pendingList(): Step[] {
-    if (this.pending) return this.pending;
-    let list: unknown = [];
-    try {
-      list = JSON.parse(this.read(PENDING_KEY) ?? "[]");
-    } catch {
-      /* corrupt */
-    }
-    this.pending = (Array.isArray(list) ? list : []).filter((s): s is Step => !!s && typeof s === "object" && typeof (s as Step).step === "string").slice(0, MAX_PENDING);
-    return this.pending;
+    return this.state;
   }
 
   private save(): void {
-    this.write(SENT_KEY, JSON.stringify([...this.sentSet()]));
-    this.write(PENDING_KEY, JSON.stringify(this.pendingList()));
+    const s = this.st();
+    this.write(STATE_KEY, JSON.stringify({ visit: s.visit, sent: [...s.sent], pending: s.pending }));
   }
 
-  /** Has the server acknowledged `step` for this browser? */
+  /**
+   * This page's visit is `token`'s. Another visit than the stored one starts with nothing sent, and
+   * steps an old visit left pending are dropped (only that visit's token could carry them; the server
+   * renews a visit while it can, so they are weeks old). Steps made before the page knew its visit
+   * are this visit's.
+   */
+  private learn(token: string): void {
+    const id = visitIdOf(token);
+    if (this.pageVisit === id) return;
+    this.pageVisit = id;
+    const s = this.st();
+    if (s.visit !== id) {
+      s.visit = id;
+      s.sent = new Set();
+    }
+    const seen = new Set<string>();
+    s.pending = s.pending
+      .filter((p) => (!p.v || p.v === id) && !s.sent.has(p.step) && !seen.has(p.step) && (seen.add(p.step), true))
+      .map((p) => (p.v ? p : { ...p, v: id }));
+    this.save();
+  }
+
+  /** Steps waiting for this page's visit (all of them while it isn't known yet). */
+  private mine(): Pend[] {
+    const v = this.pageVisit;
+    return this.st().pending.filter((p) => !v || !p.v || p.v === v);
+  }
+
+  /** Has the server acknowledged `step` for this page's visit? */
   has(step: string): boolean {
-    return this.sentSet().has(step);
+    if (this.env.enabled) this.currentToken();
+    const s = this.st();
+    return this.pageVisit !== null && s.visit === this.pageVisit && s.sent.has(step);
   }
 
   /** Report a first-time step (later calls for the same step are dropped). */
   step(step: string, value?: number, detail?: string): void {
     if (!this.env.enabled) return;
-    const pending = this.pendingList();
-    if (this.sentSet().has(step) || pending.some((s) => s.step === step) || pending.length >= MAX_PENDING) return;
-    pending.push({ step, ...(value !== undefined && Number.isFinite(value) ? { value: Math.round(value * 10) / 10 } : {}), ...(detail ? { detail } : {}) });
+    this.currentToken(); // a live token names this page's visit
+    const s = this.st();
+    const v = this.pageVisit;
+    if ((v && s.visit === v && s.sent.has(step)) || this.mine().some((p) => p.step === step) || s.pending.length >= MAX_PENDING) return;
+    s.pending.push({ step, ...(value !== undefined && Number.isFinite(value) ? { value: Math.round(value * 10) / 10 } : {}), ...(detail ? { detail } : {}), ...(v ? { v } : {}) });
     this.save();
     this.schedule(FLUSH_MS);
   }
@@ -213,33 +273,38 @@ export class Beacon {
     const token = await this.visit();
     if (!token) return this.retry();
     await this.sendErrors(token);
-    const pending = this.pendingList();
-    if (!pending.length) return;
-    const steps = pending.slice(0, 16);
+    const id = visitIdOf(token);
+    const st = this.st();
+    // Only this visit's steps go with its token (learn() tagged the untagged ones).
+    const batch = st.pending.filter((p) => p.v === id).slice(0, 16);
+    if (!batch.length) return;
+    const steps = batch.map(({ v: _v, ...x }) => x);
     const r = await this.env.post(`${this.env.apiUrl}/api/funnel`, JSON.stringify({ visit: token, steps })).catch(() => null);
     if (r?.status === 401) {
       this.dropToken();
       return this.retry();
     }
+    const now = this.st();
     if (r?.status === 400) {
       // A body the server can't read won't read better later.
-      this.pending = pending.filter((s) => !steps.includes(s));
+      now.pending = now.pending.filter((p) => !batch.includes(p));
       this.save();
       return;
     }
     if (r?.status !== 200) return this.retry();
     const j = r.json as { done?: unknown; full?: unknown } | null;
     const done = new Set(Array.isArray(j?.done) ? j.done.filter((x): x is string => typeof x === "string") : []);
-    for (const s of steps) if (done.has(s.step)) this.sentSet().add(s.step);
-    this.pending = pending.filter((s) => !done.has(s.step));
+    // Acknowledged for this visit: sent, if the stored state is still this visit's.
+    if (now.visit === id) for (const p of batch) if (done.has(p.step)) now.sent.add(p.step);
+    now.pending = now.pending.filter((p) => !(batch.includes(p) && done.has(p.step)));
     this.save();
     this.retries = 0;
     if (j?.full === true) return; // today's budget is spent: the rest waits for a later page
-    if (this.pending.length && this.pending.some((s) => !steps.includes(s))) this.schedule(0);
+    if (now.pending.some((p) => p.v === id && !batch.includes(p))) this.schedule(0);
   }
 
   private retry(): void {
-    if (this.retries >= MAX_RETRIES || (!this.pendingList().length && !this.errors.length)) return;
+    if (this.retries >= MAX_RETRIES || (!this.st().pending.length && !this.errors.length)) return;
     const wait = RETRY_MS * 2 ** this.retries++;
     this.schedule(Math.min(wait, 60_000));
   }

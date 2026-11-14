@@ -22,7 +22,7 @@ import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
 import { flushFunnel, pruneClientErrors, rollupFunnel } from "../db/funnel.ts";
 import { stmt } from "../db/game-db.ts";
 import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
-import { hmacHex, safeEqual } from "./crypto.ts";
+import { hmacHex, safeEqual, strongSecret } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
 import { banKey, CLIENT_IP_HEADER, localDevRequest, normalizeIp, proxiedRequestIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
@@ -56,8 +56,10 @@ export interface AccountsConfig {
   rateLimit?: boolean;
   /** Print dev OTP codes to the console (only when the dev outbox is in use). */
   devMailLog?: boolean;
-  /** #84: mount GET /api/account/dev-code (DEV_SIGNIN_CODES=1). Needs the dev outbox, never in production, loopback callers only. */
+  /** #84: mount GET /api/account/dev-code (DEV_SIGNIN_CODES=1). Needs the dev outbox and devCodeKey, never in production. */
   devCodeRoute?: boolean;
+  /** The root `pnpm dev`'s per-run key (DEV_SIGNIN_KEY, tools/dev.ts); a reader of the route must send it. */
+  devCodeKey?: string;
   /** Accepted after the Better Auth verifier (dev guest tokens when ALLOW_DEV_GUESTS=1). */
   fallbackVerifier?: TokenVerifier;
   mailer?: Mailer;
@@ -339,26 +341,38 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       mountAccountRoutes(app, accounts, cfg);
       // #84: a development server with no mail key sends no email: the save and sign-in cards ask
       // here for the code the dev outbox kept and show it. It hands out anyone's code, so "not
-      // production" is not enough (an exposed staging box with NODE_ENV unset is not local): it needs
-      // the explicit DEV_SIGNIN_CODES=1 opt-in, is never mounted in production, and answers only the
-      // person at this machine, judged by the socket's own address (localDevRequest).
+      // production" is not enough, and neither is "looks local": a header's absence proves nothing (a
+      // reverse proxy on this machine that adds no forwarding header looks exactly like the developer;
+      // review round two, blocker 1). The code is readable only with the key the root `pnpm dev`
+      // generated for this run (tools/dev.ts), which only the developer's own server and Vite hold;
+      // without that key configured the route does not exist. Defence in depth around it: the
+      // DEV_SIGNIN_CODES=1 opt-in, never in production, a loopback socket with a loopback Host and no
+      // forwarding header (localDevRequest), and an Origin that is absent or one of our client
+      // origins (another site's page can't read a code by CORS or a rebound name). Every refusal is
+      // the same 404.
       const outbox = devOutbox;
-      if (outbox && cfg.devCodeRoute && !cfg.production) {
+      const key = cfg.devCodeKey ?? "";
+      if (outbox && cfg.devCodeRoute && !cfg.production && strongSecret(key)) {
+        const origins = new Set(cfg.trustedOrigins);
         app.get("/api/account/dev-code", (req, res) => {
           res.setHeader("Cache-Control", "no-store");
-          if (!localDevRequest(req)) {
+          const given = req.headers["x-firstlight-dev-key"];
+          const origin = req.headers.origin;
+          if (typeof given !== "string" || !safeEqual(given, key) || (origin !== undefined && !origins.has(origin)) || !localDevRequest(req)) {
             res.status(404).json({ error: "not found" });
             return;
           }
           const email = typeof req.query.email === "string" ? req.query.email.trim() : "";
           res.json({ code: email ? outbox.recentCode(email) : null });
         });
+      } else if (outbox && cfg.devCodeRoute && !cfg.production) {
+        console.warn("dev-code: DEV_SIGNIN_CODES=1 but no DEV_SIGNIN_KEY, so the cards can't fetch codes; start with the root `pnpm dev` (or DEV_MAIL_LOG=1 prints them)");
       }
     },
     close() {
       closed = true;
       clearInterval(pruneTimer);
-      flushFunnel(db); // queued funnel rows and error reports (db/funnel.ts)
+      flushFunnel(db, { final: true }); // queued funnel rows and error reports, waiting for locks as usual (db/funnel.ts)
       setGameDb(null);
       try {
         db.close();
@@ -398,6 +412,7 @@ export function accountsConfigFromEnv(env: {
   otpPerEmailPerHour: number;
   devMailLog: boolean;
   devCodeRoute?: boolean;
+  devSigninKey?: string;
 }): AccountsConfig {
   return {
     production: env.production,
@@ -416,6 +431,7 @@ export function accountsConfigFromEnv(env: {
     otpPerEmailPerHour: env.otpPerEmailPerHour,
     devMailLog: env.devMailLog,
     devCodeRoute: !!env.devCodeRoute && !env.production,
+    devCodeKey: env.production ? "" : (env.devSigninKey ?? ""),
   };
 }
 

@@ -171,7 +171,9 @@ const promptTokens = (p: { system: string; user: string }, perToken = 4) => Math
 
 /**
  * What a call may cost at most, reserved against the hourly budget before it is made: the prompt
- * counted generously plus the whole answer cap. Reconciled to what it really used afterwards.
+ * counted generously plus the whole answer cap. Settled to what the provider reports it used; a part
+ * it doesn't report (a failed or timed-out call, an unreadable answer, a missing usage field) keeps
+ * its full reservation, since the provider may still have produced and billed it.
  */
 export function tokenReserve(p: { system: string; user: string }): number {
   return promptTokens(p, 3) + MAX_ANSWER_TOKENS;
@@ -208,7 +210,8 @@ export function modelBrain(o: ModelBrainOptions, fallback: Brain = scriptedBrain
       spent.push(held);
       const base = o.url.replace(/\/+$/, "");
       let text = "";
-      let used = { in: 0, out: 0 };
+      // Reported usage only (review round two, finding 6): until then the call holds its whole reservation.
+      let used: { in: number | null; out: number | null } = { in: null, out: null };
       try {
         const res =
           o.api === "anthropic"
@@ -225,31 +228,30 @@ export function modelBrain(o: ModelBrainOptions, fallback: Brain = scriptedBrain
                 signal: AbortSignal.timeout(o.timeoutMs ?? 8000),
               });
         stats.calls++;
-        if (!res.ok) {
-          held.tokens = promptTokens(p);
-          return fall(ctx, `http ${res.status}`);
-        }
+        // A refused or failed call keeps its whole reservation: whether it was billed is unknown.
+        if (!res.ok) return fall(ctx, `http ${res.status}`);
         const body = (await res.json()) as any;
+        const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
         if (o.api === "anthropic") {
           text = String(body?.content?.find?.((c: any) => c?.type === "text")?.text ?? "");
-          used = { in: Number(body?.usage?.input_tokens) || 0, out: Number(body?.usage?.output_tokens) || 0 };
+          used = { in: n(body?.usage?.input_tokens), out: n(body?.usage?.output_tokens) };
         } else {
           text = String(body?.choices?.[0]?.message?.content ?? "");
-          used = { in: Number(body?.usage?.prompt_tokens) || 0, out: Number(body?.usage?.completion_tokens) || 0 };
+          used = { in: n(body?.usage?.prompt_tokens), out: n(body?.usage?.completion_tokens) };
         }
       } catch (e) {
         stats.calls++;
-        held.tokens = promptTokens(p);
-        return fall(ctx, (e as Error).name === "TimeoutError" ? "timeout" : "network");
+        // Timed out, the connection dropped, or the answer couldn't be read: the reservation stays.
+        return fall(ctx, (e as Error).name === "TimeoutError" ? "timeout" : (e as Error).name === "SyntaxError" ? "bad answer" : "network");
       }
-      // Without a usage report, count the characters (about four to a token).
-      if (!used.in) used.in = promptTokens(p);
-      if (!used.out) used.out = Math.ceil(text.length / 4);
-      stats.tokensIn += used.in;
-      stats.tokensOut += used.out;
-      // Reconcile: the call holds what it really used (an endpoint that ignored max_tokens is
-      // counted in full, so the next calls see it).
-      held.tokens = used.in + used.out;
+      // Settle: each reported part counts what it was (an endpoint that ignored max_tokens is counted
+      // in full, so the next calls see it); a part not reported keeps its reservation.
+      const reservedIn = held.tokens - MAX_ANSWER_TOKENS;
+      const tokensIn = used.in ?? reservedIn;
+      const tokensOut = used.out ?? MAX_ANSWER_TOKENS;
+      stats.tokensIn += tokensIn;
+      stats.tokensOut += tokensOut;
+      held.tokens = tokensIn + tokensOut;
       const says = parseAnswer(text, p.candidates, placesFor(ctx.obs, ctx.to.level));
       return says.length ? says : fall(ctx, "bad answer");
     },
