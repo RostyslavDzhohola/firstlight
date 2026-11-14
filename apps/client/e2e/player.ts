@@ -495,11 +495,24 @@ export class Player {
     const until = Date.now() + (opts.timeoutMs ?? 30_000);
     const trail: number[][] = [];
     let stuck = 0;
+    let best = { d: Infinity, at: Date.now() };
+    let leftTown = false;
     while (Date.now() < until) {
       const s = await this.snap();
       if (arrived(s)) return true;
       const t = target(s);
       if (!t) return false;
+      // Inside a walled outpost or town with the target beyond its wall, the walk slides along the
+      // palisade without getting closer (150 s on Arcadia's): no 2 m of progress in 8 s there, and it
+      // leaves through the nearest gate (once per walk), then goes on from outside.
+      const now = Date.now();
+      if (t.surface < best.d - 2) best = { d: t.surface, at: now };
+      else if (!leftTown && now - best.at > 8000 && (s.gates?.length ?? 0) > 0 && s.zone?.server === "safe") {
+        leftTown = true;
+        await this.walkOutOfTown(Math.max(20_000, until - now));
+        best = { d: Infinity, at: Date.now() };
+        continue;
+      }
       const go = await this.steer(t.bearing, Math.min(4, t.surface + 0.5), s, opts.avoidPortal ?? true);
       if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
       const ms = Math.max(150, Math.min(900, (Math.min(t.surface, go.clear) / 6) * 1000));
@@ -509,12 +522,7 @@ export class Player {
         const a = trail[trail.length - 4]!;
         const b = s.player!.pos;
         if (Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1) {
-          // Inside a walled outpost or town with the target beyond its wall (the walk pressed into
-          // Arcadia's palisade for 90 s): out through the nearest gate first, then on from there.
-          if (++stuck >= 2 && (s.gates?.length ?? 0) > 0 && s.zone?.server === "safe" && t.surface > (s.zone.toSafe ?? 0)) {
-            await this.walkOutOfTown(Math.max(20_000, until - Date.now()));
-            stuck = 0;
-          } else await this.unstick(t.bearing, stuck);
+          await this.unstick(t.bearing, ++stuck);
           trail.length = 0;
         }
       }
