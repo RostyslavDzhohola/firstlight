@@ -64,9 +64,9 @@ export function levelMoments(prev: number, level: number, starter = 0, tree?: re
   // #79: the banner says what the level changed in the spells you know ("Frostbloom 26 → 27").
   const gains = spellGains(prev, level, starter, tree);
   const hp = (l: number) => playerMaxHp({ starter, level: l, tree });
-  // #81: each level is a build point; the banner names the key (the pause menu has it too), never a card to click.
+  // #81: each level is a build point; the banner names the key (the toast and the pause menu say the rest), never a card to click.
   const points = level - prev;
-  const build = `+${points} build point${points === 1 ? "" : "s"} (${HOTKEYS.build.caps.join(" ")} or the menu)`;
+  const build = `+${points} build point${points === 1 ? "" : "s"} (${HOTKEYS.build.caps.join(" ")})`; // the toast names the menu too
   const out: Moment[] = [{
     kind: "level", kicker: "Level up", title: `Level ${level}`, sprite: "star", ms: HOLD_MS, merge: "level",
     reward: [`+${hp(level) - hp(prev)} max HP, +${(level - prev) * 3}% damage`, build, gains, next ? `${next.name} at level ${next.level}` : ""].filter(Boolean).join(" · "),

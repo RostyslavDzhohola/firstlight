@@ -44,7 +44,9 @@ export class TreePanel extends Panel {
     const view = treeView({ starter: this.game.hud.starterIndex, level: you?.level ?? 1, tree: you?.tree?.nodes, coins: you?.coins ?? 0, safe: this.safe() });
     const head = el("div", "head", b);
     el("h2", "", head, "Build");
-    const pts = el("div", `fl-tree__pts${view.points > 0 ? " is-ready" : ""}`, head, `${view.points} point${view.points === 1 ? "" : "s"} to spend`);
+    const right = el("div", "fl-tree__right", head);
+    el("span", "coins", right, `${(you?.coins ?? 0).toLocaleString("en-US")} ◎`).dataset.e2e = "tree-coins";
+    const pts = el("span", `fl-tree__pts${view.points > 0 ? " is-ready" : ""}`, right, `${view.points} point${view.points === 1 ? "" : "s"} to spend`);
     pts.dataset.e2e = "tree-points";
     el("p", "sub", b, `Level ${view.level}. Every level gives a point; spend them in any branch, top-down. Deeper nodes cost more. Points are lost with the level when you die.`);
     const grid = el("div", "body fl-tree__grid", b);

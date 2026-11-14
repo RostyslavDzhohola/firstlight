@@ -1,5 +1,6 @@
 /* The build-tree panel (#81, ui/treePanel.ts): five branch columns of node buttons. */
 .fl-q.fl-tree { width: min(calc(78 * var(--u)), 96vw); }
+.fl-tree__right { display: flex; align-items: baseline; gap: var(--sp-4); }
 .fl-tree__pts { font: 700 var(--t-md)/1 var(--font-mono); color: var(--fog-3); white-space: nowrap; }
 .fl-tree__pts.is-ready { color: var(--dawn-3); }
 .fl-tree__grid { display: grid; grid-template-columns: repeat(5, minmax(calc(12 * var(--u)), 1fr)); gap: var(--sp-3); align-items: start; }

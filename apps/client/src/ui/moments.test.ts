@@ -31,7 +31,7 @@ describe("the banners' words", () => {
     const plain = levelMoments(3, 4);
     expect(plain).toHaveLength(1);
     expect(plain[0]).toMatchObject({ kind: "level", kicker: "Level up", title: "Level 4" });
-    expect(plain[0]!.reward).toMatch(/^\+\d+ max HP, \+3% damage · \+1 build point \(U or the menu\) · Frostbloom \d+ → \d+ · Wishfall at level 6$/);
+    expect(plain[0]!.reward).toMatch(/^\+\d+ max HP, \+3% damage · \+1 build point \(U\) · Frostbloom \d+ → \d+ · Wishfall at level 6$/);
     const withSpell = levelMoments(2, 3);
     expect(withSpell.map((x) => x.kind)).toEqual(["level", "spell"]);
     expect(withSpell[1]).toMatchObject({ kicker: "New spell", title: "Frostbloom", key: "F", sprite: "spell-frostbloom" });
