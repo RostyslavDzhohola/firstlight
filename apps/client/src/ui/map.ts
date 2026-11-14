@@ -458,7 +458,7 @@ export class MapPanel extends Panel {
     }
 
     // Active mission targets, and the tutorial's dummies during its dummy step (#31).
-    for (const t of [...missionTargets(body, you?.missions ?? []), ...guideTargets.current()]) {
+    for (const t of [...missionTargets(body, you?.missions ?? [], this.game.planet.terrain), ...guideTargets.current()]) {
       const s = project(v, t.dir, { x: 0, y: 0, z: 0 });
       if (!visible(s)) continue;
       star(ctx, s.x, s.y - 14, 8, "#ffd166");

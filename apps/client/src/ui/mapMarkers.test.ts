@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BODIES, createTerrain, padDirs, type BodyId } from "@firstlight/shared";
 import { MISSIONS } from "@firstlight/shared/content/missions";
+import { wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { missionTargets, staticMarkers } from "./mapMarkers.ts";
 
 describe("map markers", () => {
@@ -42,5 +43,13 @@ describe("map markers", () => {
     expect(t.length).toBeGreaterThanOrEqual(2);
     expect(t.some((m) => m.id === "A1")).toBe(false);
     expect(missionTargets("hollowmere", active)).toEqual([]);
+  });
+
+  it("L1 on Lumen is marked at the Quietfall Wreck (its hunt's site)", () => {
+    const terrain = createTerrain("lumen");
+    const wreck = wildSitePlacements(terrain).find((w) => w.site.id === "quietfall_wreck")!;
+    const [t] = missionTargets("lumen", [{ id: "L1" }], terrain);
+    expect(t?.id).toBe("L1");
+    expect(Math.hypot(t!.dir[0] - wreck.dir[0], t!.dir[1] - wreck.dir[1], t!.dir[2] - wreck.dir[2])).toBeLessThan(1e-6);
   });
 });
