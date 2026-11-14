@@ -31,6 +31,8 @@ interface Resources {
   decodedKB: number;
   /** The 15 largest over the wire: path (no query) and KB. */
   top: [string, number][];
+  /** Every one, largest first (the raw report only: what to make lazy or smaller). */
+  all: [string, number][];
 }
 
 /** Every resource the page fetched so far (the navigation included), from Resource Timing. */
@@ -40,14 +42,15 @@ function resources(page: Page): Promise<Resources> {
     const res = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
     const all = [...nav, ...res];
     const kb = (v: number) => Math.round(v / 102.4) / 10;
+    const list = [...all]
+      .sort((a, b) => (b.transferSize || 0) - (a.transferSize || 0))
+      .map((e) => [new URL(e.name).pathname, kb(e.transferSize || 0)] as [string, number]);
     return {
       requests: all.length,
       transferKB: kb(all.reduce((a, e) => a + (e.transferSize || 0), 0)),
       decodedKB: kb(all.reduce((a, e) => a + (e.decodedBodySize || 0), 0)),
-      top: [...all]
-        .sort((a, b) => (b.transferSize || 0) - (a.transferSize || 0))
-        .slice(0, 15)
-        .map((e) => [new URL(e.name).pathname, kb(e.transferSize || 0)] as [string, number]),
+      top: list.slice(0, 15),
+      all: list,
     };
   });
 }
