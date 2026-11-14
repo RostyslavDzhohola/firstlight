@@ -64,6 +64,7 @@ export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: st
     limits: { maxClients: 40, soloFillLimit: 36, maxCopiesPerBody: 2, globalCap: 320 },
     allowedOrigins: [ORIGIN],
     revalidate: accounts.revalidate,
+    gateway: { signIn: "guest", authOrigin: ORIGIN, originSecret: cfgOver.originSecret || undefined },
     ...(explain ? { explainRefusal: banExplainer(accounts) } : {}),
     mountBeforeJson: accounts.mountBeforeJson,
     mountAfterJson: (app) => {

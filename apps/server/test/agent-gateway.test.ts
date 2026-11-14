@@ -8,6 +8,7 @@ import { GATEWAY_RULES } from "../src/agents/gateway.ts";
 import { AGENT_RULES, resetAgentSlots } from "../src/world/agents.ts";
 import { liveRooms } from "../src/social/index.ts";
 import { startServer, waitFor } from "./helpers.ts";
+import { startAuthServer } from "./auth-helpers.ts";
 
 let game: Game;
 let base: string;
@@ -195,5 +196,24 @@ describe("the remote MCP endpoint", () => {
     expect((await fetch(`${base}/mcp`, { method: "DELETE", headers: { "mcp-session-id": sid } })).status).toBe(204);
     await waitFor(() => !actor("McpLegacy"));
     expect((await post({ id: 5, method: "tools/list" }, sid)).status).toBe(404);
+  }, 60_000);
+});
+
+describe("seats sign in like a browser guest (the production path)", () => {
+  it("makes a Better Auth guest over loopback, behind the origin secret, with the caller's address", async () => {
+    const server = await startAuthServer({ originSecret: "gateway-test-origin-secret" });
+    try {
+      const r = await json(await fetch(`${server.base}/api/agent/join`, { method: "POST", headers: { "content-type": "application/json", ...from("192.0.2.44") }, body: '{"name":"GuestSeat"}' }));
+      expect(r.body).toMatchObject({ ok: true, name: "GuestSeat", body: "portus" });
+      await waitFor(() => !!actor("GuestSeat"));
+      const id = actor("GuestSeat")!.identity;
+      expect(id).toMatchObject({ agent: true, guest: true, account: true, agentIp: "192.0.2.44" });
+      // A real guest account, flagged as an agent's for good.
+      expect(server.accounts.authDb.prepare(`SELECT "isAnonymous" AS anon FROM "user" WHERE id = ?`).get(id.userId)).toEqual({ anon: 1 });
+      await fetch(`${server.base}/api/agent/leave`, { method: "POST", headers: { authorization: `Bearer ${r.body.seat}` } });
+      await waitFor(() => !actor("GuestSeat"));
+    } finally {
+      await server.close();
+    }
   }, 60_000);
 });
