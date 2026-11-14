@@ -159,12 +159,22 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
 /** Server corrections closer than this (metres) keep the camera heading (F12 confirm Sonnet N-6). */
 export const CORRECT_KEEP_HEADING_M = 25;
+/**
+ * Outside first person the drawn body follows the (already eased) facing this fast (1/s): it is
+ * there within a few frames, and leaving first person mid-turn doesn't snap it.
+ */
+const BODY_CATCH_UP = 40;
 
 export class PlayerController {
   readonly pos = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
-  /** Unit tangent the character faces. */
+  /**
+   * Unit tangent the character faces for gameplay: sent to the server, which swings melee along it.
+   * In first person on foot it is the camera's heading at once (the swing goes to the crosshair).
+   */
   readonly facing = new THREE.Vector3(0, 0, 1);
+  /** The facing the own avatar is drawn with: `facing`, eased where first person snaps it (review finding 1). */
+  readonly bodyFacing = new THREE.Vector3(0, 0, 1);
   /** Unit tangent the camera looks along (yaw only). */
   readonly camForward = new THREE.Vector3(0, 0, 1);
   camPitch = -0.15;
@@ -284,7 +294,7 @@ export class PlayerController {
     this.pos.set(x, y, z);
     this.vel.set(0, 0, 0);
     const up = _up.copy(this.pos).normalize();
-    for (const v of [this.camForward, this.facing]) {
+    for (const v of [this.camForward, this.facing, this.bodyFacing]) {
       v.addScaledVector(up, -v.dot(up));
       if (v.lengthSq() < 1e-8) {
         const ref = Math.abs(up.z) < 0.9 ? AXIS_Z : AXIS_X;
@@ -295,6 +305,20 @@ export class PlayerController {
     this.fallStartRadius = this.pos.length();
   }
 
+  /**
+   * After a blink the server placed (Skipstep: its `correct` came first and stopped the body): move on
+   * with `vel`, the velocity from before it, along the new ground, and keep a jump that was still
+   * rising (#78: the hop was cut off 26 ms in and the body dropped where it landed). A fall's speed
+   * is not kept (the blink put the feet on the ground there).
+   */
+  resumeAfterBlink(vel: THREE.Vector3) {
+    const up = _up.copy(this.pos).normalize();
+    const along = vel.dot(up);
+    const rise = Math.max(0, along);
+    this.vel.copy(vel).addScaledVector(up, rise - along);
+    if (rise > 0) this.onGround = false;
+  }
+
   /** Place the player (arrival, travel, respawn): the camera faces the body's reference direction. */
   teleport(x: number, y: number, z: number) {
     this.pos.set(x, y, z);
@@ -303,6 +327,7 @@ export class PlayerController {
     const ref = Math.abs(up.z) < 0.9 ? AXIS_Z : AXIS_X;
     this.camForward.copy(ref).addScaledVector(up, -ref.dot(up)).normalize();
     this.facing.copy(this.camForward);
+    this.bodyFacing.copy(this.facing);
     this.fallStartRadius = this.pos.length();
     // A new place: the camera starts out at full reach over the right shoulder, nothing pinned.
     this.camReach = Infinity;
@@ -571,9 +596,13 @@ export class PlayerController {
 
     // Face movement (or the camera when aiming; a roll keeps facing where it goes).
     const hSpeed = vH.length();
-    // First person on foot faces the camera too, so the swing, the cast and the body go where the crosshair is.
-    if ((aiming || (this.firstPerson && !this.mounted)) && this.dodgeT <= 0) this.facing.lerp(this.camForward, easeShare(18, dt)).normalize();
+    // First person on foot faces the camera at once, so the swing and the cast go where the crosshair
+    // is on the frame of a turn; the drawn body turns after it (bodyFacing).
+    const fpFacing = this.firstPerson && !this.mounted && this.dodgeT <= 0;
+    if (fpFacing) this.facing.copy(this.camForward);
+    else if (aiming && this.dodgeT <= 0) this.facing.lerp(this.camForward, easeShare(18, dt)).normalize();
     else if (hSpeed > 0.5) this.facing.lerp(_dir.copy(vH).normalize(), easeShare(this.mounted ? 6 : 10, dt)).normalize();
+    this.easeBody(fpFacing ? 18 : BODY_CATCH_UP, dt);
 
     this.anim = this.dodgeT > 0 ? ANIM.DODGE
       : this.swimming ? ANIM.SWIM
@@ -582,6 +611,15 @@ export class PlayerController {
       : hSpeed > 3.5 ? ANIM.RUN
       : hSpeed > 0.3 ? ANIM.WALK
       : ANIM.IDLE;
+  }
+
+  /** Ease the drawn facing towards the gameplay one at `rate` (1/s), kept on this frame's ground plane. */
+  private easeBody(rate: number, dt: number) {
+    const up = _up.copy(this.pos).normalize();
+    const b = this.bodyFacing;
+    b.addScaledVector(up, -b.dot(up));
+    if (b.lengthSq() < 1e-8 || b.dot(this.facing) < -0.999) b.copy(this.facing);
+    else b.normalize().lerp(this.facing, easeShare(rate, dt)).normalize();
   }
 
   /** Lift feet that are under the terrain up onto it (radially). */

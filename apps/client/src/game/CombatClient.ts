@@ -448,6 +448,7 @@ export class CombatClient {
       if (this.heavyDueAt && now >= this.heavyDueAt) {
         this.heavyDueAt = 0;
         if (heavyCapable) {
+          g.net.flushInput(now); // the server swings along the facing it has: this frame's
           room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
           g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
           this.lastFire = now;
@@ -503,6 +504,7 @@ export class CombatClient {
     // own avatar: swing / shot / cast / throw picked from the held item, without the round trip
     if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
+      g.net.flushInput(now); // the server swings along the facing it has: this frame's (review finding 1)
       room.send("melee", { slot, t: Date.now(), heavy: false });
       g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       const up = g.player.up();

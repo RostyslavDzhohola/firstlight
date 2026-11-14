@@ -888,7 +888,8 @@ export class Game {
       m.fx = f.x; m.fy = f.y; m.fz = f.z;
       m.anim = this.player.anim;
       this.net.sendInput(now, m);
-      this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, this.hitStop.frozen(now) ? 0 : dt);
+      const b = this.player.bodyFacing; // drawn: eased where first person snaps the gameplay facing
+      this.self.set(p.x, p.y, p.z, b.x, b.y, b.z, this.player.anim, this.hitStop.frozen(now) ? 0 : dt);
       focus = this.photo.active ? this.photo.pos : p;
     }
 
