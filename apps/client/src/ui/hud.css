@@ -201,6 +201,10 @@ button.fl-mission:focus-visible { outline: 1px solid var(--photon); outline-offs
 /* ---------------------------------------------------------------- bottom-centre: hotbar + ammo */
 .fl-hotbar-wrap { position: absolute; left: 50%; bottom: calc(1.4 * var(--u)); transform: translateX(-50%); display: flex; align-items: flex-end; gap: calc(1.2 * var(--u)); }
 .fl-hotbar { position: relative; display: flex; gap: calc(.45 * var(--u)); }
+/* #76: the right mouse's action for the item in hand, under the hotbar. */
+.fl-rmb { position: absolute; left: -50%; right: -50%; top: calc(100% + .2 * var(--u)); display: flex; justify-content: center; align-items: center; gap: calc(.4 * var(--u)); font: 500 var(--t-xs)/1 var(--font-body); color: var(--paper-2); white-space: nowrap; text-shadow: var(--hud-text-shadow); }
+.fl-rmb[hidden] { display: none; }
+.fl-rmb .fl-key { min-width: auto; height: calc(1.05 * var(--u)); padding: 0 calc(.3 * var(--u)); font-size: var(--t-xs); }
 .fl-wname { position: absolute; left: -50%; right: -50%; bottom: calc(100% + .7 * var(--u)); text-align: center; font: 600 var(--t-sm)/1 var(--font-display); letter-spacing: .22em; text-transform: uppercase; color: var(--hero-cream); white-space: nowrap; }
 .fl-slot { position: relative; width: calc(4.5 * var(--u)); height: calc(4.5 * var(--u)); display: grid; place-items: center; transition: transform var(--dur-2) var(--ease-out); }
 .fl-slot > .px { width: calc(2.7 * var(--u)); height: calc(2.7 * var(--u)); }
