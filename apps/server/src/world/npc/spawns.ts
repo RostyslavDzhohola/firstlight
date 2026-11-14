@@ -5,6 +5,7 @@
 import { CHUNK_QUADS, gridDir, hash01, hash4, nearSafeZone, padDirs, tangentFrame, type Face, type Terrain } from "@firstlight/shared";
 import { siteCoords, siteDir, townDir } from "@firstlight/shared/planet/townFrame";
 import { outpostAnchor } from "@firstlight/shared/planet/sites";
+import { wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { OUTPOSTS, type OutpostBody } from "@firstlight/shared/content/padOutposts";
 import { OUTPOST_GROUND_HALF, outpostGroundDistance } from "@firstlight/shared/planet/outpostGround";
 import { resolveAreaDir, stableTangent, walk, type ArenaLayout } from "@firstlight/shared/content/arenas";
@@ -314,6 +315,28 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
     add({ kind: "camp", area: area.id, dir: d, members, roam: 8, chest: area.camp.chest, chestKey });
   }
 
+  // 1b. Wild sites (content/wildSites.ts, planet/wildSites.ts): the guardian and its pack on the
+  // prefab's guard spots (more members than spots share a spot, 1.6 m apart), the point on the chest
+  // so its loot lands there, and the guardian (member 0) holds the chest's key.
+  const wild = wildSitePlacements(terrain);
+  for (const ws of wild) {
+    const dir = ws.chestDir;
+    const t1 = stableTangent(dir);
+    const t2 = cross(dir, t1);
+    const at = groundPos(dir);
+    const list = [{ kind: ws.site.guardian.kind, level: ws.site.guardian.level }];
+    for (const m of ws.site.pack) for (let k = 0; k < m.count; k++) list.push({ kind: m.kind, level: m.level });
+    const members: SpawnMember[] = list.map((m, i) => {
+      const spot = groundPos(ws.guardDirs[i % ws.guardDirs.length]!);
+      const lap = Math.floor(i / ws.guardDirs.length);
+      const d: V3 = [spot[0] - at[0], spot[1] - at[1], spot[2] - at[2]];
+      const a = d[0] * t1[0] + d[1] * t1[1] + d[2] * t1[2] + lap * 1.6;
+      const b = d[0] * t2[0] + d[1] * t2[1] + d[2] * t2[2];
+      return { def: NPC_INDEX.get(m.kind)!, level: clampLevel(m.kind, planet, m.level), a, b };
+    });
+    add({ kind: "camp", area: ws.site.id, dir, members, roam: 6, chest: ws.site.chest, chestKey: 0 });
+  }
+
   // 2. Fixed singles (beasts roam their area; sentinels and egg NPCs stand still).
   for (const { area, dir } of areas) {
     for (const [si, s] of (area.singles ?? []).entries()) {
@@ -332,8 +355,9 @@ export function buildSpawnPoints(terrain: Terrain, arena: ArenaLayout | null): S
   // Shared: turn a candidate into a pack/herd point, or null if nothing fits there.
   const tryPack = (d: V3, key: number, inArea: ResolvedArea | null): boolean => {
     if (!farFromPads(d) || !farFromArena(d, 25) || !farFromPoints(d)) return false;
-    // Named camps keep their surroundings clear.
+    // Named camps and wild sites keep their surroundings clear.
     if (areas.some((ra) => ra.area.camp && chord(ra.dir, d) < ra.area.radius + 20)) return false;
+    if (wild.some((ws) => chord(ws.dir, d) < ws.prefab.foot + 35)) return false;
     const cls = classify(terrain, d);
     if (!cls.land) return false;
     let lo: number, hi: number;

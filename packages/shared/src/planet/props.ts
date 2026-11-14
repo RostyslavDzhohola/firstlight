@@ -19,6 +19,7 @@ import type { Terrain } from "./terrain.ts";
 import { siteAnchor, siteCoords, townCoords, type SiteAnchor } from "./townFrame.ts";
 import { townPropClear } from "./townGround.ts";
 import { OUTPOST_GROUND_HALF, outpostPropClear } from "./outpostGround.ts";
+import { wildSiteClearings } from "./wildSites.ts";
 
 const townAt: [number, number] = [0, 0];
 const outpostAt: [number, number] = [0, 0];
@@ -34,6 +35,7 @@ const outpostAt: [number, number] = [0, 0];
  * v5: the planets' pad-0 outposts (D42): their apron, paths, structures and trees kept clear
  * (outpostGround.ts).
  * v6: round 2: the outposts' walls, gates, gate paths and new buildings kept clear too (D-b2-1).
+ * v7 (bump at integration): the wild sites (planet/wildSites.ts) keep a clearing round their footprints.
  */
 export const PROPS_VERSION = 6;
 
@@ -270,6 +272,7 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
     ...(arena ? [{ dir: arena.up, radius: arena.radius + 6 }] : []),
     ...objectsOn(body.id).filter((o) => o.clearing !== false).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
     ...portalSpots(body, terrain).map((o) => ({ dir: o.dir, radius: 6 })),
+    ...wildSiteClearings(terrain),
   ];
   const faceSeed = hash4(body.seed, face, 0x5eed);
   // The pad-0 outpost (D42): its frame, to test props near pad 0 against its ground mask.

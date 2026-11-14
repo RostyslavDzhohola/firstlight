@@ -53,6 +53,8 @@ export interface LifeProgress {
   unofficial?: boolean;
   /** When this life opened the Gleam Vault (gleams.ts; once per life, ms epoch). */
   gleamVault?: number;
+  /** Wild sites found this life (content/wildSites.ts ids; discovery XP is once per life). */
+  sites?: string[];
 }
 
 export function emptyLife(): LifeProgress {

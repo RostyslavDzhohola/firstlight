@@ -16,6 +16,8 @@ import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/s
 import { buyBlock, SHOP_SPOTS, shopSpotAt, type ShopSpot } from "@firstlight/shared/content/shops";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPON_BY_ID, WEAPONS } from "@firstlight/shared/content/weapons";
+import { SITE_DISCOVER_MARGIN, siteDiscoveryXp } from "@firstlight/shared/content/wildSites";
+import { wildSiteAt } from "@firstlight/shared/planet/wildSites";
 import { NPC_DEFS, NPC_INDEX, defLevels, type PlanetId } from "@firstlight/shared/content/npcs";
 import type { BossId } from "@firstlight/shared/content/places";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
@@ -446,6 +448,7 @@ export class QuestSystem implements RoomSystem {
     you.title = q.title;
     you.cosmeticsExtras = env.cosmeticsExtras;
     you.gleamVault = !!this.life(a).gleamVault;
+    you.sites = [...(this.life(a).sites ?? [])];
     you.worn = { ...(a.char.worn ?? {}) };
   }
 
@@ -472,6 +475,7 @@ export class QuestSystem implements RoomSystem {
       const q = this.qp(a);
       if (this.room.bodyDef.padLayout !== "none") this.touchPads(a, q);
       this.checkReach(a, q);
+      this.touchSites(a);
       this.trials.tickPlayer(a, now);
       if (a.dead) continue;
       this.eggs.tickPlayer(a, q, now);
@@ -795,6 +799,30 @@ export class QuestSystem implements RoomSystem {
   }
 
   private readonly reachTargets = new Map<string, V3>();
+
+  /**
+   * Wild sites (content/wildSites.ts): feet within a site's footprint plus SITE_DISCOVER_MARGIN find
+   * it. The first time this life: the discovery XP, saved with the life flag in one transaction (a
+   * failed save leaves it unfound, to try again on the next tick), a toast and the journal line (you.sites).
+   */
+  private touchSites(a: PlayerActor) {
+    if (a.identity.loadtest || !this.room.terrain) return;
+    const p = actorPos(a);
+    const at = wildSiteAt(this.room.terrain, p[0], p[1], p[2], SITE_DISCOVER_MARGIN);
+    if (!at) return;
+    const life = this.life(a);
+    if (life.sites?.includes(at.site.id)) return;
+    const xp = siteDiscoveryXp(at.site);
+    let showXp = (): void => {};
+    const paid = this.grant(a, [], () => {
+      (life.sites ??= []).push(at.site.id);
+      showXp = this.room.addXp(a, xp);
+    });
+    if (!paid) return;
+    showXp();
+    this.toast(a, `Site discovered: ${at.site.name} · levels ${at.site.levels[0]}–${at.site.levels[1]} · +${xp} XP`, "xp");
+    emitGameEvent(this.room, { type: "siteDiscovered", playerId: a.id, site: at.site.id, xp });
+  }
 
   private checkReach(a: PlayerActor, q: QuestPlayer) {
     for (const { m, def } of this.activeMissions(a)) {
