@@ -11,15 +11,19 @@
 //   header carries the seat from call to call, so those clients never pass `seat`. DELETE ends it.
 //
 // Answers are single JSON objects (never SSE): every call is one request and one result. A client
-// that hangs up on a call in progress cancels it (the seat stops walking or fighting). GET is 405.
+// that hangs up on a call in progress cancels it (the seat stops walking or fighting): with no stream
+// to resume, its answer could never arrive anyway. A legacy client may also cancel explicitly with
+// `notifications/cancelled` (2025-11-25 basic/utilities/cancellation): the named request leaves the
+// seat's queue or is stopped, and its POST is answered with the cancelled result, which the spec has
+// the client ignore (HTTP needs some answer to every request). GET is 405.
 
 import { createHash, randomBytes } from "node:crypto";
 import type { Express, Request, Response } from "express";
-import { LEGACY_VERSIONS, SERVER_INFO, toolContent, toolList } from "@firstlight/agent-tools/mcp";
+import { InFlight, LEGACY_VERSIONS, SERVER_INFO, toolContent, toolList } from "@firstlight/agent-tools/mcp";
 import { PLAYBOOK, type ToolDef } from "@firstlight/agent-tools/tools";
 import { directRequestIp, banKey } from "../auth/ip.ts";
 import { WindowLimiter } from "../auth/limiter.ts";
-import { GATEWAY_RULES, originAllowed, readJson, type Gateway } from "./gateway.ts";
+import { GATEWAY_RULES, hangUpSignal, originAllowed, readJson, type Gateway } from "./gateway.ts";
 
 export const MODERN_VERSIONS: readonly string[] = ["2026-07-28"];
 const META_VERSION = "io.modelcontextprotocol/protocolVersion";
@@ -33,6 +37,12 @@ interface LegacySession {
   key: string;
   seat: string | null;
   lastUsed: number;
+  /** The join in progress: a second join waits for it instead of seating a second character. */
+  joining: Promise<unknown> | null;
+  /** Ended (DELETE, or swept): a join that finishes afterwards closes its seat. */
+  closed: boolean;
+  /** Tool calls still being answered, for `notifications/cancelled`. */
+  inFlight: InFlight;
 }
 
 interface Rpc {
@@ -64,6 +74,7 @@ function headerValue(req: Request, name: string): string | undefined {
 }
 
 const hash = (t: string) => createHash("sha256").update(t).digest("base64url");
+const CANCELLED_JOIN = { ok: false, reason: "cancelled", hint: "the caller hung up while the character joined; it has left" } as const;
 
 export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonly string[]): void {
   const allowed = new Set(allowedOrigins);
@@ -74,7 +85,11 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
 
   const sweep = setInterval(() => {
     const now = Date.now();
-    for (const [id, s] of sessions) if (now - s.lastUsed > MCP_RULES.idleMs && !(s.seat && gateway.has(s.seat))) sessions.delete(id);
+    for (const [id, s] of sessions) {
+      if (now - s.lastUsed <= MCP_RULES.idleMs || (s.seat && gateway.has(s.seat)) || s.joining || s.inFlight.size) continue;
+      s.closed = true;
+      sessions.delete(id);
+    }
   }, 60_000);
   sweep.unref();
 
@@ -83,7 +98,7 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
   };
 
   /** One tools/call, either era: `seat` is the session's (legacy) or the argument (modern). */
-  async function toolsCall(req: Request, res: Response, msg: Rpc, legacy: LegacySession | null): Promise<Record<string, unknown>> {
+  async function toolsCall(req: Request, res: Response, msg: Rpc, legacy: LegacySession | null, signal: AbortSignal): Promise<Record<string, unknown>> {
     const name = typeof msg.params?.name === "string" ? msg.params.name : "";
     const raw = msg.params?.arguments ?? {};
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return toolContent({ ok: false, reason: "bad arguments", hint: "arguments must be an object" });
@@ -91,22 +106,41 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
     const ip = directRequestIp(req);
     if (!toolNames.has(name)) return toolContent({ ok: false, reason: "unknown tool", hint: `tools: ${[...toolNames].join(", ")}` });
     if (name === "firstlight_join") {
-      const playing = legacy?.seat && gateway.has(legacy.seat) ? legacy.seat : null;
-      if (playing) return toolContent(await gateway.call(playing, ip, name, args));
-      const r = await gateway.join(ip, args);
-      if (!r.ok) return toolContent(r);
-      if (legacy) {
-        legacy.seat = r.seat as string;
-        const { seat: _seat, ...rest } = r;
-        return toolContent(rest);
+      if (!legacy) {
+        const r = await gateway.join(ip, args);
+        if (!r.ok) return toolContent(r);
+        // Hung up while it joined: nobody holds the handle, so the seat goes now.
+        if (signal.aborted) {
+          await gateway.drop(String(r.seat));
+          return toolContent({ ...CANCELLED_JOIN });
+        }
+        return toolContent({ ...r, note: `your seat is ${String(r.seat)}: pass it as "seat" in every other firstlight_* call` });
       }
-      return toolContent({ ...r, note: `your seat is ${String(r.seat)}: pass it as "seat" in every other firstlight_* call` });
+      // One join at a time per session: a second one waits for the first, then finds the seat taken.
+      while (legacy.joining) await legacy.joining.catch(() => {});
+      if (legacy.closed) return toolContent({ ok: false, reason: "session ended", hint: "this MCP session was closed; initialize again" });
+      const playing = legacy.seat && gateway.has(legacy.seat) ? legacy.seat : null;
+      if (playing) return toolContent(await gateway.call(playing, ip, name, args));
+      const joining = gateway.join(ip, args);
+      legacy.joining = joining;
+      let r: Awaited<typeof joining>;
+      try {
+        r = await joining;
+      } finally {
+        legacy.joining = null;
+      }
+      if (!r.ok) return toolContent(r);
+      // The session ended (DELETE) while it joined: nobody can reach this seat any more.
+      if (legacy.closed) {
+        await gateway.drop(String(r.seat));
+        return toolContent({ ok: false, reason: "session ended", hint: "the MCP session was closed while the character joined; it has left" });
+      }
+      legacy.seat = r.seat as string;
+      const { seat: _seat, ...rest } = r;
+      return toolContent(rest);
     }
     const seat = typeof given === "string" ? given : (legacy?.seat ?? "");
-    res.on("close", () => {
-      if (!res.writableEnded && seat) gateway.cancel(seat);
-    });
-    return toolContent(await gateway.call(seat, ip, name, args));
+    return toolContent(await gateway.call(seat, ip, name, args, signal));
   }
 
   app.post("/mcp", async (req, res) => {
@@ -130,7 +164,13 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
     const method = msg.method;
     const id = msg.id;
     if (id === undefined) {
-      // A notification (initialized, cancelled): nothing to answer.
+      // A notification: nothing to answer. A legacy client's cancellation stops the request it names
+      // in its own session (unknown or finished ids are ignored, as the spec asks).
+      if (method === "notifications/cancelled") {
+        const sid = headerValue(req, "mcp-session-id");
+        const session = sid ? sessions.get(hash(sid)) : undefined;
+        session?.inFlight.cancel(msg.params);
+      }
       res.status(202).end();
       return;
     }
@@ -148,7 +188,7 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
       const key = banKey(ip);
       if (sessions.size >= MCP_RULES.sessions || [...sessions.values()].filter((s) => s.key === key).length >= MCP_RULES.sessionsPerIp) return rpcError(res, 503, id, -32000, "too many MCP sessions; try again later");
       const sid = randomBytes(24).toString("base64url");
-      sessions.set(hash(sid), { key, seat: null, lastUsed: now });
+      sessions.set(hash(sid), { key, seat: null, lastUsed: now, joining: null, closed: false, inFlight: new InFlight() });
       const asked = String(msg.params?.protocolVersion ?? "");
       return reply(
         { protocolVersion: LEGACY_VERSIONS.includes(asked) ? asked : LEGACY_VERSIONS[LEGACY_VERSIONS.length - 1], capabilities: { tools: { listChanged: false } }, serverInfo: SERVER_INFO, instructions: PLAYBOOK },
@@ -178,7 +218,7 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
         case "prompts/list":
           return done({ prompts: [] });
         case "tools/call":
-          return done(await toolsCall(req, res, msg, null));
+          return done(await toolsCall(req, res, msg, null, hangUpSignal(res)));
         default:
           return rpcError(res, 404, id, -32601, `Method not found: ${method}`);
       }
@@ -199,8 +239,21 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
         return reply({ resources: [] });
       case "prompts/list":
         return reply({ prompts: [] });
-      case "tools/call":
-        return reply(await toolsCall(req, res, msg, session));
+      case "tools/call": {
+        // Cancelled by `notifications/cancelled` or by hanging up: either aborts the call.
+        const t = session.inFlight.open(id);
+        const gone = hangUpSignal(res);
+        const abort = () => t.abort();
+        gone.addEventListener("abort", abort, { once: true });
+        try {
+          const r = await toolsCall(req, res, msg, session, t.signal);
+          if (gone.aborted) return;
+          return reply(r);
+        } finally {
+          gone.removeEventListener("abort", abort);
+          t.done();
+        }
+      }
       default:
         return rpcError(res, 404, id, -32601, `Method not found: ${method}`);
     }
@@ -223,6 +276,7 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
       return;
     }
     sessions.delete(hash(sid));
+    session.closed = true;
     if (session.seat) await gateway.drop(session.seat);
     res.status(204).end();
   });

@@ -2,7 +2,9 @@
 // with only curl uses, and the remote MCP endpoint in both protocol eras, against the in-process
 // server. The seats are kit agents joined over loopback through /api/play, so they are flagged.
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { FirstlightAgent } from "@firstlight/agent-kit";
+import { Session, TOOL_BY_NAME, type ToolDef } from "@firstlight/agent-tools/tools";
 import type { Game } from "../src/app.ts";
 import { GATEWAY_RULES } from "../src/agents/gateway.ts";
 import { AGENT_RULES, resetAgentSlots } from "../src/world/agents.ts";
@@ -196,6 +198,211 @@ describe("the remote MCP endpoint", () => {
     expect((await fetch(`${base}/mcp`, { method: "DELETE", headers: { "mcp-session-id": sid } })).status).toBe(204);
     await waitFor(() => !actor("McpLegacy"));
     expect((await post({ id: 5, method: "tools/list" }, sid)).status).toBe(404);
+  }, 60_000);
+});
+
+// Review 2026-11-13 (agent gateway, GPT-6.1 Sol): #1 unbounded queued work, #3 concurrent legacy
+// joins orphaning seats, #4 legacy notifications/cancelled acknowledged but ignored. Driven over the
+// real HTTP paths; only the action itself is held (firstlight_say waits until released or stopped)
+// so the queue can be seen filling up.
+describe("review 2026-11-13: queues, cancellation and joins hold against a hostile caller", () => {
+  /** Hold firstlight_say until released or stopped; record what started and how many stops came. */
+  function holdSay() {
+    const say = TOOL_BY_NAME.get("firstlight_say") as ToolDef;
+    const run = say.run;
+    const started: string[] = [];
+    let running: ((r: Record<string, unknown>) => void) | null = null;
+    let stops = 0;
+    say.run = (_s, a) => new Promise((ok) => (started.push(a.phrase), (running = ok)));
+    const stop = vi.spyOn(FirstlightAgent.prototype, "stop").mockImplementation(async () => {
+      stops++;
+      running?.({ ok: false, reason: "cancelled", hint: "stopped" });
+      return { ok: true };
+    });
+    const calls = vi.spyOn(Session.prototype, "call");
+    return {
+      started,
+      stops: () => stops,
+      release: () => running?.({ ok: true }),
+      /** The session behind the latest firstlight_say call. */
+      session: () => calls.mock.contexts.findLast((_c, i) => calls.mock.calls[i]![0] === "firstlight_say") as Session | undefined,
+      restore() {
+        say.run = run;
+        stop.mockRestore();
+        calls.mockRestore();
+      },
+    };
+  }
+  const within = <T>(p: Promise<T>, ms: number, what: string) => Promise.race([p, new Promise<never>((_ok, fail) => setTimeout(() => fail(new Error(`no answer in ${ms} ms: ${what}`)), ms))]);
+
+  it("HTTP API: a full seat queue answers 429 at once; a hung-up waiting call never runs and stops nothing", async () => {
+    GATEWAY_RULES.queuePerSeat = 3;
+    const ip = "198.51.100.40";
+    const joined = await json(await fetch(`${base}/api/agent/join`, { method: "POST", headers: { "content-type": "application/json", ...from(ip) }, body: '{"name":"QueueSeat"}' }));
+    expect(joined.body.ok, JSON.stringify(joined.body)).toBe(true);
+    const auth = { authorization: `Bearer ${joined.body.seat}`, "content-type": "application/json", ...from(ip) };
+    const act = (phrase: string, signal?: AbortSignal) => fetch(`${base}/api/agent/act`, { method: "POST", headers: auth, body: JSON.stringify({ tool: "say", phrase }), signal });
+    const h = holdSay();
+    try {
+      const gg = act("GG");
+      await waitFor(() => h.started.length === 1);
+      const s = h.session()!;
+      const hangUp = new AbortController();
+      const thanks = act("Thanks", hangUp.signal).catch(() => null);
+      const helpGone = new AbortController();
+      const help = act("Help!", helpGone.signal).catch(() => null);
+      await waitFor(() => s.pending === 3);
+      // Past the bound: refused at once, not parked for later.
+      const full = await within(act("Truce?"), 5000, "a call past the queue bound");
+      expect(full.status).toBe(429);
+      expect(full.headers.get("retry-after")).toBeTruthy();
+      expect(await full.json()).toMatchObject({ ok: false, reason: "queue full" });
+      // A waiting caller hangs up: its call leaves the queue; the running action goes on.
+      hangUp.abort();
+      await thanks;
+      await waitFor(() => s.pending === 2);
+      expect(h.stops()).toBe(0);
+      h.release();
+      expect((await gg).status).toBe(200);
+      await waitFor(() => h.started.length === 2);
+      expect(h.started).toEqual(["GG", "Help!"]);
+      // The running caller hangs up: its action is stopped.
+      helpGone.abort();
+      await help;
+      await waitFor(() => h.stops() === 1 && s.pending === 0);
+    } finally {
+      h.restore();
+      await fetch(`${base}/api/agent/leave`, { method: "POST", headers: auth });
+    }
+    await waitFor(() => !actor("QueueSeat"));
+  }, 60_000);
+
+  /** A 2025-era MCP client calling from `ip`. */
+  const legacy = (ip: string) => {
+    let id = 100;
+    const post = (body: Record<string, unknown>, sid?: string, signal?: AbortSignal) =>
+      fetch(`${base}/mcp`, { method: "POST", signal, headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...from(ip), ...(sid ? { "mcp-session-id": sid, "mcp-protocol-version": "2025-11-25" } : {}) }, body: JSON.stringify({ jsonrpc: "2.0", ...body }) });
+    return {
+      post,
+      async open(): Promise<string> {
+        const init = await post({ id: ++id, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1" } } });
+        return init.headers.get("mcp-session-id")!;
+      },
+      call: (sid: string, rid: number, name: string, args: Record<string, unknown>) => post({ id: rid, method: "tools/call", params: { name, arguments: args } }, sid).then((r) => r.json() as Promise<any>),
+      del: (sid: string) => fetch(`${base}/mcp`, { method: "DELETE", headers: { "mcp-session-id": sid } }),
+    };
+  };
+
+  it("legacy MCP: notifications/cancelled stops the running call, and a waiting one never runs", async () => {
+    const m = legacy("198.51.100.42");
+    const sid = await m.open();
+    const cj = await m.call(sid, 1, "firstlight_join", { name: "CancelSeat" });
+    expect(cj.result.isError, JSON.stringify(cj)).toBe(false);
+    const h = holdSay();
+    try {
+      const running = m.call(sid, 41, "firstlight_say", { phrase: "GG" });
+      await waitFor(() => h.started.length === 1);
+      const s = h.session()!;
+      const waiting = m.call(sid, 42, "firstlight_say", { phrase: "Thanks" });
+      await waitFor(() => s.pending === 2);
+      // Cancel the waiting one: it leaves the queue (its POST still gets an answer; the client ignores it).
+      expect((await m.post({ method: "notifications/cancelled", params: { requestId: 42, reason: "changed my mind" } }, sid)).status).toBe(202);
+      expect((await within(waiting, 5000, "the cancelled waiting call")).result.content[0].text).toContain("cancelled");
+      expect(s.pending).toBe(1);
+      expect(h.stops()).toBe(0);
+      // Cancel the running one: the character stops.
+      expect((await m.post({ method: "notifications/cancelled", params: { requestId: 41 } }, sid)).status).toBe(202);
+      await within(running, 5000, "the cancelled running call");
+      expect(h.stops()).toBe(1);
+      expect(h.started).toEqual(["GG"]);
+      // Another session can't cancel this one's requests, and unknown ids are ignored.
+      const other = await m.open();
+      const third = m.call(sid, 43, "firstlight_say", { phrase: "Help!" });
+      await waitFor(() => h.started.length === 2);
+      expect((await m.post({ method: "notifications/cancelled", params: { requestId: 43 } }, other)).status).toBe(202);
+      expect((await m.post({ method: "notifications/cancelled", params: { requestId: 999 } }, sid)).status).toBe(202);
+      expect(h.stops()).toBe(1);
+      h.release();
+      expect((await third).result.isError).toBe(false);
+      await m.del(other);
+    } finally {
+      h.restore();
+      await m.del(sid);
+    }
+    await waitFor(() => !actor("CancelSeat"));
+  }, 60_000);
+
+  /** Hold every seat's sign-in until `open()`; counts how many joins reached it. */
+  function holdJoins() {
+    const connect = FirstlightAgent.prototype.connect;
+    let open!: () => void;
+    const gate = new Promise<void>((ok) => (open = ok));
+    let entered = 0;
+    const spy = vi.spyOn(FirstlightAgent.prototype, "connect").mockImplementation(async function (this: FirstlightAgent, o) {
+      entered++;
+      await gate;
+      return connect.call(this, o);
+    });
+    return { open: () => open(), entered: () => entered, restore: () => spy.mockRestore() };
+  }
+
+  it("legacy MCP: two joins at once seat one character, and DELETE leaves nothing behind", async () => {
+    const m = legacy("198.51.100.43");
+    const sid = await m.open();
+    const j = holdJoins();
+    try {
+      const a = m.call(sid, 1, "firstlight_join", { name: "TwinA" });
+      const b = m.call(sid, 2, "firstlight_join", { name: "TwinB" });
+      await waitFor(() => j.entered() >= 1);
+      // Let the second request reach the server before the first join finishes.
+      expect((await m.post({ id: 3, method: "ping" }, sid)).status).toBe(200);
+      j.open();
+      const answers = (await Promise.all([a, b])).map((r) => r.result.content[0].text as string);
+      expect(answers.filter((t) => t.includes('"already playing"'))).toHaveLength(1);
+      expect(j.entered()).toBe(1);
+    } finally {
+      j.restore();
+    }
+    await waitFor(() => !!actor("TwinA") || !!actor("TwinB"));
+    expect((await m.del(sid)).status).toBe(204);
+    await waitFor(() => !actor("TwinA") && !actor("TwinB"), 15_000);
+  }, 60_000);
+
+  it("legacy MCP: a session deleted while its join is awaited closes the seat the join made", async () => {
+    const m = legacy("198.51.100.44");
+    const sid = await m.open();
+    const j = holdJoins();
+    let joined: Promise<any>;
+    try {
+      joined = m.call(sid, 1, "firstlight_join", { name: "LateSeat" });
+      await waitFor(() => j.entered() === 1);
+      expect((await m.del(sid)).status).toBe(204);
+      j.open();
+      expect((await joined).result.content[0].text).toContain("session ended");
+    } finally {
+      j.restore();
+    }
+    await waitFor(() => !actor("LateSeat"), 15_000);
+    // Stays gone (the seat is closed, not idle).
+    await new Promise((ok) => setTimeout(ok, 500));
+    expect(actor("LateSeat")).toBeUndefined();
+  }, 60_000);
+
+  it("a caller that hangs up while it joins leaves no seat behind", async () => {
+    const j = holdJoins();
+    const gone = new AbortController();
+    try {
+      const r = fetch(`${base}/api/agent/join`, { method: "POST", signal: gone.signal, headers: { "content-type": "application/json", ...from("198.51.100.41") }, body: '{"name":"GoneSeat"}' }).catch(() => null);
+      await waitFor(() => j.entered() === 1);
+      gone.abort();
+      await r;
+      j.open();
+    } finally {
+      j.restore();
+    }
+    await waitFor(() => !!actor("GoneSeat"), 15_000).catch(() => {});
+    await waitFor(() => !actor("GoneSeat"), 15_000);
+    expect((await json(await fetch(`${base}/api/agent`))).body.seats.used).toBe(0);
   }, 60_000);
 });
 
