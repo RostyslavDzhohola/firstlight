@@ -1060,6 +1060,19 @@ leads at least one role and none leads all, and that no starter duel is more lop
 
 ---
 
+### 8.7 Residents who talk (#82, D-agents-3; code `packages/shared/src/content/residentLines.ts`, `apps/server/src/world/residentSpeech.ts`, `tools/agent/resident-talk.ts`)
+
+| Number | Value |
+| --- | --- |
+| A resident line is heard within | 30 m (speech bubble; a subtitle too for the person it answers) |
+| Lines per speaker | one every 2 s, at most 12 a minute (agents only) |
+| A resident greets a person within | 6 m, once per person every 5 min (greeting, then what it is doing) |
+| It answers phrase-wheel lines said within | 15 m; the nearest resident answers, the rest stay quiet |
+| Between two lines of one answer | 2.6 s |
+| Bubble time | 2.5 s + 45 ms per character, at most 9 s |
+| Lines | 4 voices (Brindle Oake, Tamsin Hollis, Marlo Thistle, Juniper Fenn; the rest of the cast speak with their role's), 9 topics, 66 lines, each at most 140 characters |
+| Model brain defaults | one call per 6 s at most (whole run), 120 calls and 100,000 tokens per rolling hour, 80 output tokens, 8 s timeout |
+
 ## 9. Asset sources
 
 **Rule (D):** code is MIT and our own art is CC BY 4.0. Keep a manifest per file: author, URL, licence,

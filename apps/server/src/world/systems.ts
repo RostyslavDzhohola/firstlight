@@ -14,6 +14,7 @@ import { createHorseSystem } from "./horses/HorseSystem.ts";
 import { createOnboardingSystem } from "./onboarding.ts";
 import { createAdminModeSystem } from "./adminMode.ts";
 import { createSpellSystem } from "./spells/SpellSystem.ts";
+import { createResidentSpeech } from "./residentSpeech.ts";
 
 export interface RoomSystem {
   /** Called every simulation tick (50 ms). */
@@ -53,3 +54,5 @@ SYSTEM_FACTORIES.push(createOnboardingSystem);
 SYSTEM_FACTORIES.push(createAdminModeSystem);
 // Spells lane: the spellbook (aether, Skipstep, Frostbloom, Wishfall, Glasswing Ward; hooks combat via host.wards).
 SYSTEM_FACTORIES.push(createSpellSystem);
+// Agents lane (#82): residents speak authored lines as speech bubbles (no free text).
+SYSTEM_FACTORIES.push(createResidentSpeech);

@@ -469,6 +469,7 @@ node tools/agent/residents.ts --url http://localhost:2567 --count 8 --bodies por
 | `--roles` | Cycle these roles instead of the cast's own | the cast's |
 | `--seconds` | Stop after this long | until Ctrl-C |
 | `--cpu` | The process's CPU budget, as a share of one core: over it, everyone rests longer between steps | 0.5 |
+| `--max-humans` | Play only while at most this many people are online (see [The budget switch](#the-budget-switch)) | always |
 | `--dev` | Dev guest tokens (a server started with `ALLOW_DEV_GUESTS=1`) | off |
 
 The cast, in order: Brindle_Oake (hunter), Tamsin_Hollis (wanderer), Marlo_Thistle (trader),
@@ -477,7 +478,7 @@ Juniper_Fenn (hunt-chaser), then Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_R
 | Role | What it does |
 | --- | --- |
 | hunter | Lives on a planet. Takes the guide's hunts, farms hostile creatures of its own level within 190 m of the main pad (peaceful wildlife is left alone), picks up its own loot, drinks and retreats when hurt. |
-| wanderer | Walks between pads, portals and named landmarks, stops to look, and greets people who come within 12 m with the phrase wheel (once every few minutes each). |
+| wanderer | Walks between pads, portals and named landmarks, stops to look, and turns to people who come within 12 m (the talk layer greets them in words: see [Talking to residents](#talking-to-residents-82)). |
 | trader | Idles at the shop and, in Portus, the plaza scoreboard: browses, buys a tonic when it has the coins, steps off the till so people can use it. |
 | hunt-chaser | Takes a trial of the Three Gleams from Sela Marchbank, travels to it, attempts it, comes back; opens the vault if it ever wins all three. |
 
@@ -489,6 +490,60 @@ nearest safe zone and leaves there, so no body is left in the wild to be killed 
 cut off from safety uses the logout countdown where it stands). A second Ctrl-C quits at once.
 The run ends with `RESULT {…}`: each resident's kills, deaths, yields, greetings, metres walked and
 `corrections`, and the CPU the process used.
+
+### Talking to residents (#82)
+
+Walk up to a resident and it greets you by name and says who it is and what it is doing; use the
+phrase wheel (G) near it and it answers in character: **Help!** gets the way to where your level
+should go (the portal that fits you in Portus, the guide or the way home on a planet, in metres and
+a compass direction) and then a tip for your level; **Thanks**, **GG**, **Truce?**, **Follow me** and
+**Boss here** get a word back. The nearest resident answers; the others stay quiet. The four first
+residents have voices of their own (Brindle the Hopbit-grudge hunter, Tamsin the cartographer, Marlo
+the salesman of things he doesn't own, Juniper who is always racing); the rest speak with their role's.
+
+There is no text chat in FIRSTLIGHT, so residents don't type either: they say **authored lines** by
+id (`packages/shared/src/content/residentLines.ts`), and the server fills the slots (your name, a
+place from a fixed list, metres, a compass word) and shows the bubble. Any agent may `speak` a line
+with the kit (`agent.speak("tamsin.greet.1", { to })`); people keep the phrase wheel.
+
+**The brain** chooses the lines. It is an interface (`tools/agent/resident-talk.ts`) with two
+implementations:
+
+| Brain | How it picks | Cost |
+| --- | --- | --- |
+| scripted (default) | From the world state: the person's level, where they stand, what they said | none |
+| model (`FL_RESIDENT_BRAIN=model`) | Any OpenAI-compatible (`<url>/chat/completions`) or Anthropic (`<url>/v1/messages`) endpoint, asked only when someone talks, with a short observation and the candidate lines; it answers with line ids | see below |
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `FL_RESIDENT_BRAIN` | `model` to use one | scripted |
+| `FL_RESIDENT_API` | `openai` (any compatible server) or `anthropic` | `openai` |
+| `FL_RESIDENT_URL`, `FL_RESIDENT_MODEL`, `FL_RESIDENT_KEY` | The endpoint's base URL, the model, the key | none |
+| `FL_RESIDENT_CALLS_PER_HOUR`, `FL_RESIDENT_TOKENS_PER_HOUR` | The hard budget per rolling hour | 120, 100000 |
+| `FL_RESIDENT_GAP_S` | At most one call this often | 6 |
+
+When the budget is spent, a call fails or times out (8 s), or the answer isn't one of the offered
+ids, the scripted brain answers instead: a resident never goes quiet and never says free text.
+
+**What a real hour costs** (token arithmetic, nothing was called): a prompt is about 250 tokens in
+(measured on the built prompts: 160 to 255) and about 30 out. At the default cap of 120 calls an hour
+that is about 31,000 tokens in and 3,600 out: **about $0.007 an hour** for a small model priced like
+`gpt-4o-mini` ($0.15 in, $0.60 out per million tokens) and **about $0.05 an hour** for one priced like
+Claude Haiku 4.5 ($1 in, $5 out). The hardest the cadence allows (one call every 6 s, 600 an hour)
+is five times that: $0.03 and $0.25. Prices are list prices as known on 2026-11-13; check the
+provider's page before turning it on.
+
+### The budget switch
+
+`--max-humans N`: residents play only while at most N people are online (the server's
+`/api/online` count, which leaves agents out), checked every 30 s. Over it, each ends its step,
+walks to the nearest safe zone and leaves; when the count is N or fewer again they come back. The
+house rules stand either way: a resident never attacks a player and never takes a kill or loot from
+a person (`apps/server/test/residents.test.ts`).
+
+```sh
+node tools/agent/residents.ts --count 4 --max-humans 6
+```
 
 Each resident keeps its guest session in `~/.firstlight/agents/residents/` (one file per server and
 name), so the same characters come back on the next run and keep their levels.

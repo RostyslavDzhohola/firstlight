@@ -76,6 +76,18 @@ export interface ActionResult {
   [k: string]: unknown;
 }
 
+/** Something a player near you said: a phrase-wheel line (`phrase`) or a resident's line (`text`). */
+export interface Heard {
+  /** The speaker's session id (as in `observe().players[].id`). */
+  by: string;
+  name: string;
+  phrase?: string;
+  text?: string;
+  line?: string;
+  /** A resident's line addressed to you. */
+  toMe?: boolean;
+}
+
 export interface AgentEvent {
   at: number;
   type: "hit" | "hurt" | "kill" | "death" | "toast" | "denied" | "mission" | "shop" | "info" | "phrase" | "level" | "spell" | "trial";
@@ -607,7 +619,16 @@ export class FirstlightAgent {
         this.huntIds = new Set(m.npcs as string[]);
         break;
       case "phrase":
-        if (m.by !== id) this.note("phrase", `${this.nameOf(m.by)} says "${PHRASES[m.id] ?? "…"}"`);
+        if (m.by !== id) {
+          this.note("phrase", `${this.nameOf(m.by)} says "${PHRASES[m.id] ?? "…"}"`);
+          this.hear({ by: m.by, name: this.nameOf(m.by), phrase: PHRASES[m.id] ?? "" });
+        }
+        break;
+      case "speech":
+        if (m.by !== id) {
+          this.note("phrase", `${this.nameOf(m.by)}: "${String(m.text)}"`);
+          this.hear({ by: m.by, name: this.nameOf(m.by), text: String(m.text), line: String(m.line), toMe: m.to === id });
+        }
         break;
       case "announce":
         this.note("info", `announcement: ${m.text}`);
@@ -1916,6 +1937,35 @@ export class FirstlightAgent {
     if (!Number.isInteger(id) || id < 0 || id >= PHRASES.length) return { ok: false, reason: "no such phrase", hint: PHRASES.map((p, i) => `${i}: ${p}`).join(", ") };
     this.room!.send("phrase", { id });
     return { ok: true, said: PHRASES[id] };
+  }
+
+  /**
+   * Say an authored resident line (content/residentLines.ts) by id, as a speech bubble for everyone
+   * within 30 m. The server fills `{you}` (the player `to` answers) and `{me}`, and checks the
+   * place, distance and direction against its lists. Agents only, one line every 2 s.
+   */
+  async speak(line: string, slots: { to?: string; place?: string; dist?: number; dir?: string } = {}): Promise<ActionResult> {
+    const no = this.notPlaying();
+    if (no) return no;
+    this.room!.send("speak", { line, ...slots });
+    return { ok: true, line };
+  }
+
+  /** Hear what players near you say (phrase-wheel lines and resident lines). Returns the unsubscribe. */
+  onHeard(fn: (h: Heard) => void): () => void {
+    this.hearers.add(fn);
+    return () => this.hearers.delete(fn);
+  }
+
+  private hearers = new Set<(h: Heard) => void>();
+  private hear(h: Heard): void {
+    for (const fn of this.hearers) {
+      try {
+        fn(h);
+      } catch {
+        /* a listener's bug is its own */
+      }
+    }
   }
 
   /** Skip the Portus tutorial (three training dummies): it pays 50 XP when done, nothing when skipped. */
