@@ -153,4 +153,52 @@ describe("the budget switch", () => {
       await run.done;
     }
   }, 150_000);
+
+  // Review 2026-11-13 (agent gateway, GPT-6.1 Sol) #5: residents joined before the first count, and
+  // a count that failed kept the last permission for good.
+  it("over the limit at start-up: nobody joins at all", async () => {
+    const lines: string[] = [];
+    const run = runResidents({ url, count: 1, cast: CAST.filter((c) => c.name === "Tamsin_Hollis"), bodies: ["portus"], cpu: 1, dev: true, maxHumans: 2, humans: async () => 3, humansEveryMs: 200, log: (l) => lines.push(l) });
+    try {
+      await waitFor(() => run.report().humans === 3, 10_000);
+      await new Promise((ok) => setTimeout(ok, 1500));
+      expect(run.report()).toMatchObject({ humans: 3, parked: true });
+      expect(lines.filter((l) => l.includes("joined")), lines.join("\n")).toEqual([]);
+      expect(actor("Tamsin_Hollis")).toBeUndefined();
+      expect(run.report().residents[0]!.status).toBe("parked");
+    } finally {
+      run.stop();
+      await run.done;
+    }
+  }, 60_000);
+
+  it("while the count is unknown they stay out, and a count that fails later takes them out", async () => {
+    const lines: string[] = [];
+    let people: number | null = null; // null: the count fails
+    let asked = 0;
+    const humans = async () => {
+      asked++;
+      if (people === null) throw new Error("count unavailable");
+      return people;
+    };
+    const run = runResidents({ url, count: 1, cast: CAST.filter((c) => c.name === "Tamsin_Hollis"), bodies: ["portus"], cpu: 1, dev: true, maxHumans: 2, humans, humansEveryMs: 200, log: (l) => lines.push(l) });
+    try {
+      await waitFor(() => asked >= 3, 15_000);
+      expect(run.report()).toMatchObject({ humans: null, parked: true });
+      expect(lines.filter((l) => l.includes("joined")), lines.join("\n")).toEqual([]);
+      expect(actor("Tamsin_Hollis")).toBeUndefined();
+      // A valid count under the limit: in they come.
+      people = 1;
+      await waitFor(() => !!actor("Tamsin_Hollis"), 30_000);
+      expect(run.report()).toMatchObject({ humans: 1, parked: false });
+      // The count fails again: unknown is not permission, so they step out.
+      people = null;
+      await waitFor(() => !actor("Tamsin_Hollis") && run.report().parked, 60_000);
+      expect(run.report().humans).toBeNull();
+      expect(agentsOnline()).toBe(0);
+    } finally {
+      run.stop();
+      await run.done;
+    }
+  }, 150_000);
 });
