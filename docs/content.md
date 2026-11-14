@@ -175,7 +175,7 @@ The server decides every spend and respec and saves the tree with the character 
 | Branch | Row | Node | Cost | Effect |
 |---|---|---|---|---|
 | Body | 1 | Hardy | 1 | Max HP ×1.12 (on the starter's level curve) |
-| Body | 2 | Second Roll | 2 | Hold **two** dodge rolls; each comes back one dodge cooldown after it was used (the movement budget holds a roll per charge) |
+| Body | 2 | Second Roll | 2 | Hold **two** dodge rolls; each comes back one dodge cooldown after it was used (the movement budget holds a roll per charge); two rolls start at least 400 ms apart (`ROLL_GAP_MS`), so a roll's own packets spend one charge |
 | Body | 3 | Tonic Craft | 3 | Tonics heal ×1.4 and **end a running slow/chill and a burn** |
 | Body | 4 | Last Breath | 3 | A blow from someone that would kill leaves 1 HP instead, once per 90 s (falls are not saved). Regeneration is untouched: no Body node heals inside a fight (§1.1) |
 | Blade | 1 | Keen Edge | 1 | Melee damage ×1.1 |

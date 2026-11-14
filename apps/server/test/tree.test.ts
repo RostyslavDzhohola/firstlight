@@ -6,11 +6,14 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, isSafe } from "@firstlight/shared";
-import { playerMaxHp, RESPEC, TREE, treePoints } from "@firstlight/shared/content/tree";
+import { playerMaxHp, RESPEC, ROLL_GAP_MS, TREE, treePoints } from "@firstlight/shared/content/tree";
 import Database from "better-sqlite3";
 import { ensureAccount, killCharacter, loadCharacter, openGameDb, saveCharacter, type CharacterData, type Db } from "../src/db/index.ts";
 import { MIGRATIONS, migrate } from "../src/db/schema.ts";
-import { dodgeReady, moveLimits } from "../src/world/movement.ts";
+import { dodgeReady, motionFields, moveLimits, validateMove, type MoveWorld } from "../src/world/movement.ts";
+import type { PlayerActor } from "../src/world/actors.ts";
+import { STARTER_STATS } from "@firstlight/shared/content/starters";
+import { ANIM } from "@firstlight/shared/net/schema";
 import { tempDir } from "./auth-helpers.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, dieAndRejoin, harness, me, offPad, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
@@ -112,11 +115,68 @@ describe("build tree on a live room (#81)", () => {
     expect(built.sprint!).toBeCloseTo(plain.sprint! * 1.06, 5);
     const ms = built.dodgeCooldownMs!;
     const t = Date.now();
-    expect(dodgeReady({ lastDodgeAt: t - 100, dodgeTimes: [t - 100] }, t, ms, 2)).toBe(true);
-    expect(dodgeReady({ lastDodgeAt: t - 50, dodgeTimes: [t - 100, t - 50] }, t, ms, 2)).toBe(false);
-    expect(dodgeReady({ lastDodgeAt: t - 50, dodgeTimes: [t - ms - 1, t - 50] }, t, ms, 2)).toBe(true);
-    expect(dodgeReady({ lastDodgeAt: t - 100 }, t, ms, 1)).toBe(false);
+    expect(dodgeReady({ lastDodgeAt: t - 500, dodgeTimes: [t - 500] }, t, ms, 2)).toBe(true);
+    expect(dodgeReady({ lastDodgeAt: t - 500, dodgeTimes: [t - 900, t - 500] }, t, ms, 2)).toBe(false);
+    expect(dodgeReady({ lastDodgeAt: t - 450, dodgeTimes: [t - ms - 1, t - 450] }, t, ms, 2)).toBe(true);
+    expect(dodgeReady({ lastDodgeAt: t - 500 }, t, ms, 1)).toBe(false);
   }, 20_000);
+});
+
+// Review finding 2: the client sends DODGE in every 50 ms packet through its 300 ms roll. Each roll
+// must spend one charge, and only a client holding Second Roll gets a second roll's burst.
+describe("Second Roll on the real packet sequence (movement.ts validateMove)", () => {
+  const flat: MoveWorld = { radius: 1000, waterLevel: -100, groundAt: () => 0 };
+  const PLAIN_ROW = STARTER_STATS.length; // no starter row: the base pace and the base 1.2 s cooldown
+  type Pkt = { metres: number; anim: number };
+  const roll: Pkt[] = Array.from({ length: 6 }, () => ({ metres: (4.5 / 0.3) * 0.05, anim: ANIM.DODGE })); // 4.5 m in 0.3 s
+  const sprint = (n: number): Pkt[] => Array.from({ length: n }, () => ({ metres: 9 * 0.05, anim: ANIM.SPRINT }));
+  // A roll, 200 ms of sprint, a second roll 400 ms after the first started (ROLL_GAP_MS), sprint again.
+  const twoRolls = [...roll, ...sprint(2), ...roll, ...sprint(4)];
+
+  /** Play the packets at 20 Hz along a great circle on a flat world from an empty bank; refusals and the charges spent. */
+  function play(tree: string[], packets: Pkt[]) {
+    let now = 1_000_000;
+    const a = { ...motionFields(1000, now - 5000), lastX: 0, lastY: 0, lastZ: 1000, state: { x: 0, y: 0, z: 1000 }, mounted: false, mountGraceUntil: 0, char: { starter: PLAIN_ROW, tree } } as unknown as PlayerActor;
+    a.moveBudget = 0;
+    a.lastBudgetAt = now;
+    let arc = 0, refused = 0;
+    const spentAfter: number[] = [];
+    for (const p of packets) {
+      now += 50;
+      const t = arc + p.metres / 1000;
+      const m = { x: Math.sin(t) * 1000, y: 0, z: Math.cos(t) * 1000, anim: p.anim };
+      if (validateMove(a, m, flat, moveLimits(a, now), now).ok) {
+        a.lastX = m.x;
+        a.lastY = m.y;
+        a.lastZ = m.z;
+        arc = t;
+      } else refused++;
+      spentAfter.push((a.dodgeTimes ?? []).length);
+    }
+    return { refused, spentAfter };
+  }
+
+  it("one roll's six DODGE packets spend one charge, with the node and without", () => {
+    expect(ROLL_GAP_MS).toBeGreaterThan(roll.length * 50);
+    for (const tree of [["body_hardy", "body_second_roll"], []]) {
+      const r = play(tree, [...roll, ...sprint(4)]);
+      expect(r.refused).toBe(0);
+      if (tree.length) expect(r.spentAfter).toEqual(Array(10).fill(1));
+    }
+  });
+
+  it("a second distinct roll right after the first fits with Second Roll and spends the second charge", () => {
+    const r = play(["body_hardy", "body_second_roll"], twoRolls);
+    expect(r.refused).toBe(0);
+    expect(r.spentAfter.slice(0, 8)).toEqual(Array(8).fill(1));
+    expect(r.spentAfter.slice(8)).toEqual(Array(10).fill(2));
+  });
+
+  it("a client without the node can't claim the second roll's burst: those steps are refused", () => {
+    expect(play([], twoRolls).refused).toBeGreaterThan(0);
+    // ...and with one charge the same packets a full cooldown apart fit again.
+    expect(play([], [...roll, ...sprint(18), ...roll, ...sprint(4)]).refused).toBe(0);
+  });
 });
 
 describe("build tree storage (migration 13)", () => {

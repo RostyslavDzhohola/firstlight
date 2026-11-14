@@ -178,14 +178,27 @@ export function playerMaxHp(c: { starter: number; level: number; tree?: readonly
 }
 
 /**
+ * The least time between two roll starts (ms). A roll lasts 300 ms and the client sends `DODGE` in
+ * every input packet through it (20 a second), so the server would count each packet as a new roll
+ * while a second charge was left (build tree review 2). Rolls start at least this far apart on both
+ * sides: a roll's own packets never spend a charge, and the 100 ms past the roll leaves the client
+ * a packet or two out of the roll between back-to-back rolls and covers arrival jitter. One charge
+ * never notices: every starter's cooldown is longer.
+ */
+export const ROLL_GAP_MS = 400;
+
+/**
  * May a dodge roll start now (Second Roll)? `times`: when the rolls still counted were used. One
  * charge: a full cooldown since the last roll. More: fewer than `charges` rolls in the last cooldown,
- * so each charge comes back one cooldown after it was spent. The server validates with it and the
- * client predicts with it.
+ * so each charge comes back one cooldown after it was spent, and never within ROLL_GAP_MS of the
+ * last start. The server validates with it and the client predicts with it.
  */
 export function rollReady(times: readonly number[], now: number, cooldownMs: number, charges: number): boolean {
   let recent = 0;
-  for (const t of times) if (now - t < cooldownMs) recent++;
+  for (const t of times) {
+    if (now - t < ROLL_GAP_MS) return false;
+    if (now - t < cooldownMs) recent++;
+  }
   return recent < Math.max(1, charges);
 }
 

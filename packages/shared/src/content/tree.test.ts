@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { maxHp } from "./progression.ts";
-import { starterStats } from "./starters.ts";
-import { BRANCHES, buildStats, NEUTRAL_BUILD, nodeLine, normalizeTree, playerMaxHp, pointsLeft, respecCost, rollReady, spendRefusal, spentPoints, TREE, treePoints, treeYou } from "./tree.ts";
+import { STARTER_STATS, starterStats } from "./starters.ts";
+import { BRANCHES, buildStats, NEUTRAL_BUILD, nodeLine, normalizeTree, playerMaxHp, pointsLeft, respecCost, ROLL_GAP_MS, rollReady, spendRefusal, spentPoints, TREE, treePoints, treeYou } from "./tree.ts";
 
 describe("build tree (#81)", () => {
   it("has five branches, rows from 1 with costs 1, 2, 3, 3, and about half the tree at level 20", () => {
@@ -53,6 +53,14 @@ describe("build tree (#81)", () => {
     expect(rollReady([500], 1000, 1200, 1)).toBe(false);
     expect(rollReady([500], 1000, 1200, 2)).toBe(true);
     expect(rollReady([500, 900], 1000, 1200, 2)).toBe(false);
-    expect(rollReady([-300, 900], 1000, 1200, 2)).toBe(true);
+    expect(rollReady([-300, 500], 1000, 1200, 2)).toBe(true);
+  });
+
+  it("never starts a roll within ROLL_GAP_MS of the last, so a roll's own packets don't spend a charge", () => {
+    expect(ROLL_GAP_MS).toBeGreaterThan(300); // a roll's length (PlayerController MOVE.dodgeTime)
+    for (const s of STARTER_STATS) expect(s.dodgeCooldown * 1000).toBeGreaterThan(ROLL_GAP_MS); // one charge never notices
+    expect(rollReady([1000 - ROLL_GAP_MS + 1], 1000, 1200, 2)).toBe(false);
+    expect(rollReady([1000 - ROLL_GAP_MS], 1000, 1200, 2)).toBe(true);
+    expect(rollReady([-300, 1000 - ROLL_GAP_MS + 1], 1000, 1200, 2)).toBe(false);
   });
 });
