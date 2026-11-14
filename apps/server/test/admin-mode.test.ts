@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { motionFields, moveLimits } from "../src/world/movement.ts";
 import type { PlayerActor } from "../src/world/actors.ts";
 import { adminCheck, adminItems } from "../src/world/adminMode.ts";
-import { addAccountStat, getAccountStat, loadCharacter, openGameDb, type Db } from "../src/db/index.ts";
+import { addAccountStat, flushFunnel, getAccountStat, loadCharacter, openGameDb, type Db } from "../src/db/index.ts";
 import { ensureAccount } from "../src/db/accounts.ts";
 import { setGameDb, stmt } from "../src/db/game-db.ts";
 import { rayTerrain } from "../src/world/geometry.ts";
@@ -344,6 +344,7 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
   it("the whole kit, kills, loot, props, pads, eggs, a bypassing writer and travel leave game.db as it was", async () => {
     const { s } = await owner("auditor");
     await onlyRooms((md) => md.sandbox === "auditor"); // the real room closed (its last writes done)
+    flushFunnel(); // the real room's funnel rows (its join) are written by a timer: write them now
     const before = snapshot();
     const refusedBefore = refusedWrites.count;
     const sb = sandboxOfBot(s);
@@ -387,6 +388,7 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
     expect(me(t).level).toBe(LEVEL_CAP);
     await safeLeave(t.room);
     await onlyRooms(() => false);
+    flushFunnel(); // anything a sandbox queued for the funnel would be written now, and show
     expect(snapshot()).toBe(before);
     expect(db.prepare("SELECT COUNT(*) AS n FROM test_account").get()).toEqual({ n: 0 }); // never flagged from a sandbox (D-home-6)
     expect(EGG_TIMERS.puzzles.size).toBe(0);
@@ -476,6 +478,7 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
     const p = await bot("patient", "arcadia", "");
     const pa = serverRoom(p).actors.get(p.id)!;
     pa.state.hp = 40;
+    pa.combatUntil = Date.now() + 120_000; // in a fight: out-of-combat regeneration (#77) stays off, only a heal could move HP
     const { s } = await owner("medic");
     mode(s, { action: "hand", id: "patchkit", tier: 3 });
     await until("patchkit", () => s.you.hotbar[s.you.selected]?.id === "patchkit");
@@ -682,8 +685,11 @@ describe("the sandbox's write guard (game.db stmt)", () => {
     };
     walk(root);
     // game-db.ts is the entry point; schema.ts migrates at boot; leaderboard.ts explains its plan in a
-    // test hook; auth/ holds the sign-in database (auth.db), which no room code reaches.
-    const allowed = /\/(db\/game-db|db\/schema|db\/leaderboard)\.ts$|\/auth\//;
+    // test hook; auth/ holds the sign-in database (auth.db), which no room code reaches. The funnel
+    // (D-sec3-1): funnel.ts only sets pragmas (busy_timeout around its flush) and writes through
+    // stmt(); funnelService.ts sets the game connection's checkpoint pragma; funnelReport.ts and
+    // funnelWorker.ts run on the worker's own connection (and in tools and tests), never from a room.
+    const allowed = /\/(db\/game-db|db\/schema|db\/leaderboard|db\/funnel|db\/funnelService|db\/funnelReport|db\/funnelWorker)\.ts$|\/auth\//;
     const raw = files.filter((f) => !allowed.test(f) && /\.(prepare|exec|pragma)\(|new Database\(/.test(readFileSync(f, "utf8")));
     expect(raw.map((f) => f.slice(root.length))).toEqual([]);
     const authFromRooms = files.filter((f) => /\/(world|social)\//.test(f) && /authDb/.test(readFileSync(f, "utf8")));

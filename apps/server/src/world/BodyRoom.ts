@@ -4,11 +4,11 @@
 
 import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { BODIES, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
+import { BODIES, BODY_IDS, bodyGravity, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
-import { starterMaxHp } from "@firstlight/shared/content/starters";
+import { buildStats, normalizeTree, playerMaxHp, reloadMs } from "@firstlight/shared/content/tree";
 import { STARTERS, starterLook, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
@@ -17,6 +17,7 @@ import type { Identity } from "../auth/identity.ts";
 import { actorPos, adminSwitch, inSaddle, pushHistory, staleAfterServerMove, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
+import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 import { releaseAgentSlot, useAgentSeat } from "./agents.ts";
@@ -26,6 +27,7 @@ export const bannedCheck: { current: (userId: string) => boolean } = { current: 
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
+import { clearSlow } from "./npc/effects.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { voiceItemHidden } from "./voice/index.ts";
@@ -87,7 +89,7 @@ export const RULES = {
  * Runtime state a takeover hands from the old actor to the new session's (F12 B2): protection keeps
  * its expiry, and cooldowns, damage/heal-over-time and NPC effects survive a reload.
  */
-const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "healCooldownUntil", "tonicCooldownUntil", "lastAttackAt", "reloadEndsAt", "heat", "overheatUntil", "specialReadyAt", "lastDodgeAt", "lastPhraseAt", "lastDamagedBy", "npcFx", "violations"] as const satisfies readonly (keyof PlayerActor)[];
+const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "healCooldownUntil", "tonicCooldownUntil", "lastAttackAt", "reloadEndsAt", "heat", "overheatUntil", "specialReadyAt", "lastDodgeAt", "lastPhraseAt", "lastDamagedBy", "npcFx", "violations", "lastBreathReadyAt", "dodgeTimes"] as const satisfies readonly (keyof PlayerActor)[];
 
 const vec = z.number().finite();
 const inputSchema = z.object({ seq: z.number().int().nonnegative(), x: vec, y: vec, z: vec, fx: z.number().min(-1).max(1), fy: z.number().min(-1).max(1), fz: z.number().min(-1).max(1), anim: z.number().int().min(0).max(31), t: vec });
@@ -139,7 +141,7 @@ const YOU_LAZY_MS = 400;
  * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
  * per client still bounds everything else.
  */
-export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2, cast: 5, spellSync: 2 };
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2, cast: 5, spellSync: 2, tree: 5 };
 /** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
 const BAD_MESSAGE_LIMIT = 20;
 
@@ -330,7 +332,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
     // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
     const listPiles = !options.loadtest;
-    if (listPiles) for (const p of pileStore.current.list(options.body)) this.addPileToState(p);
+    // A pile a solid added since it was left (a wild site's hull or tower: review 2026-11-13 world
+    // sites, finding 2) moves out to clear ground, saved, before anyone sees it.
+    if (listPiles) for (const p of pileStore.current.list(options.body)) this.addPileToState(this.unburyPile(p));
     this.portals = portalSpots(this.bodyDef, this.terrain);
     this.unsubscribePiles = onPileEvent((e) => {
       if (!listPiles) return;
@@ -374,7 +378,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       a.chargeStartedAt = on ? Date.now() : 0;
       a.chargeItem = on ? (a.char.hotbar[a.char.selected] ?? null) : null;
     });
-    this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
+    this.onMessage("travel", z.object({ to: z.enum(BODY_IDS as unknown as [BodyId, ...BodyId[]]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
       if (!a || (m.on && inSaddle(a, Date.now()))) return;
@@ -486,7 +490,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     void legacy;
     characterRepo.current.ensure?.(auth.userId);
     char ??= characterRepo.current.load(auth.userId);
-    if (!char) char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
+    let charCreated = false;
+    if (!char) {
+      char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
+      charCreated = true;
+    }
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
@@ -504,7 +512,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.fz = f[2];
     p.anim = ANIM.IDLE;
     p.level = char.level;
-    p.maxHp = starterMaxHp(char.starter, char.level);
+    p.maxHp = playerMaxHp(char);
     p.hp = char.dead ? 0 : Math.max(1, Math.min(p.maxHp, char.hp || p.maxHp));
     p.name = auth.name;
     p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
@@ -544,13 +552,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       diedAt: 0,
       lastDamagedBy: null,
       youDirty: true,
-      ...motionFields(Math.hypot(p.x, p.y, p.z), now),
+      ...motionFields(Math.hypot(p.x, p.y, p.z), now, bodyGravity(this.bodyDef)),
       chargeStartedAt: 0,
       chargeItem: null,
       specialReadyAt: 0,
       lastPhraseAt: 0,
       healAcc: 0,
       ...(this.sandbox ? { sandbox: this.sandbox } : {}),
+      ...(charCreated ? { charCreated: true } : {}),
     };
     if (old) {
       const carried = a as unknown as Record<string, unknown>, from = old as unknown as Record<string, unknown>;
@@ -785,8 +794,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     } else {
       if (a.airborne && !swimmingOk && !flying) {
         const drop = a.peakRadius - (R + ground);
-        const frac = fallDamageFraction(drop);
-        if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
+        const frac = fallDamageFraction(drop, bodyGravity(this.bodyDef), buildStats(a.char.tree).safeFallM);
+        if (frac > 0) dealDamage(this.host, null, a, frac * playerMaxHp(a.char), false);
       }
       a.airborne = false;
       a.peakRadius = len;
@@ -850,10 +859,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   reload(a: PlayerActor | undefined) {
     if (!a || a.dead) return;
-    const { tier } = selectedWeapon(a);
+    const { def, tier } = selectedWeapon(a);
     const item = a.char.hotbar[a.char.selected];
     if (!item || tier.mag === undefined || (item.mag ?? tier.mag) >= tier.mag) return;
-    a.reloadEndsAt = Date.now() + (tier.reload ?? 1.5) * 1000;
+    a.reloadEndsAt = Date.now() + reloadMs(def, tier, buildStats(a.char.tree)); // the same time as an empty magazine's (Quick Hands)
     item.mag = tier.mag;
     a.youDirty = true;
   }
@@ -874,7 +883,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (now < a.tonicCooldownUntil) return;
       a.tonicCooldownUntil = now + 8000;
       const dur = item.id === "tonic_small" ? 3 : 4;
-      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000, left: tier.heal ?? 40 });
+      // Tonic Craft (build tree): more healing, and it ends a slow and a burn.
+      const build = buildStats(a.char.tree);
+      const heal = (tier.heal ?? 40) * build.tonicHeal;
+      a.heals.push({ perSec: heal / dur, until: now + dur * 1000, left: heal });
+      if (build.tonicCleanse) cleanse(a, now);
       this.consume(a, slot);
     } else if (item.id === "patchkit" || item.id === "bubble") {
       supportOf(this)?.use(a, slot, item, targetId); // channelled heal / shield bubble (support.ts)
@@ -994,7 +1007,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         for (const k of Object.keys(live)) if (!(k in char)) delete live[k];
         Object.assign(a.char, char);
         a.state.level = a.char.level;
-        a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
+        a.state.maxHp = playerMaxHp(a.char);
         a.state.hp = Math.min(a.state.hp, a.state.maxHp);
         this.equip(a, a.char.selected);
       }
@@ -1012,7 +1025,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    */
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData | null {
     if (owner.identity.loadtest || this.metadata?.loadtest) return null;
-    const g = this.snapToGround(at);
+    // On the ground under `at`: under a lookout or a wall top that is inside the solid, so out to clear ground.
+    const under = this.snapToGround(at);
+    const g = this.pileOutOfSolids(under) ?? under;
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
       x: g[0],
@@ -1035,6 +1050,28 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     return pile;
   }
 
+  /**
+   * Where a pile on the ground at `g` must go, or null if it can stay: inside a structure or a
+   * natural solid (a wreck's hull, a tower's core, a boulder: hidden, and maybe beyond pickup reach
+   * of anywhere a player stands), the nearest clear ground, found the way a player is placed
+   * (clearOfStructures). A pile merely beside a wall or a tree stays put.
+   */
+  private pileOutOfSolids(g: V3): V3 | null {
+    const step = PLAYER_BODY.step;
+    if (!this.structures?.footing(g[0], g[1], g[2], step).inside && !this.nature.footing(g[0], g[1], g[2], step).inside) return null;
+    return this.clearOfStructures(g);
+  }
+
+  /** `p` moved out of a solid it lies in (pileOutOfSolids) and the move saved; else `p`. */
+  private unburyPile(p: PileData): PileData {
+    const q = this.pileOutOfSolids([p.x, p.y, p.z]);
+    if (!q) return p;
+    const moved = pileStore.current.move(p.id, q[0], q[1], q[2]);
+    if (!moved) return p;
+    emitPileEvent({ kind: "update", pile: moved }); // the body's other copy, if it is up
+    return moved;
+  }
+
   private addPileToState(p: PileData) {
     this.piles.set(p.id, p);
     const s = new PileState();
@@ -1052,6 +1089,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.piles.set(p.id, p);
     const s = this.state.piles.get(p.id);
     if (!s) return this.addPileToState(p);
+    s.x = p.x; // moved out of a solid (unburyPile)
+    s.y = p.y;
+    s.z = p.z;
     s.items = Math.min(255, p.items.length);
     s.coins = p.coins;
   }
@@ -1156,8 +1196,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
     const shown = a.state.level;
     if (a.char.level <= shown) return;
-    a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
-    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level, a.char.starter);
+    a.state.maxHp = playerMaxHp(a.char);
+    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level, a.char.starter, a.char.tree);
     a.state.level = a.char.level;
     a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
     emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
@@ -1269,8 +1309,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         if (refuse()) return;
         t.char.xp = xpAtLevel(lv);
         t.char.level = lv;
+        t.char.tree = normalizeTree(lv, t.char.tree); // a lower level gives back fewer points
         t.state.level = lv;
-        t.state.maxHp = starterMaxHp(t.char.starter, lv);
+        t.state.maxHp = playerMaxHp(t.char);
         t.state.hp = t.state.maxHp;
         t.youDirty = true;
         break;
@@ -1384,11 +1425,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (heightAboveSupport(a, this.moveWorld) > MOVE.groundedAbove) return;
     // Landed.
     const len = Math.hypot(a.state.x, a.state.y, a.state.z);
-    const frac = fallDamageFraction(a.peakRadius - len);
+    const frac = fallDamageFraction(a.peakRadius - len, bodyGravity(this.bodyDef), buildStats(a.char.tree).safeFallM);
     a.airborne = false;
     a.peakRadius = len;
     groundMotion(a, len, now);
-    if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
+    if (frac > 0) dealDamage(this.host, null, a, frac * playerMaxHp(a.char), false);
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */
@@ -1443,7 +1484,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
     // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
     // restarts with the level's HP (F12 confirm Codex N-S1). A failed save restores `char` (persist).
-    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level, a.char.starter);
+    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level, a.char.starter, a.char.tree);
     characterRepo.current.save(a.identity.userId, a.char);
   }
 
@@ -1562,11 +1603,18 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   }
 }
 
+/** Tonic Craft (build tree): a tonic ends a running chill or slow (the client is told) and a burn. */
+function cleanse(a: PlayerActor, now: number) {
+  a.burn = null;
+  // `set` has the client drop every slow and chill it predicts (world/npcs/moveEffects.ts).
+  if (clearSlow(a, now)) a.client.send("npcFx", { kind: "slow", ms: 0, amount: 0, set: true });
+}
+
 /** HP after levelling from `shown` to `level`: the max-HP gain is added, capped at the new max. */
-function levelUpHp(hp: number, shown: number, level: number, starter: number): number {
+function levelUpHp(hp: number, shown: number, level: number, starter: number, tree?: readonly string[]): number {
   if (level <= shown) return hp;
-  const newMax = starterMaxHp(starter, level);
-  return Math.min(newMax, hp + (newMax - starterMaxHp(starter, shown)));
+  const newMax = playerMaxHp({ starter, level, tree });
+  return Math.min(newMax, hp + (newMax - playerMaxHp({ starter, level: shown, tree })));
 }
 
 function norm(v: readonly number[]): V3 {

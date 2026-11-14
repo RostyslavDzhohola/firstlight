@@ -23,9 +23,10 @@ describe("Horse Whistle item and shop (content.md §1.5)", () => {
   });
 
   it("was appended at the end so existing PlayerState.weapon indexes keep their meaning", () => {
-    // Index 19 for good; later items (the ninja's kunai and seal) were appended after it.
+    // Index 19 for good; later items (the ninja's kunai and seal, then the sculpted families of
+    // 2026-11-13) were appended after it.
     expect(WEAPON_INDEX.get(HORSE_WHISTLE)).toBe(19);
-    expect(WEAPONS.slice(20).map((w) => w.id)).toEqual(["kunai", "ember_seal"]);
+    expect(WEAPONS.slice(20).map((w) => w.id)).toEqual(["kunai", "ember_seal", "boarspear", "crossbow", "lantern"]);
     expect(WEAPON_INDEX.get("radio")).toBe(16);
     expect(WEAPON_INDEX.get("tonic_large")).toBe(18);
   });

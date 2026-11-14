@@ -1,4 +1,4 @@
-// Player avatars: the five starters (Hexwick, Brother Ash, Kappa, Unit 7, Hinoko), each in one of its
+// Player avatars: the starters (Hexwick, Brother Ash, Kappa, Unit 7, Hinoko, and the Traveller in Ash's body), each in one of its
 // looks (STARTER_LOOKS: Kappa and Unit 7 have two), as skinned GLBs on one shared skeleton, animated by an AnimationMixer with crossfades driven by the ANIM state, tinted by
 // palette, with sockets for weapons (right hand) and cosmetics (head, face, back, belt).
 // Until the GLBs are loaded (or if they fail) the old capsule stands in, so the public API
@@ -11,13 +11,14 @@
 import * as THREE from "three/webgpu";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { ANIM, PF } from "@firstlight/shared/net/schema";
-import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
+import { lookId, STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { flags } from "../config.ts";
 import { avatarAssets, MODEL_SCALE, modelIndex, preloadAvatars, ROLL_SPEED, UAL_PELVIS, type AvatarAssets } from "./avatars/assets.ts";
 import { avatarMaterial, PALETTES, proxyMaterial, setAvatarPalette } from "./avatars/material.ts";
 import { applyOccluderFadeGated } from "./occluderFade.ts";
 import { hideBareBones } from "./bareBones.ts";
 import { weaponModel } from "./avatars/weapons.ts";
+import { SCULPTED_WEAPONS } from "./avatars/sculptedIds.ts";
 import { keptSamples } from "./warmup.ts";
 import { CUT_GONE, CUT_IDLE, rezActive, rezAdmits, rezBody, rezFxMesh, rezMode, rezPose, rezSwitch, returnRezLight, takeRezLight, type RezBody, type RezFx, type RezKind, type RezPose } from "./rez.ts";
 
@@ -127,6 +128,55 @@ const BODY_SOCKET: readonly (readonly [number, number, number, number])[] = [
 export const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
   new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0)));
 
+/**
+ * Held grips: while a clip plays, some held items turn in the hand, a rotation in the hand socket's
+ * axes after the mount (degrees, Blender's Euler XYZ: X first, then Y, then Z about the fixed axes, as
+ * prop_check.py --rot reads it; three's order "ZYX"). Each is checked with the held-prop clip check
+ * (tools/blender/props3d/prop_check.py --rot) on the shipped starters.
+ * - `block` (#76, D-fix-view-3), with `block_hold`: the shared block clip holds a sword's guard; a staff
+ *   held its way ran through the Kappa's hat brim and down into the shell. Turned, it lies across the guard.
+ * - `carry` (#63, D-fix-moon-3), with run, sprint and the roll: every long weapon plays the bare-hands
+ *   locomotion clips through the fist, and swung 8–10 cm through the head. Turned about the socket's Y
+ *   axis the long end trails back and down along the forearm, clear of the head, chest and legs.
+ */
+export type HeldPose = "block" | "carry";
+const HELD_GRIP_DEG: Readonly<Record<HeldPose, Readonly<Record<string, readonly [number, number, number]>>>> = {
+  block: { riverstaff: [-135, -5, 12] },
+  carry: { riverstaff: [0, 80, 0], emberglass: [0, 75, 0], axe: [0, 90, 0], longbow: [0, 80, 0], boarspear: [0, 80, 0] },
+};
+const HELD_GRIP: Record<HeldPose, Map<string, THREE.Quaternion>> = {
+  block: gripMap(HELD_GRIP_DEG.block),
+  carry: gripMap(HELD_GRIP_DEG.carry),
+};
+function gripMap(deg: Readonly<Record<string, readonly [number, number, number]>>): Map<string, THREE.Quaternion> {
+  return new Map(Object.entries(deg).map(([id, [x, y, z]]) => [id, new THREE.Quaternion().setFromEuler(new THREE.Euler((x * Math.PI) / 180, (y * Math.PI) / 180, (z * Math.PI) / 180, "ZYX"))]));
+}
+/** The held pose a clip asks for: the guard turns block grips, moving fast turns carry grips. */
+export function heldPose(clip: string): HeldPose | null {
+  if (clip === "block_hold") return "block";
+  if (clip === "run" || clip === "sprint" || clip === "roll_fast") return "carry";
+  return null;
+}
+/** Whether held item `id` has a grip for `pose`. */
+export function hasHeldGrip(id: string, pose: HeldPose | null): boolean {
+  return !!pose && HELD_GRIP[pose].has(id);
+}
+/** Seconds the held item takes to turn into a grip and back (about the clips' own blend in). */
+export const BLOCK_GRIP_TIME = 0.15;
+const _grip = new THREE.Quaternion();
+
+/**
+ * The held item's rotation in the hand socket: its mount (`rest`: GUN_GRIP or none) turned by the
+ * weapon's grip for `pose`, `t` of the way (0 … 1, smoothstepped). Without a grip it stays at rest.
+ */
+export function heldWeaponQuat(id: string, pose: HeldPose | null, t: number, rest: THREE.Quaternion, out: THREE.Quaternion): THREE.Quaternion {
+  const grip = pose ? HELD_GRIP[pose].get(id) : undefined;
+  out.copy(rest);
+  if (!grip || t <= 0) return out;
+  const x = Math.min(1, t);
+  return out.premultiply(_grip.identity().slerp(grip, x * x * (3 - 2 * x)));
+}
+
 /** Free what one avatar owns: each unique cloned skeleton (bone texture) and every mesh object's
  *  per-object render state (Object3D.dispose() fires the event the renderer listens for). Shared
  *  template geometry, materials and the atlas are never disposed here. */
@@ -148,8 +198,60 @@ const _m = new THREE.Matrix4();
 const _d = new THREE.Vector3();
 /** The rez light leans from the palette's accent towards this. */
 const _rezTint = new THREE.Color(0xbfefff);
+/** The first-person head cut reaches this far (m) past the head's own vertices (and the crown and face sockets). */
+const HEAD_CUT_MARGIN = 0.04;
+/**
+ * Per model (MODEL_FILES index): the sphere round every vertex the head carries (hair, ears, a hat's
+ * brim, a beak): its centre in the Head bone's space and its radius in model units. Measured once from
+ * the rest pose (headCutOf).
+ */
+const HEAD_CUTS = new Map<number, { centre: THREE.Vector3; r: number } | null>();
+
+/**
+ * The sphere round the vertices skinned mostly (half or more) to `head` or the bones under it, in the
+ * model at rest (unscaled, identity transform): centre in `head`'s space, radius in model units.
+ */
+function headCutOf(model: THREE.Object3D, head: THREE.Object3D): { centre: THREE.Vector3; r: number } | null {
+  const pts: THREE.Vector3[] = [];
+  const box = new THREE.Box3();
+  model.traverse((o) => {
+    const sm = o as THREE.SkinnedMesh;
+    if (!sm.isSkinnedMesh || !sm.skeleton) return;
+    const mine = new Set<number>();
+    sm.skeleton.bones.forEach((b, i) => {
+      for (let p: THREE.Object3D | null = b; p; p = p.parent) if (p === head) return void mine.add(i);
+    });
+    const pos = sm.geometry.getAttribute("position");
+    const si = sm.geometry.getAttribute("skinIndex");
+    const sw = sm.geometry.getAttribute("skinWeight");
+    if (!pos || !si || !sw || !mine.size) return;
+    for (let v = 0; v < pos.count; v++) {
+      let w = 0;
+      for (let k = 0; k < 4; k++) if (mine.has(si.getComponent(v, k))) w += sw.getComponent(v, k);
+      if (w < 0.5) continue;
+      // Skinned where the bones are now (the rest pose), then into the model's space.
+      const q = sm.getVertexPosition(v, new THREE.Vector3()).applyMatrix4(sm.matrixWorld);
+      pts.push(q);
+      box.expandByPoint(q);
+    }
+  });
+  if (!pts.length) return null;
+  const c = box.getCenter(new THREE.Vector3());
+  let r = 0;
+  for (const q of pts) r = Math.max(r, q.distanceTo(c));
+  return { centre: head.worldToLocal(c), r };
+}
 /** A move of more than this in one frame is a teleport (m): the fastest horse covers under 1 m. */
 export const TELEPORT_M = 8;
+
+/**
+ * The clip for ANIM.FALL given the clip playing now: a hop's way down keeps the jump clip while it
+ * still runs (it reaches its landing as a 0.73 s hop lands); the long fall's flail only once it has
+ * run out, or off a ledge with no jump (#78: every hop flailed from its top).
+ */
+export function fallClip(current: string, running: boolean): "jump_air" | "fall" {
+  return current === "jump_air" && running ? "jump_air" : "fall";
+}
 
 type Lod = "full" | "mid" | "far";
 const byRezDist = (p: AvatarView, q: AvatarView) => p.rezDist - q.rezDist;
@@ -206,6 +308,10 @@ export class AvatarView {
   private readonly attached = new Map<SocketName, THREE.Object3D>();
   private weaponIndex = 0;
   private weaponObj: THREE.Object3D | null = null;
+  /** The held item's mount in the hand (GUN_GRIP or none), the grip it is turned into and how far (0 … 1). */
+  private readonly weaponRest = new THREE.Quaternion();
+  private gripPose: HeldPose | null = null;
+  private gripT = 0;
   private flagBits = 0;
   private lastAnim: number = ANIM.IDLE;
   private speed = 0;
@@ -282,7 +388,11 @@ export class AvatarView {
     if (obj) {
       // Swords, staffs, wands and bows run through the fist (blade towards the thumb: the socket's
       // rest axes). Guns sit in the hand instead: muzzle along the knuckles, top towards the thumb.
-      if (def.cls === "ranged" && def.delivery !== "arrow") obj.quaternion.copy(GUN_GRIP);
+      if (def.cls === "ranged" && def.delivery !== "arrow") this.weaponRest.copy(GUN_GRIP);
+      else this.weaponRest.identity();
+      obj.quaternion.copy(this.weaponRest);
+      this.gripPose = null;
+      this.gripT = 0;
       socket.add(obj);
       this.weaponObj = obj;
       obj.visible = this.rezSolid;
@@ -310,6 +420,11 @@ export class AvatarView {
   /** Smoothed ground speed (m/s) from this avatar's own successive positions. */
   get groundSpeed(): number {
     return this.speed;
+  }
+
+  /** The body moved here without walking (a Skipstep blink): no teleport rez-in, no speed spike from the distance (#78). */
+  blinked() {
+    this.havePrev = false;
   }
 
   /** PlayerState.flags (PF): DEAD, BLOCKING, SWIMMING, SCOPED override the animation state. */
@@ -535,6 +650,26 @@ export class AvatarView {
     return this.sockets.get(slot);
   }
 
+  /**
+   * First person (D-view-fp-1, game/view.ts): the eye (the face socket: the eye line, at the front of
+   * the face) into `eye`, and a sphere round the whole head (crown, back and face, with a margin for
+   * hair and hats) into `centre`; returns its radius. 0 without the skinned model (capsule, far LOD).
+   */
+  firstPersonHead(eye: THREE.Vector3, centre: THREE.Vector3): number {
+    const face = this.sockets.get("face");
+    const crown = this.sockets.get("head");
+    const bone = crown?.parent;
+    if (!this.model || this.lod === "far" || !face || !crown || !bone) return 0;
+    bone.updateWorldMatrix(true, true);
+    face.getWorldPosition(eye);
+    crown.getWorldPosition(_d);
+    const cut = HEAD_CUTS.get(this.modelIdx);
+    if (cut) centre.copy(cut.centre).applyMatrix4(bone.matrixWorld);
+    else bone.getWorldPosition(centre).add(_d).multiplyScalar(0.5);
+    const scale = MODEL_SCALE[this.modelIdx] ?? 1;
+    return Math.max(centre.distanceTo(_d), centre.distanceTo(eye), (cut?.r ?? 0) * scale) + HEAD_CUT_MARGIN;
+  }
+
   /** Place at a planet-space position, standing on local up, facing a tangent direction. */
   set(x: number, y: number, z: number, fx: number, fy: number, fz: number, anim: number, dt: number) {
     // ground speed from successive positions (tangential only), smoothed
@@ -571,6 +706,7 @@ export class AvatarView {
     this.clock += dt;
     this.drive(anim);
     this.lastAnim = anim;
+    this.stepHeldGrip(dt);
     // LOD-aware mixer stepping
     this.pendingDt += dt;
     if (this.lod === "full") {
@@ -584,6 +720,29 @@ export class AvatarView {
         this.pendingDt = 0;
       }
     } else if (this.pendingDt > 1) this.pendingDt = 1;
+  }
+
+  /**
+   * Turn the held item into the grip its clip asks for (the guard: block, running and rolling: carry)
+   * and back out after (#76, #63). From one grip to another it turns back to the mount first.
+   */
+  private stepHeldGrip(dt: number) {
+    const obj = this.weaponObj;
+    if (!obj) return;
+    const id = WEAPONS[this.weaponIndex]?.id ?? "";
+    const want = heldPose(this.currentName);
+    const goal = hasHeldGrip(id, want) ? want : null;
+    const step = dt / BLOCK_GRIP_TIME;
+    if (goal && goal === this.gripPose) {
+      if (this.gripT >= 1) return;
+      this.gripT = Math.min(1, this.gripT + step);
+    } else if (this.gripT > 0) {
+      this.gripT = Math.max(0, this.gripT - step);
+    } else {
+      if (this.gripPose === goal) return;
+      this.gripPose = goal;
+    }
+    heldWeaponQuat(id, this.gripPose, this.gripT, this.weaponRest, obj.quaternion);
   }
 
   dispose() {
@@ -734,6 +893,9 @@ export class AvatarView {
       bone.add(sock);
       this.sockets.set(name, sock);
     }
+    // The first-person head cut's sphere, once per model (only the local player's avatar uses it).
+    const head = bones.get("Head");
+    if (head && !HEAD_CUTS.has(this.modelIdx)) HEAD_CUTS.set(this.modelIdx, headCutOf(model, head));
     model.scale.setScalar(s);
     model.updateMatrixWorld(true);
   }
@@ -823,7 +985,9 @@ export class AvatarView {
         else { name = "sprint"; ts = clamp(sp / (CLIP_SPEED.sprint! * this.stride), 0.85, 1.3 / this.stride); }
         break;
       case ANIM.JUMP: name = "jump_air"; break;
-      case ANIM.FALL: name = "fall"; break;
+      // A hop's way down keeps the jump clip (it reaches its landing as a 0.73 s hop lands); the long
+      // fall's flail only once the clip has run out, off a ledge (#78: every hop flailed half-way).
+      case ANIM.FALL: name = fallClip(this.currentName, !!this.current?.isRunning()); break;
       case ANIM.SWIM:
         if (sp > 0.6) { name = "swim"; ts = clamp(sp / CLIP_SPEED.swim!, 0.7, 1.6); } else name = "swim_idle";
         break;
@@ -876,8 +1040,11 @@ const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "embergla
  *  is drawn. Checked in a real renderer with ?avatars&warmcheck: no build after the warm-up. */
 export function avatarWarmupLooks(): { palette: number; starter: number; look: number; item: string }[] {
   const looks: { palette: number; starter: number; look: number; item: string }[] = [];
+  const seen = new Set<string>();
   for (let starter = 0; starter < STARTERS.length; starter++) {
     for (let look = 0; look < (STARTER_LOOKS[starter]?.length ?? 1); look++) {
+      if (seen.has(lookId(starter, look))) continue; // a look worn by two starters (the Traveller in Ash's body) builds once
+      seen.add(lookId(starter, look));
       const i = looks.length;
       looks.push({ palette: i % PALETTES.length, starter, look, item: WARMUP_ITEMS[i % WARMUP_ITEMS.length]! });
     }
@@ -908,6 +1075,13 @@ export function avatarWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3)
         v.attach("hand_l", weaponModel("stormcoil", palette));
         parts.push(v.root);
         return v;
+      });
+      // Every sculpted item is its own toon material (its own textures): the ones no sample holds
+      // go on the samples' backs, so none of them builds on first sight either (D-weapons-1).
+      const held = new Set<string>(WARMUP_ITEMS);
+      SCULPTED_WEAPONS.filter((id) => !held.has(id)).forEach((id, i) => {
+        const v = warmupViews[i % warmupViews.length];
+        if (v) v.attach(i < warmupViews.length ? "back" : "belt", weaponModel(id, i % PALETTES.length));
       });
       // Starter 0 → trim colour i: all six proxy + trim materials.
       for (let i = 0; i < PALETTES.length; i++) parts.push(capsule(i, 0));

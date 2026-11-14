@@ -8,10 +8,11 @@
 // Each returns a promise and is safe to call again while open (returns the open one).
 
 import "./account.css";
-import { AuthError, getAccountInfo, invalidatePlayToken, NAME_PATTERN, onAccountChange, saveStatus, savingStatus, sendEmailCode, setDisplayName, verifyEmailCode, type AccountInfo } from "../net/auth.ts";
+import { AuthError, devCode, getAccountInfo, invalidatePlayToken, NAME_PATTERN, onAccountChange, saveStatus, savingStatus, sendEmailCode, setDisplayName, verifyEmailCode, type AccountInfo } from "../net/auth.ts";
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite } from "./dom.ts";
 import { codeFromText, firstSaveStep, mayOpenSaveCard, SAVE_MIN_LEVEL, type SaveStatus, type SaveStep as FlowStep } from "./saveOffer.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
+import { PLAIN_STARTER } from "@firstlight/shared/content/weapons";
 
 const RESEND_SECONDS = 60;
 const RING_C = 50.3; // 2π × 8
@@ -240,9 +241,20 @@ function emailFlow(container: HTMLElement, o: FlowOpts): void {
         c.classList.toggle("is-focus", focus && i === Math.min(v.length, 5) && v.length < 6);
       });
     };
-    el("span", "fl-fine", container, "The code is in the email. It works for 5 minutes. Paste it or type it.");
+    const fine = el("span", "fl-fine", container, "The code is in the email. It works for 5 minutes. Paste it or type it.");
     const status = el("div", "fl-status", container);
     status.setAttribute("role", "status");
+    // #84: a local server sent no email: say so and fill the code in (never in a production build:
+    // the build's literal false lets the bundler drop this and devCode's fetch, see dev-code.test.ts).
+    const showDevCode = async () => {
+      if (!__FL_DEV_CODES__) return;
+      const c = await devCode(email);
+      if (!c || !container.contains(fine)) return;
+      fine.textContent = `Local server: no email was sent. Your code is ${c}; it's filled in for you.`;
+      fine.dataset.e2e = "dev-code";
+      input.value = c;
+      paint();
+    };
 
     const resendRow = el("div", "fl-resend", container);
     const ringT = el("span", "fl-resend__t", resendRow);
@@ -340,9 +352,11 @@ function emailFlow(container: HTMLElement, o: FlowOpts): void {
       status.className = `fl-status ${r.ok ? "is-ok" : "is-error"}`;
       status.textContent = r.ok ? "New code sent." : r.message;
       input.focus();
+      if (r.ok) void showDevCode();
     };
     paint();
     focusSoon(input);
+    void showDevCode();
   };
 
   const stepSaved = () => {
@@ -459,7 +473,7 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
     m.card.classList.add("fl-acct--save");
     m.card.dataset.e2e = "save-card";
     m.card.setAttribute("aria-label", "Save your progress");
-    const starter = () => opts.starter ?? (Number(localStorage.getItem("fl.starter") ?? 0) || 0);
+    const starter = () => opts.starter ?? (Number(localStorage.getItem("fl.starter") ?? PLAIN_STARTER) || 0);
     const run = (start: FlowStep, info: AccountInfo | null) =>
       emailFlow(m.card, {
         kind: "save",

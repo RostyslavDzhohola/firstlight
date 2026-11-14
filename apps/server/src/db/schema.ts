@@ -246,6 +246,73 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_log ADD COLUMN agent INTEGER NOT NULL DEFAULT 0;
   UPDATE session_log SET agent = 1 WHERE user_id IN (SELECT user_id FROM agent_account);
   `,
+  // 11 (lane ship, #85): the first-session funnel and client error reports (db/funnel.ts). One row
+  // per first time a subject (a character's account `u:<id>`, or a browser visit `v:<id>`) reached a
+  // step; `kind` keeps our test accounts and AI agents apart from people. Additive and idempotent,
+  // so it can be renumbered when lanes merge.
+  `
+  CREATE TABLE IF NOT EXISTS funnel_step (
+    subject  TEXT NOT NULL,
+    step     TEXT NOT NULL,
+    at       INTEGER NOT NULL,
+    value    REAL,
+    detail   TEXT,
+    kind     TEXT NOT NULL DEFAULT 'person',
+    PRIMARY KEY (subject, step)
+  );
+  CREATE INDEX IF NOT EXISTS funnel_step_at ON funnel_step(at);
+  CREATE TABLE IF NOT EXISTS client_error (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at       INTEGER NOT NULL,
+    sig      TEXT NOT NULL,
+    message  TEXT NOT NULL,
+    stack    TEXT NOT NULL,
+    build    TEXT NOT NULL,
+    tier     TEXT,
+    backend  TEXT,
+    kind     TEXT NOT NULL DEFAULT 'person'
+  );
+  CREATE INDEX IF NOT EXISTS client_error_at ON client_error(at);
+  `,
+  // 12 (fix-ship, D-ship-6): the funnel's daily aggregates. Raw funnel_step rows are kept for
+  // FUNNEL_LIMITS.retentionDays; each older cohort day is folded into a fixed set of rows here (KPI
+  // numerators and denominators, step counts, medians with their counts) and its raw rows deleted, so
+  // the raw table stays under caps × retention and this one grows by a bounded number of rows a day.
+  // Additive and idempotent.
+  `
+  CREATE TABLE IF NOT EXISTS funnel_day (
+    day     TEXT NOT NULL,
+    metric  TEXT NOT NULL,
+    num     REAL NOT NULL DEFAULT 0,
+    den     REAL NOT NULL DEFAULT 0,
+    value   REAL,
+    PRIMARY KEY (day, metric)
+  );
+  `,
+  // 13 (fix-sec2, review round two #8): a folded account subject keeps its raw rows, marked here, so
+  // a character that comes back after its cohort day was folded is still known (its first join, its
+  // steps) and is never counted as a new subject. Visits are deleted when folded (they can't act by
+  // then: db/funnel.ts keeps raw rows longer than a visit lives).
+  `
+  ALTER TABLE funnel_step ADD COLUMN folded INTEGER NOT NULL DEFAULT 0;
+  `,
+  // 14 (lane progress, #81): the build tree's taken nodes, saved with the character (db/characters.ts
+  // writes and reads it beside the row). A side table so the migration stays idempotent and can be
+  // renumbered; triggers keep it with its character, like medal_count: a death or prune deletes it,
+  // a link moves it. Characters saved before this have no row: no nodes taken.
+  `
+  CREATE TABLE IF NOT EXISTS character_tree (
+    user_id     TEXT PRIMARY KEY,
+    nodes_json  TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE TRIGGER IF NOT EXISTS character_tree_delete AFTER DELETE ON character BEGIN
+    DELETE FROM character_tree WHERE user_id = OLD.user_id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS character_tree_move AFTER UPDATE OF user_id ON character BEGIN
+    DELETE FROM character_tree WHERE user_id = NEW.user_id;
+    UPDATE character_tree SET user_id = NEW.user_id WHERE user_id = OLD.user_id;
+  END;
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

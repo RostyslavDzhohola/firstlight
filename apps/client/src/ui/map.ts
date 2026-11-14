@@ -20,6 +20,7 @@ import { missionTargets, staticMarkers, type MapMarker } from "./mapMarkers.ts";
 import { guideTargets } from "../game/onboardingTargets.ts";
 import { mapView, metresPerPixel, placeUnder, pointerToCanvas, project, resizeView, screenAngle, unproject, zoomView, type MapView, type Projected } from "./mapView.ts";
 import { arrow, diamond, star } from "./minimapMarkers.ts";
+import { wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { uiSettings } from "./uiSettings.ts";
 import { WAYPOINT_COLOUR, waypoints } from "./waypoint.ts";
 
@@ -444,8 +445,20 @@ export class MapPanel extends Panel {
       }
     }
 
+    // Wild sites this life has found (content/wildSites.ts): a bronze diamond with the level band.
+    const found = new Set(you?.sites ?? []);
+    if (found.size) {
+      for (const ws of wildSitePlacements(this.game.planet.terrain)) {
+        if (!found.has(ws.site.id)) continue;
+        const s = project(v, ws.dir, { x: 0, y: 0, z: 0 });
+        if (!visible(s)) continue;
+        diamond(ctx, s.x, s.y, 7, "#e0a458");
+        label(`site:${ws.site.id}`, `${ws.site.name} · Lv ${ws.site.levels[0]}–${ws.site.levels[1]}`, s, "#f5d6a8", 2, 9);
+      }
+    }
+
     // Active mission targets, and the tutorial's dummies during its dummy step (#31).
-    for (const t of [...missionTargets(body, you?.missions ?? []), ...guideTargets.current()]) {
+    for (const t of [...missionTargets(body, you?.missions ?? [], this.game.planet.terrain), ...guideTargets.current()]) {
       const s = project(v, t.dir, { x: 0, y: 0, z: 0 });
       if (!visible(s)) continue;
       star(ctx, s.x, s.y - 14, 8, "#ffd166");

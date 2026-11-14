@@ -59,12 +59,19 @@ test.describe("J2 safe zones and weapons", () => {
     await player.note("town, tutorial running", training);
     expect(training.accepted, "nothing fires for real inside the town").toBe(false);
     expect.soft(training.notice || training.sent.includes("train"), "a training shot or the holstered notice").toBe(true);
+    // The attack lesson is that one swing, anywhere in town (#68): the server pays the whole tutorial
+    // at once (level 2, where saving unlocks), while the other tips stay up.
+    s = await player.until((x) => !!x.onboarding?.paid, "the training shot paid the tutorial", 15_000);
+    expect.soft(s.you?.level, "the tutorial's payout lands on level 2").toBe(2);
+    expect(s.onboarding?.active, "the tips are still up after the payout").toBe(true);
     // After the tutorial (skipped from Esc, like a player who knows the game): the notice.
     await player.escape();
-    // Before the dummies pay out, skipping asks for a second click (#32).
+    // Paid already, so the row only hides the tips and one click skips (the second click guards an
+    // unpaid skip, #32; unit-tested in saveOffer.test.ts).
     const skip = page.getByRole("menuitem", { name: /skip tutorial/i }).or(page.getByRole("button", { name: /skip tutorial/i })).first();
+    await expect(skip, "the paid skip row says what it does").toContainText(/hide the rest of the tips/i);
     await skip.click();
-    await skip.click();
+    s = await player.until((x) => !x.onboarding?.active, "one click ended the paid tutorial", 10_000);
     await player.lock();
     await expectRefusedInside(player, "Portus town, after the tutorial");
     await player.lookUp(-0.25);

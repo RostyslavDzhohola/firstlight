@@ -64,6 +64,8 @@ export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: st
     limits: { maxClients: 40, soloFillLimit: 36, maxCopiesPerBody: 2, globalCap: 320 },
     allowedOrigins: [ORIGIN],
     revalidate: accounts.revalidate,
+    loopbackExempt: true, // in-process tests only (see helpers.ts startServer)
+    gateway: { signIn: "guest", authOrigin: ORIGIN, originSecret: cfgOver.originSecret || undefined },
     ...(explain ? { explainRefusal: banExplainer(accounts) } : {}),
     mountBeforeJson: accounts.mountBeforeJson,
     mountAfterJson: (app) => {
@@ -80,7 +82,7 @@ export async function startAuthServer(over: Partial<AccountsConfig> & { dir?: st
     originSecret: cfgOver.originSecret ?? "",
     async close(keepFiles = false) {
       await game.close();
-      accounts.close();
+      await accounts.close();
       if (!keepFiles) rmSync(dir, { recursive: true, force: true });
     },
   };

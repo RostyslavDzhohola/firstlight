@@ -37,26 +37,9 @@ export const EGGS: readonly EggDef[] = [
 
 export const EGG_BY_ID: ReadonlyMap<string, EggDef> = new Map(EGGS.map((e) => [e.id, e]));
 
-/** Tuning for the egg mechanics (content.md §6). */
-export const EGG_RULES = {
-  E1_COST: 1,
-  E2_ORDER: ["rain", "leaf", "sun", "flame"] as const,
-  E2_PENALTY_HOPBITS: 3,
-  E3_FOLLOW_SECONDS: 60,
-  E3_FOLLOW_METRES: 15,
-  E3_BURROW_OPEN_MS: 5 * 60_000,
-  E4_LANTERNS: 7,
-  E4_WINDOW_MS: 180_000,
-  E4_FERRY_MS: 60_000,
-  E5_ORDER: ["skull", "lantern", "candle"] as const,
-  E5_PENALTY_BONEWALKERS: 2,
-  E7_CODE: "7041",
-  E8_LAMPS: 5,
-  E8_WINDOW_MS: 20_000,
-  E8_LAMP_RADIUS: 0.6,
-  /** How long an opened passage (burrow, ferry ride, hatch, lift, well) stays valid for that player. */
-  PASSAGE_MS: 5 * 60_000,
-} as const;
+// The eggs' rules (orders, codes, counts and windows) are the answers: they live on the server only,
+// in apps/server/src/world/quests/eggRules.ts, so no client bundle can carry them (#41). What the
+// client needs to draw the eggs' props is in world.ts.
 
 // ---------------------------------------------------------------- Hall of Firsts
 

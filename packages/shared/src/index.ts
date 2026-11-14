@@ -11,3 +11,4 @@ export * from "./planet/props.ts";
 export * from "./planet/portals.ts";
 export * from "./planet/breakables.ts";
 export * from "./sky.ts";
+export * from "./orbits.ts";

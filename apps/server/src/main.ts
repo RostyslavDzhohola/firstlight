@@ -19,6 +19,7 @@ import { dataFastVisits } from "./ops/datafast.ts";
 import { mountHome } from "./ops/home.ts";
 import { endAllSessions } from "./social/index.ts";
 import { banExplainer } from "./social/refusal.ts";
+import { setVisitKey } from "./auth/visitToken.ts";
 
 // Refuse to boot an insecure production config (review): dev guests would allow impersonation, and a
 // missing origin secret makes forwarded IPs spoofable.
@@ -46,6 +47,9 @@ bannedCheck.current = (userId) => isBanned(gameDb(), userId);
 // Admin rights are asked of the account table again while playing (D-admin-2): revoking one sticks.
 adminCheck.current = (userId) => isAdmin(gameDb(), userId);
 
+// Funnel visit tokens survive a restart: signed with a key derived from the auth secret (D-ship-6).
+setVisitKey(env.authSecret);
+
 const game = await createGame({
   port: env.port,
   verify: accounts.verify,
@@ -58,6 +62,8 @@ const game = await createGame({
   allowedOrigins: env.clientOrigins,
   gracefulShutdown: true,
   production: env.production,
+  // Gateway seats sign in as guests through Better Auth over loopback, like a browser would (D-agents-gw-1).
+  gateway: { signIn: "guest", authOrigin: env.clientOrigins[0], originSecret: env.originSecret || undefined },
   mountBeforeJson: accounts.mountBeforeJson,
   explainRefusal: banExplainer(accounts),
   revalidate: accounts.revalidate,
@@ -66,11 +72,12 @@ const game = await createGame({
     mountOps(app, { db: accounts.db, requireAdmin: accounts.requireAdmin, allowedOrigins: env.clientOrigins });
     mountHome(app, { db: accounts.db, visits: dataFastVisits({ apiKey: env.datafastApiKey }) });
   },
-  onShutdown: () => {
-    // Each step on its own: a failure in one must not skip closing the databases.
+  onShutdown: async () => {
+    // Each step on its own: a failure in one must not skip closing the databases. Closing the
+    // accounts flushes the funnel's queue within one deadline (FUNNEL_LIMITS.closeDeadlineMs).
     for (const [what, fn] of [["end sessions", endAllSessions], ["close accounts", () => accounts.close()]] as const) {
       try {
-        fn();
+        await fn();
       } catch (err) {
         console.error(`shutdown: ${what} failed: ${(err as Error)?.message ?? err}`);
       }

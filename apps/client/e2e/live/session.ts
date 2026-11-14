@@ -877,7 +877,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       for (const k of on ? keys : [...keys].reverse()) await (on ? page.keyboard.down(k) : page.keyboard.up(k));
     };
     const trail: { at: number; pos: number[] }[] = [];
-    let side = "KeyD";
+    let stuckCount = 0;
     let shunning = false;
     const t0 = Date.now();
     const end = (why: string) => {
@@ -915,14 +915,10 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
         const a = trail[0]!;
         const p = s.player!.pos;
         if (now - a.at > 2000 && Math.hypot(a.pos[0]! - p[0]!, a.pos[1]! - p[1]!, a.pos[2]! - p[2]!) < 1.5) {
-          // Stuck (a slope, a creature, a corner the rays missed): back off, side-step, hop.
-          trace(`walk: stuck at ${p.map((v) => v.toFixed(0)).join(",")}, side-stepping`);
+          // Stuck: Player.unstick goes round on one side (walls the rays see over, a long outpost wall).
           await press(false);
-          await player.hold(["KeyS"], 400);
-          await player.hold([side], 900);
-          await player.hold([side, "KeyW"], 700);
-          await player.tap("Space");
-          side = side === "KeyD" ? "KeyA" : "KeyD";
+          const took = await player.unstick(want, ++stuckCount);
+          trace(`walk: stuck at ${p.map((v) => v.toFixed(0)).join(",")} (${stuckCount}), going round by ${n0(took)}°`);
           trail.length = 0;
         }
       }
@@ -1029,7 +1025,8 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
       await player.hold(["ShiftLeft", "KeyW"], 2600);
     },
     dodge: () => player.hold(["KeyC"], 60),
-    attack: () => hitTrainingDummies(player),
+    // Since #68 one left click anywhere in Portus completes the attack lesson (a dummy in reach falls with it).
+    attack: () => player.attack(),
     switch: async () => {
       await player.tap("Digit2");
       await page.waitForTimeout(400);
@@ -1101,7 +1098,8 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
     if (!(await panel.count())) throw new Error("pressed E by the guide but no panel opened (`fl screen` shows the prompt, if any)");
     const said = (await panel.innerText()).replace(/\s+/g, " ").trim();
     let took = 0;
-    for (let i = 0; i < 4; i++) {
+    // Every Accept on the panel (Lark has five since the moon's L1).
+    for (let i = 0; i < 8; i++) {
       const accept = panel.getByRole("button", { name: /^accept$/i }).first();
       if (!(await accept.count())) break;
       await accept.click();
@@ -1255,7 +1253,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
     step: { usage: "step", help: "local only: do the current tutorial step with real input; says what its card asked and how long it took", run: step },
     tutorial: {
       usage: "tutorial [all]",
-      help: "local only: every tutorial step in turn up to the portal (`all`: walk into the Arcadia portal too); one line per step",
+      help: "local only: every tutorial step in turn (it ends in the plaza since #68; `portal arcadia` walks on); one line per step",
       async run([all]) {
         localOnly("the tutorial macros (they hit training dummies)");
         const lines: string[] = [];

@@ -17,18 +17,19 @@ export const PLAY_GATE = {
   globalCalls: 1500,
 };
 
-const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
-
 export function createPlayGate(production: boolean) {
   const byIp = new WindowLimiter(PLAY_GATE.ipCalls, PLAY_GATE.windowMs);
   const all = new WindowLimiter(PLAY_GATE.globalCalls, PLAY_GATE.windowMs, 1);
   return {
-    /** Spend one request of the budgets; false when either is spent. Loopback has no address budget outside production. */
-    admit(ip: string | null, now = Date.now()): boolean {
+    /**
+     * Spend one request of the budgets; false when either is spent. `exempt` (an in-process test
+     * server's loopback caller, GameOptions.loopbackExempt) has no address budget outside production.
+     */
+    admit(ip: string | null, exempt = false, now = Date.now()): boolean {
       byIp.max = PLAY_GATE.ipCalls;
       all.max = PLAY_GATE.globalCalls;
       if (!all.take("all", now)) return false;
-      if (!production && ip !== null && LOOPBACK.has(ip)) return true;
+      if (!production && exempt) return true;
       return byIp.take(ip ? banKey(ip) : "unknown", now);
     },
   };

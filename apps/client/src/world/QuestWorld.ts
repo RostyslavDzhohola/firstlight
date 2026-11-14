@@ -19,6 +19,8 @@ import { applyLabelFade } from "../render/labelFade.ts";
 import { applyOccluderFade } from "../render/occluderFade.ts";
 import { TOWN_BODY } from "@firstlight/shared/planet/sites";
 import { KEEPER_STALL, type StallBox } from "./stallCamera.ts";
+import mirrorWallUrl from "./assets/mirror-wall.png?no-inline";
+import mirrorGlassUrl from "./assets/mirror-glass.png?no-inline";
 
 /** Materials shared by every body's props (never freed); everything else a QuestWorld builds is its own. */
 const mats = new Map<string, THREE.Material>();
@@ -70,6 +72,13 @@ function stallBox(name: string, b: StallBox, mat: THREE.Material): THREE.Mesh {
 }
 
 /** Text on a canvas, as a sprite (labels) or a texture (plaques). */
+/** A texture from an image the bundle ships (loads in the browser; an empty texture without a DOM, as in tests). */
+function imageTexture(url: string): THREE.Texture {
+  const tex = typeof Image === "undefined" ? new THREE.Texture() : new THREE.TextureLoader().load(url);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function textCanvas(lines: { text: string; font: string; color: string }[], w: number, h: number, bg?: string, mirror = false): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = w;
@@ -478,15 +487,11 @@ export class QuestWorld {
       }
       case "mirror": {
         // A baked mirror (works on Low): the opposite wall's mirror-painted digits read correctly here.
-        const wallC = textCanvas([{ text: "7041", font: "800 150px ui-monospace, monospace", color: "#c8ccd6" }], 512, 256, "#2a2f38", true);
-        const wallTex = new THREE.CanvasTexture(wallC);
-        wallTex.colorSpace = THREE.SRGBColorSpace;
-        const painted = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.7), new THREE.MeshBasicNodeMaterial({ map: wallTex, side: THREE.DoubleSide }));
+        // Both faces are images made from the server's rule (tools/eggs/mirror-clue.ts), so the
+        // answer is never text in the client (#41).
+        const painted = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.7), new THREE.MeshBasicNodeMaterial({ map: imageTexture(mirrorWallUrl), side: THREE.DoubleSide }));
         painted.position.set(0, 1.6, -3);
-        const mirC = textCanvas([{ text: "7041", font: "800 150px ui-monospace, monospace", color: "#7a8494" }], 512, 256, "#9fb0c0");
-        const mirTex = new THREE.CanvasTexture(mirC);
-        mirTex.colorSpace = THREE.SRGBColorSpace;
-        const mirror = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.4), new THREE.MeshBasicNodeMaterial({ map: mirTex, side: THREE.DoubleSide, transparent: true, opacity: 0.85 }));
+        const mirror = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.4), new THREE.MeshBasicNodeMaterial({ map: imageTexture(mirrorGlassUrl), side: THREE.DoubleSide, transparent: true, opacity: 0.85 }));
         mirror.position.set(0, 1.6, 0);
         r.add(painted, mirror);
         break;

@@ -9,6 +9,7 @@ import type { Room } from "@colyseus/sdk";
 import { bodyWorld, FirstlightAgent, groundDistance } from "@firstlight/agent-kit";
 import { BODIES, type BodyId } from "@firstlight/shared";
 import { PF } from "@firstlight/shared/net/schema";
+import { STARTERS } from "@firstlight/shared/content/weapons";
 import type { Game } from "../src/app.ts";
 import { AGENT_RULES, resetAgentSlots } from "../src/world/agents.ts";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
@@ -26,7 +27,6 @@ let url: string;
 const agents: FirstlightAgent[] = [];
 const rooms: Room[] = [];
 const SCALE = TRIAL_RULES.timeScale;
-const STARTERS = ["hexwick", "ash", "kappa", "unit7", "ninja"];
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 let step = "";
 /** waitFor that says which wait ran out. */
@@ -90,7 +90,7 @@ afterAll(async () => {
 });
 
 async function agent(id: string, body: BodyId = "arcadia", starter = "unit7"): Promise<FirstlightAgent> {
-  grantTravel(id, body, { starter: STARTERS.indexOf(starter) });
+  grantTravel(id, body, { starter: STARTERS.findIndex((s) => s.id === starter) });
   const a = new FirstlightAgent();
   agents.push(a);
   expect((await a.connect({ url, token: `dev:${id}:${id}:admin`, body, starter })).ok).toBe(true);
@@ -465,4 +465,21 @@ describe("agents: etiquette", () => {
       clearInterval(iv);
     }
   }, 90_000);
+});
+
+describe("agents: the build tree (#81)", () => {
+  it("an agent sees its points and the open nodes, spends them through the server, and hears a refusal's reason", async () => {
+    const a = await agent("builder");
+    await put(a, openSpotOutside("arcadia"), 4);
+    await waitFor(() => a.observe({ peek: true }).self.tree.points === 3);
+    const t0 = a.observe({ peek: true }).self.tree;
+    expect(t0.taken).toEqual([]);
+    expect(t0.open.map((n) => n.id).sort()).toEqual(["aim_steady", "blade_edge", "body_hardy", "magic_attuned", "travel_stride"]);
+    expect(a.observe({ peek: true }).summary).toContain("Build: 3 point(s) to spend");
+    expect(await a.spendPoint("blade_edge")).toMatchObject({ ok: true, points: 2, taken: ["blade_edge"] });
+    expect(await a.spendPoint("blade_riposte")).toMatchObject({ ok: false, reason: "locked" });
+    expect(await a.spendPoint("blade_cleave")).toMatchObject({ ok: true, points: 0 });
+    expect(actor(a).char.tree).toEqual(["blade_edge", "blade_cleave"]);
+    expect(await a.respec()).toMatchObject({ ok: false, reason: "safe zone" });
+  }, 30_000);
 });

@@ -22,7 +22,14 @@ AUTH_DB_PATH=/tmp/fl-e2e/auth.db GAME_DB_PATH=/tmp/fl-e2e/game.db pnpm dev
 - `GET http://127.0.0.1:2611/healthz` answers `{"ok":true,…}` when the server is up.
 - Sign-in codes: with no `RESEND_API_KEY` outside production, `DEV_MAIL_LOG=1` prints
   `[dev-mail] FIRSTLIGHT code for <email>: <code>` on the server's stdout. Each address gets 3 codes
-  an hour, so use a new address per run.
+  an hour, so use a new address per run. `DEV_SIGNIN_CODES=1` plus the per-run
+  `DEV_SIGNIN_KEY` (the root `pnpm dev` sets both) also let the dev client's save and sign-in cards
+  fetch and fill the code (D-sec2-1): open the link Vite prints under its URLs ("Dev sign-in codes:
+  open http://localhost:5173/#fl-dev-key=…") once per run in that browser; the key travels only in
+  the link's fragment, never over the network (D-sec3-6). Started another way, set the same
+  `DEV_SIGNIN_KEY` (43+ random characters) for the server and Vite, or read the code from the log.
+  Never put a proxy or tunnel in front of a dev server with dev codes on: anyone holding the key can
+  read anyone's sign-in code; `pnpm dev` is for this machine only.
 - **Admins** (T6): start the server with `ADMIN_CLAIM_TOKEN` set to `openssl rand -base64 32` (shorter
   tokens, under 32 random bytes, switch the claim off; D-admin-2), play once in the browser
   (guest or saved), then open `http://127.0.0.1:5611/admin/claim` there, paste the token into the
@@ -191,3 +198,16 @@ Setup: a fresh guest (clean browser profile) on a stack with an empty database, 
 6. Click the weapon, click "Drop here": a pile appears at your feet. Close with I, stand on the
    pile, press E: the weapon is back in slot 1.
 7. Reload: the tutorial doesn't come back.
+
+## Jfail: a stranger's worst moments (lane ship, #85)
+
+`apps/client/e2e/jfail.spec.ts`, local stack only, on WebGL2 and WebGPU (`JFAIL_FILM=1` films each one):
+1. Server down at Play: "Couldn't reach the world" with Retry; Retry gets in.
+2. No WebGL2 and no WebGPU: "Graphics didn't start" and what to try.
+3. A full world: "THE WORLD IS FULL" with the queue place; in by itself.
+4. The connection drops mid-game: "Reconnecting…", then back in the world.
+5. A deploy mid-session the one reload can't fix: "A NEW VERSION IS OUT" with Reload.
+6. Pointer lock refused: "Click to look around", nothing throws.
+7. A phone-sized window: the home page fits, says how to play, offers the touch try.
+8. The funnel: the page asks the server for one (test) visit, then reports Play, pick and world (seconds, renderer) under it once each; a reload asks for no new visit and resends nothing.
+9. The tab frozen in the background (`JFAIL_BACKGROUND_S`, default 60): the world runs on, still connected.

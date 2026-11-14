@@ -15,14 +15,18 @@ import { bool, cameraPosition, clamp, dot, float, interleavedGradientNoise, leng
 
 /** Without a skeleton (the capsule stand-in): the chest is this far above the rendered feet (m). */
 export const FADE_CHEST = 1.0;
-/** Half-size of the cleared area round the chest at the player's distance (m): head to feet. */
-export const FADE_RADIUS = 1.05;
+/** Half-size of the cleared area round the chest at the player's distance (m): head to feet, plus a soft rim (#74). */
+export const FADE_RADIUS = 1.35;
 /** Half-size of the cleared area along the aim (the crosshair) at the player's distance (m). */
 export const FADE_AIM_RADIUS = 0.45;
 /** Fragments within this depth of the player's (m) stay solid: a trunk beside you isn't in the way. */
 export const FADE_DEPTH_MARGIN = 0.3;
-/** Fraction of the cone (from its centre) that is fully cleared; the rest is a soft dither ramp. */
-export const FADE_CORE = 0.6;
+/**
+ * Fraction of the cone (from its centre) that is fully cleared; the rest is a soft dither ramp. 0.45 of
+ * 1.35 m keeps the cleared core at 0.6 m (as before) and widens the ramp from 0.42 to 0.74 m, so a trunk
+ * eases in and out as the camera turns past it instead of popping (#74).
+ */
+export const FADE_CORE = 0.45;
 /**
  * The local player's own avatar (#22, D-view-5): fully there with the camera beyond OWN_FADE_FAR (m)
  * of its chest and head, fully dissolved within OWN_FADE_NEAR. A wall or a stall behind the player
@@ -69,7 +73,22 @@ export const occluderUniforms = {
   strength: uniform(0).setGroup(renderGroup),
   /** How far the local player's own avatar is dissolved (ownFade of the camera's distance), 0 … 1. */
   own: uniform(0).setGroup(renderGroup),
+  /**
+   * First person (D-view-fp-1): the own avatar's fragments inside this sphere (centre xyz, radius w;
+   * w 0 = off) dissolve, so the eye never sees the inside of its own head while the body, the hands and
+   * the held weapon stay. Shadows keep the head (maskShadowNode).
+   */
+  ownCut: uniform(new THREE.Vector4(0, 0, 0, 0)).setGroup(renderGroup),
 };
+
+/** The inner share of the own-head cut sphere that is fully gone; the outer rim dithers. */
+export const OWN_CUT_CORE = 0.85;
+
+/** How far (0 … 1) the first-person head cut dissolves an own-avatar point `p` (what the shader does). */
+export function ownCutFade(p: THREE.Vector3, cut: THREE.Vector4 = occluderUniforms.ownCut.value): number {
+  if (!(cut.w > 0)) return 0;
+  return 1 - smooth(cut.w * OWN_CUT_CORE, cut.w, Math.hypot(p.x - cut.x, p.y - cut.y, p.z - cut.z));
+}
 
 export interface FadeParams {
   depth: number;
@@ -92,10 +111,10 @@ export function fadeParams(depth: number, out: FadeParams = { depth: 0, cosOuter
   return out;
 }
 
-const smooth = (e0: number, e1: number, x: number) => {
+function smooth(e0: number, e1: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
-};
+}
 
 /** How far the own avatar dissolves with the camera `d` m from its chest and head (0 whole … 1 gone). */
 export function ownFade(d: number): number {
@@ -202,7 +221,11 @@ function keepNode(gated: boolean): THREE.Node {
   // Gated: 0 never, 1 the cone (quest NPCs), 2 the own avatar's near-camera fade (all of it at once).
   // Props also clear at the lens (the camera inside a bush or a canopy); avatars have their own rule.
   const lens = float(1).sub(smoothstep(LENS_GONE, LENS_SOLID, dist));
-  const fade = (gated ? select(gate.greaterThan(1.5), u.own, cone.mul(gate)) : max(cone, lens)).mul(u.strength);
+  // The own avatar: its near-camera fade, or (first person) the head inside the cut sphere.
+  const cutR = u.ownCut.w;
+  // Off (radius 0, centre the planet's): every fragment is far outside it, so nothing is cut.
+  const cut = float(1).sub(smoothstep(cutR.mul(OWN_CUT_CORE), max(cutR, 0.0001), length(positionWorld.sub(u.ownCut.xyz))));
+  const fade = (gated ? select(gate.greaterThan(1.5), max(u.own, cut), cone.mul(gate)) : max(cone, lens)).mul(u.strength);
   // Stable screen-door threshold (no time term: a still view doesn't shimmer).
   const noise = interleavedGradientNoise(screenCoordinate.xy);
   return noise.greaterThanEqual(fade) as unknown as THREE.Node;
@@ -255,7 +278,7 @@ export function occluderFadeOf(o: THREE.Object3D, cam: THREE.Vector3, aim: THREE
   const how = m ? fading.get(m) : undefined;
   if (!how) return 0;
   const g = how === "gated" ? fadeGate(o) : FADE_GATE.occluder;
-  if (g === FADE_GATE.ownAvatar) return ownFadeFor(cam, chest);
+  if (g === FADE_GATE.ownAvatar) return Math.max(ownFadeFor(cam, chest), ownCutFade(p));
   return g === FADE_GATE.occluder ? fadeAmount(cam, aim, chest, p) : 0;
 }
 
@@ -282,11 +305,12 @@ export function avatarChest(root: THREE.Object3D, chestBone: THREE.Object3D | nu
  * Per frame, after the camera is placed: the cone from `camera` to the player's `chest` (avatarChest).
  * `active` false (photo mode, the bench, no player) switches it off.
  */
-export function updateOccluderFade(camera: THREE.Camera, chest: THREE.Vector3 | null, active: boolean) {
+export function updateOccluderFade(camera: THREE.Camera, chest: THREE.Vector3 | null, active: boolean, headCut: { centre: THREE.Vector3; radius: number } | null = null) {
   const u = occluderUniforms;
   if (!active || !chest) {
     u.strength.value = 0;
     u.own.value = 0;
+    u.ownCut.value.set(0, 0, 0, 0);
     return;
   }
   _t.copy(chest);
@@ -300,6 +324,13 @@ export function updateOccluderFade(camera: THREE.Camera, chest: THREE.Vector3 | 
   u.cosAimInner.value = _p.cosAimInner;
   camera.getWorldDirection(_aim);
   u.aim.value.copy(_aim);
-  u.own.value = ownFadeFor(_c, _t);
+  // First person: the body stays (no near-camera fade), only the head inside the cut sphere goes.
+  if (headCut && headCut.radius > 0) {
+    u.own.value = 0;
+    u.ownCut.value.set(headCut.centre.x, headCut.centre.y, headCut.centre.z, headCut.radius);
+  } else {
+    u.own.value = ownFadeFor(_c, _t);
+    u.ownCut.value.set(0, 0, 0, 0);
+  }
   u.strength.value = 1;
 }

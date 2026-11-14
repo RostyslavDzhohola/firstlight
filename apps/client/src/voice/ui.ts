@@ -73,7 +73,7 @@ export class VoiceUi {
     let text: string;
     let cls: string;
     if (!vc.enabled) {
-      text = vc.optedIn ? "Voice off · press V" : "Voice off · press V to set up";
+      text = vc.optedIn ? "Voice off · press K" : "Voice off · press K to set up";
       cls = "off";
     } else if (vc.adminMuted) {
       text = "Muted by a moderator";
@@ -95,7 +95,7 @@ export class VoiceUi {
       cls = "on";
     } else {
       const n = vc.room?.transport.peers().length ?? 0;
-      text = n ? `Hold V to talk · ${n} nearby` : "Hold V to talk";
+      text = n ? `Hold K to talk · ${n} nearby` : "Hold K to talk";
       cls = "on";
     }
     this.label.textContent = text;
@@ -222,7 +222,7 @@ export class VoiceUi {
     el("h2", "", body, "PROXIMITY VOICE");
     const list = el("ul", "fl-vfacts", body);
     el("li", "", list, "Talk to players near you. Voices come from where people stand and fade out by 35 m. With a radio you can talk to your channel anywhere on this planet.");
-    el("li", "", list, "Hold V to talk. Hold B to talk on the radio. Nothing is sent while you aren't holding a key.");
+    el("li", "", list, "Hold K to talk. Hold B to talk on the radio. Nothing is sent while you aren't holding a key.");
     el("li", "", list, "Voice is never recorded. Audio goes through a relay, so other players never see your IP address.");
     el("li", "", list, "Mute, block or report anyone from Esc → Voice & radio. Shift+Esc mutes everyone at once.");
     const label = el("label", "fl-vcheck", body);
@@ -249,7 +249,7 @@ export class VoiceUi {
     const status = el("p", "fl-vstatus", body);
     if (vc.adminMuted) status.textContent = "A moderator muted your voice. You can't talk or hear others in this world.";
     else if (vc.relayDown) status.textContent = "The voice relay is unavailable right now. Retrying…";
-    else if (vc.micState === "live") status.textContent = "Microphone ready. Hold V to talk to people near you.";
+    else if (vc.micState === "live") status.textContent = "Microphone ready. Hold K to talk to people near you.";
     else {
       status.textContent = vc.micState === "unsupported" ? "This browser can't use a microphone here. You can still listen." : "Microphone blocked — listening only. Allow the microphone in the address bar, then retry.";
       if (vc.micState === "denied") this.button(body, "Retry microphone", () => vc.retryMic());

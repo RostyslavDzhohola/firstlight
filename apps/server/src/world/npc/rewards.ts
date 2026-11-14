@@ -185,6 +185,7 @@ export function rollChest(sys: NpcSystem, chest: CampChest, level: number, rng: 
   for (let i = 0; i < chest.weapons; i++) items.push(randomWeapon(level, rng));
   if (chest.tonics > 0) items.push({ id: PLANET_TONIC[planet].id, tier: 1, qty: chest.tonics });
   if (chest.cosmetic && rng() < chest.cosmetic.chance) items.push({ id: chest.cosmetic.id, tier: 1, qty: 1 });
+  if (chest.rare && rng() < chest.rare.chance) items.push({ id: chest.rare.id, tier: weaponTierFor(level, rng()), qty: 1 });
   return { items, coins: chest.coins };
 }
 

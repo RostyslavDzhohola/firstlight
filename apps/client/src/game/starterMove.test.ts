@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Terrain } from "@firstlight/shared";
 import { STARTER_STATS, starterMove } from "@firstlight/shared/content/starters";
 import { ANIM } from "@firstlight/shared/net/schema";
+import { ROLL_GAP_MS } from "@firstlight/shared/content/tree";
 import type { Input } from "./input.ts";
 import { MOVE, MOVE_BASE, PlayerController, setStarterMove } from "./PlayerController.ts";
 
@@ -67,5 +68,28 @@ describe("setStarterMove", () => {
     };
     expect(rollsIn(idx("kappa"), 1.1)).toBe(2);
     expect(rollsIn(idx("ash"), 1.1)).toBe(1);
+  });
+
+  it("Second Roll (#81): C held rolls twice in a cooldown, the second start ROLL_GAP_MS after the first with frames out of the roll between", () => {
+    setStarterMove(UNIT7, ["body_hardy", "body_second_roll"]);
+    expect(MOVE.dodgeCharges).toBe(2);
+    const pc = new PlayerController(terrain, -100);
+    pc.teleport(0, R, 0);
+    const keys = input(["KeyW"]);
+    const starts: number[] = [];
+    let was = false, outBetween = 0;
+    for (let f = 0; f < 60; f++) {
+      keys.pressed.clear();
+      keys.pressed.add("KeyC");
+      pc.update(1 / 60, keys, false);
+      const rolling = pc.anim === ANIM.DODGE;
+      if (rolling && !was) starts.push(f / 60);
+      if (!rolling && starts.length === 1) outBetween++;
+      was = rolling;
+    }
+    expect(starts).toHaveLength(2); // 1 s: two rolls, the cooldown holds the third
+    expect((starts[1]! - starts[0]!) * 1000).toBeGreaterThanOrEqual(ROLL_GAP_MS - 1);
+    expect((starts[1]! - starts[0]!) * 1000).toBeLessThan(ROLL_GAP_MS + 40);
+    expect(outBetween).toBeGreaterThanOrEqual(3); // ~100 ms: an input packet or two that the server sees out of the roll
   });
 });

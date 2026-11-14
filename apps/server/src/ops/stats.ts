@@ -1,13 +1,29 @@
 // /stats (SPEC §6.11): sessions today and over 7 days, playtime distribution, deaths, levels,
 // renderer backend and tier split, time per body, D1/D7 return, players online now. Our own data
 // only (session_log in game.db); load-test players are never recorded, and our test accounts are
-// left out of every figure and counted apart (D-home-6). `?format=json` for scripts.
+// left out of every figure and counted apart (D-home-6). The #85 funnel and client errors (db/funnel.ts)
+// lead the page; their report is made by the funnel's worker thread (db/funnelService.ts, D-sec3-1),
+// which this awaits, so a large funnel never stalls the rooms. `?format=json` for scripts (`pnpm
+// metrics --funnel` reads it): `funnel` is the report, or `{off: true}` (FUNNEL_ENABLED=0) or
+// `{error}` (no worker, or no answer in time).
 
 import type { Express, RequestHandler } from "express";
 import type { Identity } from "../auth/identity.ts";
-import { agentSessionCount, retention, sessionStats, testSessionCount } from "../db/index.ts";
+import {
+  ACCOUNT_FUNNEL,
+  agentSessionCount,
+  funnelConfig,
+  retention,
+  sessionStats,
+  testSessionCount,
+  VISIT_FUNNEL,
+  type FunnelKpi,
+  type FunnelReport,
+  type FunnelWindows,
+} from "../db/index.ts";
+import { funnelServiceFor } from "../db/funnelService.ts";
 import { liveRooms } from "../social/index.ts";
-import { bars, esc, fmtDuration, page, PAGE_HEADERS, pct } from "./html.ts";
+import { bars, esc, fmtDuration, fmtTime, page, PAGE_HEADERS, pct } from "./html.ts";
 import type { OpsDeps } from "./admin.ts";
 
 const DAY = 86_400_000;
@@ -34,9 +50,96 @@ function onlineNow(): { total: number; perBody: Record<string, number>; test: nu
   return { total, perBody, test, agents };
 }
 
+const STEP_NAMES: Record<string, string> = {
+  page: "Opened the page (visit issued)",
+  play: "Pressed Play",
+  pick: "Picked a character",
+  world: "World on screen (the page's report)",
+  tutorial_done: "Finished the tutorial",
+  join: "Joined a world (the server saw it)",
+  kill: "First kill",
+  mission: "First mission taken",
+  level2: "Level 2",
+  level5: "Level 5",
+  saved: "Saved the character",
+  first_session: "First session ended",
+  back: "Came back on a later day",
+};
+
+function kpiCell(k: FunnelKpi): string {
+  if (k.value === null) return `<td class="num muted">—</td>`;
+  const shown = k.unit === "share" ? `${pct(k.value)} <span class="muted">(${k.num}/${k.den})</span>` : k.unit === "s" ? `${k.value.toFixed(1)} s` : fmtDuration(k.value);
+  return `<td class="num"${k.ok === false ? ' style="color:var(--bad)"' : k.ok ? ' style="color:var(--ok)"' : ""}>${shown}</td>`;
+}
+
+function stepRows(steps: readonly string[], pick: (r: FunnelReport) => Record<string, number>, w: { day: FunnelReport; week: FunnelReport; all: FunnelReport }): string {
+  const cell = (r: FunnelReport, step: string) => {
+    const m = pick(r);
+    const first = m[steps[0]!] ?? 0;
+    const n = m[step] ?? 0;
+    return `<td class="num">${n}${first && step !== steps[0] ? ` <span class="muted">(${pct(n / first)})</span>` : ""}</td>`;
+  };
+  return steps.map((s) => `<tr><td>${esc(STEP_NAMES[s] ?? s)}</td>${cell(w.day, s)}${cell(w.week, s)}${cell(w.all, s)}</tr>`).join("");
+}
+
+/** The funnel's write queue since the server started: what waits, what was retried, what was lost (db/funnel.ts). */
+export function funnelQueueLine(q: FunnelWindows["limits"]["queue"]): string {
+  const bad = q.lost > 0 || q.dropped > 0;
+  return `<p class="muted"${bad ? ' style="color:var(--bad)"' : ""} data-funnel-queue>Funnel writes since start: ${q.pending} waiting, ${q.retries} retried (database busy), ${q.lost} lost after retries, ${q.dropped} refused (queue full)${q.lastError ? `; last error: ${esc(q.lastError)}` : ""}.</p>`;
+}
+
+/** The funnel's part of /stats: its report, or why there is none. */
+type FunnelPart = FunnelWindows | { off: true } | { error: string };
+
+async function funnelPart(db: OpsDeps["db"], now: number): Promise<FunnelPart> {
+  if (!funnelConfig.enabled) return { off: true };
+  const service = funnelServiceFor(db);
+  if (!service) return { error: "the funnel's worker is not running (game.db in memory?)" };
+  try {
+    return await service.windows(now);
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+function funnelSection(part: FunnelPart): string {
+  if ("off" in part) return `<section><h2>Launch KPIs (#85)</h2><p class="muted" data-funnel-off>The funnel is off (FUNNEL_ENABLED=0): nothing is recorded. Set FUNNEL_ENABLED=1 (or remove it) and restart the server to turn it on; the pages already deployed start reporting by themselves.</p></section>`;
+  if ("error" in part) return `<section><h2>Launch KPIs (#85)</h2><p style="color:var(--bad)" data-funnel-error>The funnel report isn't available right now: ${esc(part.error)}. Reload in a minute.</p></section>`;
+  const f = part;
+  const w = f.windows;
+  const kpiRows = f.kpis.all.map((k, i) => `<tr><td>${esc(k.label)}</td><td class="muted">${k.source === "server" ? "server" : "page"}</td><td class="muted">${esc(k.target)}</td>${kpiCell(f.kpis.day[i]!)}${kpiCell(f.kpis.week[i]!)}${kpiCell(k)}</tr>`).join("");
+  const capped = Object.entries(f.limits.today).filter(([, b]) => b.used >= b.cap).map(([k]) => k);
+  const head = `<tr><th></th><th class="num">Last day</th><th class="num">7 days</th><th class="num">All time</th></tr>`;
+  const tutorialSteps = w.all.tutorial.map((t) => `tutorial:${t.step}`);
+  const tutorialRows = tutorialSteps.length
+    ? stepRows(["world", ...tutorialSteps, "tutorial_done"], (r) => r.visits, w).replace(/<td>tutorial:([^<]*)<\/td>/g, "<td>Tutorial: $1</td>")
+    : "";
+  const errorRows = f.errors.week.kinds
+    .map((e) => `<tr><td class="num">${e.count}</td><td><b>${esc(e.message)}</b><pre>${esc(e.stack.split("\n").slice(0, 2).join("\n"))}</pre></td><td class="muted">${esc(e.where)}<br>build ${esc(e.build)}</td><td class="muted">${esc(fmtTime(e.lastAt))}</td></tr>`)
+    .join("");
+  const split = (m: Record<string, number>) => Object.entries(m).sort((a, b) => b[1] - a[1]);
+  return `
+<section><h2>Launch KPIs (#85): new visits and characters</h2>
+<table><tr><th>KPI</th><th>Source</th><th>Target</th><th class="num">Last day</th><th class="num">7 days</th><th class="num">All time</th></tr>${kpiRows}</table>
+<p class="muted">A window holds the visits and new characters whose first step falls in it; each share counts those that reached both of its steps. Source "server": the server decided both steps (a visit's join comes from its token at /api/play); "page": the numerator is what the page reported. People only: our test visits and accounts (${w.all.apart.test}) and AI agents (${w.all.apart.agent}) are counted apart. Characters made before the funnel existed are not new ones. Raw steps are kept ${f.limits.retentionDays} days, older days as daily totals (their medians are medians of daily medians).</p>
+${capped.length ? `<p style="color:var(--bad)">Today's funnel cap reached (${esc(capped.join(", "))}): later steps today are not recorded, so today's figures are partial.</p>` : ""}
+${funnelQueueLine(f.limits.queue)}</section>
+<div class="grid2">
+<section><h2>First visit, step by step</h2><table>${head}${stepRows(VISIT_FUNNEL, (r) => r.visits, w)}</table></section>
+<section><h2>New characters, step by step</h2><table>${head}${stepRows(ACCOUNT_FUNNEL, (r) => r.accounts, w)}</table></section>
+</div>
+${tutorialRows ? `<section><h2>Tutorial, step by step (visits)</h2><table>${head}${tutorialRows}</table></section>` : ""}
+<div class="grid2">
+<section><h2>Renderer the first visit picked (7 d)</h2>${bars(split(w.week.backend))}<h3>Quality tier</h3>${bars(split(w.week.tier))}</section>
+<section><h2>Graphics fallbacks and failure screens (7 d)</h2>${bars([...split(w.week.fallback).map(([k, v]) => [`WebGL2: ${k}`, v] as [string, number]), ...(["boot_fail", "lost", "webgl_none", "removed", "version"] as const).filter((k) => w.week.visits[k]).map((k) => [k.replace("_", " "), w.week.visits[k]!] as [string, number])])}</section>
+</div>
+<section><h2>Client errors (7 d): ${f.errors.week.total} report(s)</h2>${errorRows ? `<table><tr><th class="num">Reports</th><th>Error</th><th>Where</th><th>Last</th></tr>${errorRows}</table>` : `<p class="muted">No client errors reported.</p>`}
+<p class="muted">Each page reports a kind of error once per session. Last day: ${f.errors.day.total}, all time (${f.limits.errorRetentionDays} d kept): ${f.errors.all.total}. From test visits and agents, apart: ${f.errors.week.apart}.</p></section>`;
+}
+
 export function mountStats(app: Express, deps: OpsDeps): void {
   const gate = deps.requireAdmin as RequestHandler;
-  app.get("/stats", gate, (req, res) => {
+  app.get("/stats", gate, async (req, res) => {
     const now = Date.now();
     const today = sessionStats(deps.db, Math.floor(now / DAY) * DAY);
     const week = sessionStats(deps.db, now - 7 * DAY);
@@ -44,8 +147,9 @@ export function mountStats(app: Express, deps: OpsDeps): void {
     const online = onlineNow();
     const tests = testSessionCount(deps.db, now - 7 * DAY);
     const agentWeek = agentSessionCount(deps.db, now - 7 * DAY);
+    const funnel = await funnelPart(deps.db, now);
     if (req.query.format === "json") {
-      res.set("Cache-Control", "no-store").json({ online, today, week, retention: ret, testAccounts: { onlineNow: online.test, week: tests }, agents: { onlineNow: online.agents, week: agentWeek } });
+      res.set("Cache-Control", "no-store").json({ online, today, week, retention: ret, testAccounts: { onlineNow: online.test, week: tests }, agents: { onlineNow: online.agents, week: agentWeek }, funnel });
       return;
     }
     const who = (res.locals.identity as Identity).name;
@@ -68,6 +172,7 @@ export function mountStats(app: Express, deps: OpsDeps): void {
 <div class="kpi"><b>${pct(ret.d1Rate)}</b><span>D1 return (30 d cohorts)</span></div>
 <div class="kpi"><b>${pct(ret.d7Rate)}</b><span>D7 return (30 d cohorts)</span></div>
 </div>
+${funnelSection(funnel)}
 <div class="grid2">
 <section><h2>Session length (7 d, ${ended} ended)</h2>${bars(Object.entries(week.playtime))}</section>
 <section><h2>Highest level per session (7 d)</h2>${bars(levelEntries)}</section>

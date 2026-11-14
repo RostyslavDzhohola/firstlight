@@ -10,9 +10,12 @@ describe("the arrival title card", () => {
     const cards = worldCards(null);
     for (const id of BODY_IDS) {
       const c = arrivalCard(id);
-      const w = cards.find((x) => x.id === id)!;
-      expect(c.line).toBe(w.line);
-      expect(c.levels).toBe(w.levels);
+      const w = cards.find((x) => x.id === id);
+      // Lumen (#6) has no card on the home page (it is found in the game); the others match theirs.
+      if (w || id !== "lumen") {
+        expect(c.line).toBe(w!.line);
+        expect(c.levels).toBe(w!.levels);
+      }
       expect(c.line.length, id).toBeLessThanOrEqual(42); // one line under the name at 1280 wide
     }
   });

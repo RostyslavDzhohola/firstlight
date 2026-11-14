@@ -159,6 +159,9 @@ export const WORLD_OBJECTS: readonly WorldObjectDef[] = [
   ),
   // H4 The Long Vigil: the vigil lamp on the road north-east of Saint Orrin's ruin.
   late({ id: "h4_lamp", body: "hollowmere", place: "saint_orrins", east: 60, north: 100, look: "beacon", name: "Light the vigil lamp", trigger: "interact", range: 3, mission: "H4" }),
+
+  // Lumen (#6): the stranded surveyor at Moonfall Pad.
+  O({ id: "guide_lumen", body: "lumen", place: "moonfall_pad", east: 4.5, north: -3, look: "guide", name: "Surveyor Odile", trigger: "interact", range: 3 }),
 ];
 
 export const WORLD_OBJECT_BY_ID: ReadonlyMap<string, WorldObjectDef> = new Map(WORLD_OBJECTS.map((o) => [o.id, o]));

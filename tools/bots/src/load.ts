@@ -31,12 +31,14 @@ const SECRET = process.env.LOADTEST_SECRET ?? "";
 
 // Count received bytes per bot by wrapping the global WebSocket before the SDK loads.
 let rxBytes = 0;
+let rxMsgs = 0;
 const Base = globalThis.WebSocket;
 class CountingWS extends Base {
   constructor(url: string | URL, protocols?: string | string[]) {
     super(url, protocols);
     this.addEventListener("message", (e: MessageEvent) => {
       const d = e.data as ArrayBuffer | Blob | string;
+      rxMsgs++;
       rxBytes += typeof d === "string" ? d.length : d instanceof ArrayBuffer ? d.byteLength : (d as Blob).size;
     });
   }
@@ -86,9 +88,12 @@ interface Bot {
 const bots: Bot[] = [];
 const t0 = Date.now();
 let joinFailures = 0;
+/** Each bot's join: /api/play to its player replicated in the room state (ms). */
+const joinMs: number[] = [];
 
 async function spawnBot(i: number) {
   try {
+    const tj = Date.now();
     const tok = await token(i);
     const r = await fetchPaced(`${URL_}/api/play`, { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: JSON.stringify({ body: BODY, loadtest: true, v: PROTOCOL_VERSION }) });
     const res = (await r.json()) as { ok: boolean; reservation?: unknown };
@@ -108,6 +113,7 @@ async function spawnBot(i: number) {
       check();
     });
     room.onMessage("correct", (m: { x: number; y: number; z: number }) => (bot.pos = [m.x, m.y, m.z]));
+    joinMs.push(Date.now() - tj);
     bots.push(bot);
   } catch (e) {
     joinFailures++;
@@ -125,6 +131,7 @@ const SPEED = 6;
 const DT = 0.05;
 let ticks = 0;
 const startRx = rxBytes;
+const startMsgs = rxMsgs;
 const tStart = Date.now();
 const iv = setInterval(() => {
   ticks++;
@@ -167,7 +174,15 @@ setTimeout(async () => {
   clearInterval(report);
   const secs = (Date.now() - tStart) / 1000;
   const perBot = (rxBytes - startRx) / Math.max(1, bots.length) / secs;
-  const result = { bots: bots.length, failures: joinFailures, seconds: Math.round(secs), rxPerBotKBs: +(perBot / 1024).toFixed(2), gbPerPlayerHour: +((perBot * 3600) / 1e9).toFixed(3) };
+  const msgs = rxMsgs - startMsgs;
+  const js = [...joinMs].sort((x, y) => x - y);
+  const q = (p: number) => (js.length ? js[Math.min(js.length - 1, Math.floor(js.length * p))]! : 0);
+  const result = {
+    bots: bots.length, failures: joinFailures, seconds: Math.round(secs), rxPerBotKBs: +(perBot / 1024).toFixed(2), gbPerPlayerHour: +((perBot * 3600) / 1e9).toFixed(3),
+    // messages (state patches and events) per bot per second, and their mean size
+    msgsPerBotS: +(msgs / Math.max(1, bots.length) / secs).toFixed(2), bytesPerMsg: msgs ? Math.round((rxBytes - startRx) / msgs) : 0,
+    joinMs: { p50: q(0.5), p95: q(0.95), max: q(1) },
+  };
   console.log("RESULT", JSON.stringify(result));
   for (const b of bots) await b.room.leave().catch(() => {});
   process.exit(0);

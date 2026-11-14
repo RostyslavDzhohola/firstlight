@@ -1,0 +1,912 @@
+{
+ "char": "mage.glb",
+ "rest": {
+  "shared_bones_missing": [],
+  "shared_bones_max_dev_m": 0.0,
+  "shared_bones_worst": "ring_04_leaf_l",
+  "extra_bones_dev_m": {
+   "hood_01": 0.0,
+   "hood_02": 0.0,
+   "braid_01": 0.0,
+   "braid_02": 0.0,
+   "braid_03": 0.0,
+   "panel_f_01": 0.0,
+   "panel_f_02": 0.0,
+   "panel_b_01": 0.0,
+   "panel_b_02": 0.0,
+   "sash_01": 0.0,
+   "sash_02": 0.0,
+   "lantern_01": 0.0
+  },
+  "ok": true,
+  "clip_frame0_hand_offset_from_rest_m": {
+   "aim": 0.964,
+   "block": 0.691,
+   "cast": 0.926,
+   "cast_mage": 0.785,
+   "death": 0.702,
+   "emote_cheer": 0.695,
+   "emote_dance": 0.661,
+   "emote_point": 0.695,
+   "emote_wave": 0.695,
+   "fall": 0.306,
+   "hit": 0.724,
+   "hit_heavy": 1.125,
+   "idle": 0.695,
+   "idle_mage": 0.785,
+   "jump": 1.081,
+   "land": 0.322,
+   "melee_heavy": 1.289,
+   "melee_light": 0.689,
+   "punch": 0.713,
+   "punch_heavy": 0.713,
+   "roll": 0.953,
+   "run": 0.917,
+   "shoot": 0.964,
+   "sprint": 0.893,
+   "swim": 1.939,
+   "swim_idle": 1.457,
+   "throw": 0.695,
+   "walk": 0.74,
+   "walk_mage": 0.794
+  }
+ },
+ "clips": {
+  "aim": {
+   "frames": 6,
+   "flags": [
+    {
+     "set": "braid",
+     "body": "upperarm_l",
+     "depth_m": 0.019,
+     "frame": 2
+    }
+   ],
+   "worst": {
+    "set": "braid",
+    "body": "upperarm_l",
+    "depth_m": 0.019,
+    "frame": 2
+   }
+  },
+  "block": {
+   "frames": 38,
+   "flags": [],
+   "worst": {
+    "set": "lantern",
+    "body": "forearm_r",
+    "depth_m": 0.005,
+    "frame": 28
+   }
+  },
+  "cast": {
+   "frames": 16,
+   "flags": [],
+   "worst": {
+    "set": "braid",
+    "body": "upperarm_l",
+    "depth_m": -0.001,
+    "frame": 2
+   }
+  },
+  "cast_mage": {
+   "frames": 51,
+   "flags": [],
+   "worst": {
+    "set": "braid",
+    "body": "forearm_l",
+    "depth_m": 0.008,
+    "frame": 40
+   }
+  },
+  "death": {
+   "frames": 73,
+   "flags": [
+    {
+     "set": "hand_l",
+     "body": "thigh_l",
+     "depth_m": 0.063,
+     "frame": 24
+    },
+    {
+     "set": "tabard_f",
+     "body": "calf_r",
+     "depth_m": 0.041,
+     "frame": 54
+    }
+   ],
+   "worst": {
+    "set": "hand_l",
+    "body": "thigh_l",
+    "depth_m": 0.063,
+    "frame": 24
+   }
+  },
+  "emote_cheer": {
+   "frames": 76,
+   "flags": [],
+   "worst": {
+    "set": "tabard_b",
+    "body": "calf_r",
+    "depth_m": -0.015,
+    "frame": 50
+   }
+  },
+  "emote_dance": {
+   "frames": 31,
+   "flags": [
+    {
+     "set": "tabard_f",
+     "body": "calf_l",
+     "depth_m": 0.03,
+     "frame": 24
+    }
+   ],
+   "worst": {
+    "set": "tabard_f",
+    "body": "calf_l",
+    "depth_m": 0.03,
+    "frame": 24
+   }
+  },
+  "emote_point": {
+   "frames": 76,
+   "flags": [],
+   "worst": {
+    "set": "lantern",
+    "body": "forearm_r",
+    "depth_m": 0.001,
+    "frame": 58
+   }
+  },
+  "emote_wave": {
+   "frames": 76,
+   "flags": [],
+   "worst": {
+    "set": "tabard_b",
+    "body": "calf_r",
+    "depth_m": -0.015,
+    "frame": 50
+   }
+  },
+  "fall": {
+   "frames": 76,
+   "flags": [],
+   "worst": {
+    "set": "tabard_b",
+    "body": "calf_l",
+    "depth_m": 0.005,
+    "frame": 32
+   }
+  },
+  "hit": {
+   "frames": 11,
+   "flags": [],
+   "worst": {
+    "set": "braid",
+    "body": "upper_chest",
+    "depth_m": 0.004,
+    "frame": 8
+   }
+  },
+  "hit_heavy": {
+   "frames": 26,
+   "flags": [
+    {
+     "set": "tabard_f",
+     "body": "calf_r",
+     "depth_m": 0.033,
+     "frame": 16
+    }
+   ],
+   "worst": {
+    "set": "tabard_f",
+    "body": "calf_r",
+    "depth_m": 0.033,
+    "frame": 16
+   }
+  },
+  "idle": {
+   "frames": 76,
+   "flags": [],
+   "worst": {
+    "set": "tabard_b",
+    "body": "calf_r",
+    "depth_m": -0.015,
+    "frame": 50
+   }
+  },
+  "idle_mage": {
+   "frames": 76,
+   "flags": [],
+   "worst": {
+    "set": "braid",
+    "body": "forearm_l",
+    "depth_m": 0.002,
+    "frame": 12
+   }
+  },
+  "jump": {
+   "frames": 41,
+   "flags": [
+    {
+     "set": "tabard_f",
+     "body": "calf_r",
+     "depth_m": 0.038,
+     "frame": 8
+    },
+    {
+     "set": "braid",
+     "body": "thigh_l",
+     "depth_m": 0.018,
+     "frame": 38
+    }
+   ],
+   "worst": {
+    "set": "tabard_f",
+    "body": "calf_r",
+    "depth_m": 0.038,
+    "frame": 8
+   }
+  },
+  "land": {
+   "frames": 39,
+   "flags": [
+    {
+     "set": "sash",
+     "body": "forearm_l",
+     "depth_m": 0.027,
+     "frame": 6
+    }
+   ],
+   "worst": {
+    "set": "sash",
+    "body": "forearm_l",
+    "depth_m": 0.027,
+    "frame": 6
+   }
+  },
+  "melee_heavy": {
+   "frames": 61,
+   "flags": [
+    {
+     "set": "braid",
+     "body": "upperarm_r",
+     "depth_m": 0.049,
+     "frame": 24
+    },
+    {
+     "set": "tabard_b",
+     "body": "thigh_r",
+     "depth_m": 0.045,
+     "frame": 30
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.038,
+     "frame": 32
+    },
+    {
+     "set": "tabard_f",
+     "body": "thigh_r",
+     "depth_m": 0.026,
+     "frame": 6
+    },
+    {
+     "set": "braid",
+     "body": "forearm_r",
+     "depth_m": 0.026,
+     "frame": 36
+    },
+    {
+     "set": "tabard_f",
+     "body": "calf_r",
+     "depth_m": 0.022,
+     "frame": 40
+    },
+    {
+     "set": "sash",
+     "body": "thigh_l",
+     "depth_m": 0.021,
+     "frame": 14
+    }
+   ],
+   "worst": {
+    "set": "braid",
+    "body": "upperarm_r",
+    "depth_m": 0.049,
+    "frame": 24
+   }
+  },
+  "melee_light": {
+   "frames": 14,
+   "flags": [
+    {
+     "set": "braid",
+     "body": "upperarm_r",
+     "depth_m": 0.047,
+     "frame": 10
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_l",
+     "depth_m": 0.028,
+     "frame": 4
+    }
+   ],
+   "worst": {
+    "set": "braid",
+    "body": "upperarm_r",
+    "depth_m": 0.047,
+    "frame": 10
+   }
+  },
+  "punch": {
+   "frames": 27,
+   "flags": [],
+   "worst": {
+    "set": "braid",
+    "body": "upper_chest",
+    "depth_m": 0.003,
+    "frame": 6
+   }
+  },
+  "punch_heavy": {
+   "frames": 31,
+   "flags": [],
+   "worst": {
+    "set": "braid",
+    "body": "thigh_l",
+    "depth_m": 0.003,
+    "frame": 24
+   }
+  },
+  "roll": {
+   "frames": 45,
+   "flags": [
+    {
+     "set": "hand_r",
+     "body": "thigh_r",
+     "depth_m": 0.06,
+     "frame": 26
+    },
+    {
+     "set": "tabard_f",
+     "body": "calf_r",
+     "depth_m": 0.048,
+     "frame": 44
+    },
+    {
+     "set": "tabard_b",
+     "body": "thigh_r",
+     "depth_m": 0.046,
+     "frame": 8
+    },
+    {
+     "set": "tabard_b",
+     "body": "thigh_l",
+     "depth_m": 0.044,
+     "frame": 10
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.037,
+     "frame": 12
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_l",
+     "depth_m": 0.023,
+     "frame": 10
+    },
+    {
+     "set": "hand_r",
+     "body": "calf_r",
+     "depth_m": 0.023,
+     "frame": 24
+    },
+    {
+     "set": "lantern",
+     "body": "thigh_r",
+     "depth_m": 0.017,
+     "frame": 24
+    },
+    {
+     "set": "braid",
+     "body": "chest",
+     "depth_m": 0.016,
+     "frame": 14
+    }
+   ],
+   "worst": {
+    "set": "hand_r",
+    "body": "thigh_r",
+    "depth_m": 0.06,
+    "frame": 26
+   }
+  },
+  "run": {
+   "frames": 29,
+   "flags": [
+    {
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.047,
+     "frame": 0
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_l",
+     "depth_m": 0.046,
+     "frame": 14
+    },
+    {
+     "set": "tabard_f",
+     "body": "thigh_r",
+     "depth_m": 0.036,
+     "frame": 2
+    },
+    {
+     "set": "braid",
+     "body": "thigh_l",
+     "depth_m": 0.031,
+     "frame": 24
+    }
+   ],
+   "worst": {
+    "set": "tabard_b",
+    "body": "calf_r",
+    "depth_m": 0.047,
+    "frame": 0
+   }
+  },
+  "shoot": {
+   "frames": 20,
+   "flags": [
+    {
+     "set": "braid",
+     "body": "upperarm_l",
+     "depth_m": 0.018,
+     "frame": 14
+    }
+   ],
+   "worst": {
+    "set": "braid",
+    "body": "upperarm_l",
+    "depth_m": 0.018,
+    "frame": 14
+   }
+  },
+  "sprint": {
+   "frames": 21,
+   "flags": [
+    {
+     "set": "tabard_f",
+     "body": "calf_r",
+     "depth_m": 0.041,
+     "frame": 16
+    },
+    {
+     "set": "tabard_f",
+     "body": "thigh_l",
+     "depth_m": 0.033,
+     "frame": 8
+    },
+    {
+     "set": "tabard_f",
+     "body": "calf_l",
+     "depth_m": 0.028,
+     "frame": 8
+    }
+   ],
+   "worst": {
+    "set": "tabard_f",
+    "body": "calf_r",
+    "depth_m": 0.041,
+    "frame": 16
+   }
+  },
+  "swim": {
+   "frames": 41,
+   "flags": [
+    {
+     "set": "sash",
+     "body": "thigh_l",
+     "depth_m": 0.04,
+     "frame": 26
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_l",
+     "depth_m": 0.023,
+     "frame": 8
+    },
+    {
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.023,
+     "frame": 8
+    },
+    {
+     "set": "sash",
+     "body": "calf_l",
+     "depth_m": 0.02,
+     "frame": 26
+    }
+   ],
+   "worst": {
+    "set": "sash",
+    "body": "thigh_l",
+    "depth_m": 0.04,
+    "frame": 26
+   }
+  },
+  "swim_idle": {
+   "frames": 101,
+   "flags": [
+    {
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.037,
+     "frame": 78
+    }
+   ],
+   "worst": {
+    "set": "tabard_b",
+    "body": "calf_r",
+    "depth_m": 0.037,
+    "frame": 78
+   }
+  },
+  "throw": {
+   "frames": 41,
+   "flags": [
+    {
+     "set": "tabard_b",
+     "body": "calf_r",
+     "depth_m": 0.048,
+     "frame": 34
+    }
+   ],
+   "worst": {
+    "set": "tabard_b",
+    "body": "calf_r",
+    "depth_m": 0.048,
+    "frame": 34
+   }
+  },
+  "walk": {
+   "frames": 41,
+   "flags": [],
+   "worst": {
+    "set": "tabard_f",
+    "body": "calf_r",
+    "depth_m": 0.012,
+    "frame": 14
+   }
+  },
+  "walk_mage": {
+   "frames": 41,
+   "flags": [
+    {
+     "set": "braid",
+     "body": "forearm_l",
+     "depth_m": 0.017,
+     "frame": 0
+    }
+   ],
+   "worst": {
+    "set": "braid",
+    "body": "forearm_l",
+    "depth_m": 0.017,
+    "frame": 0
+   }
+  }
+ },
+ "flags": [
+  {
+   "set": "braid",
+   "body": "upperarm_l",
+   "depth_m": 0.019,
+   "frame": 2,
+   "clip": "aim"
+  },
+  {
+   "set": "hand_l",
+   "body": "thigh_l",
+   "depth_m": 0.063,
+   "frame": 24,
+   "clip": "death"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_r",
+   "depth_m": 0.041,
+   "frame": 54,
+   "clip": "death"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_l",
+   "depth_m": 0.03,
+   "frame": 24,
+   "clip": "emote_dance"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_r",
+   "depth_m": 0.033,
+   "frame": 16,
+   "clip": "hit_heavy"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_r",
+   "depth_m": 0.038,
+   "frame": 8,
+   "clip": "jump"
+  },
+  {
+   "set": "braid",
+   "body": "thigh_l",
+   "depth_m": 0.018,
+   "frame": 38,
+   "clip": "jump"
+  },
+  {
+   "set": "sash",
+   "body": "forearm_l",
+   "depth_m": 0.027,
+   "frame": 6,
+   "clip": "land"
+  },
+  {
+   "set": "braid",
+   "body": "upperarm_r",
+   "depth_m": 0.049,
+   "frame": 24,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "tabard_b",
+   "body": "thigh_r",
+   "depth_m": 0.045,
+   "frame": 30,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.038,
+   "frame": 32,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "tabard_f",
+   "body": "thigh_r",
+   "depth_m": 0.026,
+   "frame": 6,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "braid",
+   "body": "forearm_r",
+   "depth_m": 0.026,
+   "frame": 36,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_r",
+   "depth_m": 0.022,
+   "frame": 40,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "sash",
+   "body": "thigh_l",
+   "depth_m": 0.021,
+   "frame": 14,
+   "clip": "melee_heavy"
+  },
+  {
+   "set": "braid",
+   "body": "upperarm_r",
+   "depth_m": 0.047,
+   "frame": 10,
+   "clip": "melee_light"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_l",
+   "depth_m": 0.028,
+   "frame": 4,
+   "clip": "melee_light"
+  },
+  {
+   "set": "hand_r",
+   "body": "thigh_r",
+   "depth_m": 0.06,
+   "frame": 26,
+   "clip": "roll"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_r",
+   "depth_m": 0.048,
+   "frame": 44,
+   "clip": "roll"
+  },
+  {
+   "set": "tabard_b",
+   "body": "thigh_r",
+   "depth_m": 0.046,
+   "frame": 8,
+   "clip": "roll"
+  },
+  {
+   "set": "tabard_b",
+   "body": "thigh_l",
+   "depth_m": 0.044,
+   "frame": 10,
+   "clip": "roll"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.037,
+   "frame": 12,
+   "clip": "roll"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_l",
+   "depth_m": 0.023,
+   "frame": 10,
+   "clip": "roll"
+  },
+  {
+   "set": "hand_r",
+   "body": "calf_r",
+   "depth_m": 0.023,
+   "frame": 24,
+   "clip": "roll"
+  },
+  {
+   "set": "lantern",
+   "body": "thigh_r",
+   "depth_m": 0.017,
+   "frame": 24,
+   "clip": "roll"
+  },
+  {
+   "set": "braid",
+   "body": "chest",
+   "depth_m": 0.016,
+   "frame": 14,
+   "clip": "roll"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.047,
+   "frame": 0,
+   "clip": "run"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_l",
+   "depth_m": 0.046,
+   "frame": 14,
+   "clip": "run"
+  },
+  {
+   "set": "tabard_f",
+   "body": "thigh_r",
+   "depth_m": 0.036,
+   "frame": 2,
+   "clip": "run"
+  },
+  {
+   "set": "braid",
+   "body": "thigh_l",
+   "depth_m": 0.031,
+   "frame": 24,
+   "clip": "run"
+  },
+  {
+   "set": "braid",
+   "body": "upperarm_l",
+   "depth_m": 0.018,
+   "frame": 14,
+   "clip": "shoot"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_r",
+   "depth_m": 0.041,
+   "frame": 16,
+   "clip": "sprint"
+  },
+  {
+   "set": "tabard_f",
+   "body": "thigh_l",
+   "depth_m": 0.033,
+   "frame": 8,
+   "clip": "sprint"
+  },
+  {
+   "set": "tabard_f",
+   "body": "calf_l",
+   "depth_m": 0.028,
+   "frame": 8,
+   "clip": "sprint"
+  },
+  {
+   "set": "sash",
+   "body": "thigh_l",
+   "depth_m": 0.04,
+   "frame": 26,
+   "clip": "swim"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_l",
+   "depth_m": 0.023,
+   "frame": 8,
+   "clip": "swim"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.023,
+   "frame": 8,
+   "clip": "swim"
+  },
+  {
+   "set": "sash",
+   "body": "calf_l",
+   "depth_m": 0.02,
+   "frame": 26,
+   "clip": "swim"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.037,
+   "frame": 78,
+   "clip": "swim_idle"
+  },
+  {
+   "set": "tabard_b",
+   "body": "calf_r",
+   "depth_m": 0.048,
+   "frame": 34,
+   "clip": "throw"
+  },
+  {
+   "set": "braid",
+   "body": "forearm_l",
+   "depth_m": 0.017,
+   "frame": 0,
+   "clip": "walk_mage"
+  }
+ ],
+ "sets": {
+  "hand_l": 944,
+  "hand_r": 1014,
+  "lantern": 544,
+  "braid": 914,
+  "hood_tip": 259,
+  "tabard_f": 604,
+  "tabard_b": 474,
+  "sash": 98
+ },
+ "baseline_rest": {
+  "braid|belly": -0.0429,
+  "braid|chest": -0.0336,
+  "braid|upper_chest": -0.0211
+ }
+}

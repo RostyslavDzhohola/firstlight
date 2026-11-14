@@ -23,11 +23,21 @@ describe("DataFast script", () => {
     expect(dataFastScript({ VITE_DATAFAST_WEBSITE_ID: "dfid_abc123", VITE_DATAFAST_DOMAIN: "one4all.dev", VITE_DATAFAST_COOKIELESS: "false" })?.src).toBe("https://datafa.st/js/script.js");
   });
 
-  it("the Privacy card says cookies only for the cookie script, and is absent without DataFast (#12)", () => {
+  it("the Privacy card says cookies only for the cookie script (#12)", () => {
     const env = { VITE_DATAFAST_WEBSITE_ID: "dfid_abc123", VITE_DATAFAST_DOMAIN: "one4all.dev" };
-    expect(privacyText(dataFastScript({}))).toBeNull();
-    expect(privacyText(dataFastScript(env))![0]).toContain("no cookies are set");
-    expect(privacyText(dataFastScript({ ...env, VITE_DATAFAST_COOKIELESS: "false" }))![0]).toContain("which sets cookies");
+    expect(privacyText(dataFastScript(env))[0]).toContain("no cookies are set");
+    expect(privacyText(dataFastScript({ ...env, VITE_DATAFAST_COOKIELESS: "false" }))[0]).toContain("which sets cookies");
+  });
+
+  it("our own funnel is disclosed with or without DataFast, with its controls (review ship #6)", () => {
+    const env = { VITE_DATAFAST_WEBSITE_ID: "dfid_abc123", VITE_DATAFAST_DOMAIN: "one4all.dev" };
+    for (const s of [dataFastScript({}), dataFastScript(env)]) {
+      const text = privacyText(s).join(" ");
+      expect(text).toContain("our own server, never a third party");
+      expect(text).toContain("Do Not Track or Global Privacy Control");
+      expect(text).toContain("the button below");
+      expect(text.includes("DataFast")).toBe(!!s);
+    }
   });
 });
 

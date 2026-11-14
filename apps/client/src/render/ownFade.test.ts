@@ -85,3 +85,19 @@ describe("own-avatar near-camera fade (#22)", () => {
     other.dispose();
   });
 });
+
+describe("first-person head cut (D-view-fp-1)", () => {
+  it("dissolves own-avatar points inside the head sphere, keeps the body below it, and is off at radius 0", async () => {
+    const { ownCutFade, OWN_CUT_CORE } = await import("./occluderFade.ts");
+    const head = new THREE.Vector4(0, R + 1.75, 0, 0.25);
+    const at = (y: number, z = 0) => new THREE.Vector3(0, R + y, z);
+    expect(ownCutFade(at(1.75), head)).toBe(1); // the head's centre
+    expect(ownCutFade(at(1.75 + 0.25 * OWN_CUT_CORE - 0.01), head)).toBe(1); // the crown, inside the core
+    expect(ownCutFade(at(1.3), head)).toBe(0); // the chest
+    expect(ownCutFade(at(0.9, 0.3), head)).toBe(0); // a hand at the hip
+    const rim = ownCutFade(at(1.75 + 0.25 * (1 + OWN_CUT_CORE) / 2), head);
+    expect(rim).toBeGreaterThan(0);
+    expect(rim).toBeLessThan(1);
+    expect(ownCutFade(at(1.75), new THREE.Vector4(0, R + 1.75, 0, 0))).toBe(0);
+  });
+});

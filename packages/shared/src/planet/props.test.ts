@@ -49,7 +49,8 @@ function meshFlatness(positions: Float32Array, indices: Uint32Array, x: number, 
   return null;
 }
 
-describe("props", () => {
+// Each test places real props over every body (1-7 s alone on a loaded M1): 30 s, not the 5 s default.
+describe("props", { timeout: 30_000 }, () => {
   const terrains = Object.fromEntries(BODY_IDS.map((id) => [id, createTerrain(id)])) as Record<BodyId, Terrain>;
 
   it("is deterministic: two terrain instances give identical props", () => {
@@ -185,7 +186,7 @@ describe("props", () => {
         }
       }
     }
-    expect(PROPS_VERSION).toBe(6);
+    expect(PROPS_VERSION).toBe(7);
   });
 
   it("grows forest undergrowth close to trees and keeps the original collider dimensions", () => {

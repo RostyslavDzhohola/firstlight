@@ -29,13 +29,13 @@ type Ctl = [keys: readonly string[] | "mouse-l" | "mouse-r" | "mouse-move", labe
 type CtlGroup = { title: string; rows: Ctl[] };
 
 /** Voice chat's keys: hidden in this build (features.voice, D-controls-1). */
-const VOICE_CONTROLS: CtlGroup = { title: "Voice", rows: [[["V"], "Push to talk"], [["B"], "Talk on radio"], [["Shift", "Esc"], "Mute everyone"]] };
+const VOICE_CONTROLS: CtlGroup = { title: "Voice", rows: [[HOTKEYS.pushToTalk.caps, "Push to talk"], [["B"], "Talk on radio"], [["Shift", "Esc"], "Mute everyone"]] };
 
 /** How to play. Every key the game binds (SPEC §4.4). */
 export const CONTROLS: CtlGroup[] = [
   {
     title: "Move",
-    rows: [[["W", "A", "S", "D"], "Move"], ["mouse-move", "Look"], [["Space"], "Jump"], [["Shift"], "Sprint"], [["C"], "Dodge-roll"]],
+    rows: [[["W", "A", "S", "D"], "Move"], ["mouse-move", "Look"], [["Space"], "Jump"], [["Shift"], "Sprint"], [["C"], "Dodge-roll"], [HOTKEYS.view.caps, "First / third person (or scroll all the way in)"]],
   },
   {
     title: "Fight",

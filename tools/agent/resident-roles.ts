@@ -33,6 +33,8 @@ export interface ResidentStats {
   trials: number;
   /** Metres walked. */
   walked: number;
+  /** Lines said to people who talked to it or walked up (resident-talk.ts). */
+  lines: number;
 }
 
 export interface Resident {
@@ -51,6 +53,8 @@ export interface Resident {
   pause(ms: number): Promise<void>;
   /** 0..1, this resident's own sequence. */
   rng(): number;
+  /** It speaks its own greeting lines (resident-talk.ts): the phrase-wheel hello is left out. */
+  talks?: boolean;
 }
 
 /** A hunter's range: how far from its home pad it fights and roams (metres). Arcadia's Clover Fields start about 150 m out. */
@@ -114,6 +118,12 @@ export async function greet(r: Resident, o: Observation, greeted: Map<string, nu
   if (!p) return false;
   greeted.set(p.name, now);
   await r.agent.lookAt(p.id);
+  // A resident that talks greets in words (resident-talk.ts); it only turns to face them.
+  if (r.talks) {
+    r.stats.greetings++;
+    await r.pause(1200);
+    return true;
+  }
   const said = await r.agent.phrase("Truce?"); // the wheel's friendly hello
   if (said.ok) {
     r.stats.greetings++;
@@ -225,6 +235,7 @@ export async function hunter(r: Resident): Promise<void> {
   const a = r.agent;
   const theirs = new Map<string, number>(); // creatures left to someone (and piles already tried), and until when
   let asked = false;
+  let hunting = false; // said "goes hunting" this visit
   let idle = 0;
   while (r.alive()) {
     await r.pause(150); // a breath every round: no branch below can spin
@@ -232,7 +243,7 @@ export async function hunter(r: Resident): Promise<void> {
     if (await mind(r, o)) continue;
     if (a.bodyId !== r.home) {
       if (!(await goTo(r, r.home))) await r.pause(3000);
-      asked = false;
+      asked = hunting = false;
       continue;
     }
     const w = world(r);
@@ -255,6 +266,11 @@ export async function hunter(r: Resident): Promise<void> {
     if (nearArena(w, a.position)) {
       await travelTo(r, pad, { sprint: true, within: 40, seconds: 60 });
       continue;
+    }
+    // The visit's errands (the guide, the shop) are done: from here on it hunts.
+    if (!hunting) {
+      hunting = true;
+      r.log("goes hunting");
     }
     // Loot that is ours and close. One try each: what didn't fit in the bags stays where it is.
     const now = Date.now();

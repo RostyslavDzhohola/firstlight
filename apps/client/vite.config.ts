@@ -23,8 +23,41 @@ function dataFast(env: Record<string, string>): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => ({
-  plugins: [dataFast({ ...loadEnv(mode, process.cwd(), "VITE_"), ...(process.env as Record<string, string>) })],
+/** The build id client error reports carry (#85): VITE_BUILD_ID, else the deploy's commit, else "dev". */
+const BUILD_ID = (process.env.VITE_BUILD_ID || process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 8) || "dev").slice(0, 40);
+
+/**
+ * The root `pnpm dev`'s per-run key for reading dev sign-in codes (tools/dev.ts; D-sec3-6). No request
+ * returns it, so nobody can fetch it, through a proxy or otherwise (review round three, #2): the dev
+ * server prints, in the developer's terminal, a link with the key in its fragment (which a browser
+ * never sends), and the page opened from it keeps the key (src/net/devKey.ts). One click per run.
+ */
+function devSigninKey(): Plugin {
+  return {
+    name: "firstlight-dev-signin-key",
+    apply: "serve",
+    configureServer(server) {
+      const key = process.env.DEV_SIGNIN_KEY ?? "";
+      if (!key) return;
+      const print = server.printUrls.bind(server);
+      server.printUrls = () => {
+        print();
+        const local = server.resolvedUrls?.local[0] ?? `http://localhost:${server.config.server.port ?? 5173}/`;
+        server.config.logger.info(`  ➜  Dev sign-in codes: open ${local}#fl-dev-key=${key} once (the key stays in that browser; this terminal only)`);
+      };
+    },
+  };
+}
+
+export default defineConfig(({ mode, command }) => ({
+  plugins: [dataFast({ ...loadEnv(mode, process.cwd(), "VITE_"), ...(process.env as Record<string, string>) }), devSigninKey()],
+  define: {
+    "import.meta.env.VITE_BUILD_ID": JSON.stringify(BUILD_ID),
+    // Dev sign-in codes (#84, net/auth.ts devCode): on for the dev server, a literal false in every
+    // build, so the code fetch is never in a production bundle. The key itself is never in a module
+    // or a response: devSigninKey() above prints it in the terminal, as a link.
+    __FL_DEV_CODES__: JSON.stringify(command === "serve" && !!process.env.DEV_SIGNIN_KEY),
+  },
   server: {
     port: Number(process.env.CLIENT_PORT ?? 5173),
     host: true,

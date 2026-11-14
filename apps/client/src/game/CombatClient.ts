@@ -16,6 +16,7 @@ import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { setStarterMove } from "./PlayerController.ts";
+import { buildStats } from "@firstlight/shared/content/tree";
 import { easeShare } from "./frameClock.ts";
 import { openSaveProgress } from "../ui/account.ts";
 import { closeDeath, type DeathInfo } from "../ui/death.ts";
@@ -25,6 +26,8 @@ import { saveStatus } from "../net/auth.ts";
 import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
 import { heavyName, heavyRelease, SpecialCooldown } from "./specialCooldown.ts";
 import { bannerCovers } from "../ui/moments.ts";
+import { say, subtitleMs } from "../audio/speech.ts";
+import { uiSettings } from "../ui/uiSettings.ts";
 
 const NUDGED_KEY = "fl.saveNudged";
 const _v = new THREE.Vector3();
@@ -161,6 +164,7 @@ export class CombatClient {
         const s = this.toScreen(_v.set(m.x, m.y, m.z), 1.9);
         if (s) this.hud.damageNumber(s.x, s.y, m.amount, m.weak);
       }
+      if (m.attacker === me || m.target === me) this.game.audio.fight(); // the music's combat layer
       if (m.target === me) {
         if (m.kb && (m.kx || m.ky || m.kz)) this.game.player.knockback(new THREE.Vector3(m.kx, m.ky, m.kz), m.kb);
         this.hud.hurt();
@@ -212,6 +216,22 @@ export class CombatClient {
       const speaker = m.by === me ? null : (room.state as any).players?.get(m.by);
       const slot = partyState().members.findIndex((x) => x.sessionId === m.by) + 1;
       this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "", { name: speaker?.name, slot: slot > 0 && slot <= 4 ? (slot as 1 | 2 | 3 | 4) : undefined });
+    });
+    // A resident's line (#82): a bubble over it for everyone near, held long enough to read, a
+    // subtitle as well when it answers you, and its recording from where it stands (lines without
+    // slots are spoken: audio/speech.ts).
+    room.onMessage("speech", (m: { by: string; text: string; to?: string; line?: string }) => {
+      if (isBlocked(m.by)) return;
+      const speaker = (room.state as any).players?.get(m.by);
+      if (!speaker) return;
+      const at = new THREE.Vector3(speaker.x, speaker.y, speaker.z);
+      const ms = m.line ? subtitleMs(m.line, m.text) : Math.min(9000, 2500 + m.text.length * 45);
+      const s = this.toScreen(at.clone(), 2.3);
+      if (s) this.hud.bubble(s.x, s.y, m.text, { name: speaker.name, ms });
+      // A spoken line's subtitle is say()'s, held while its recording plays; free text gets a reading time.
+      const name = String(speaker.name).replace(/_/g, " ");
+      if (m.line) say(this.game.audio, m.line, { name: m.to === me ? name : null, at: at.addScaledVector(at.clone().normalize(), 1.6), key: m.by }); // from its head
+      else if (m.to === me && uiSettings.get().subtitles) this.hud.subtitle(name, m.text, ms);
     });
     room.onMessage("death", (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
       if (m.victim !== me) return;
@@ -331,7 +351,7 @@ export class CombatClient {
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
       g.hud.setIdentity(meState.name, meState.starter, meState.palette, meState.look ?? 0);
-      setStarterMove(meState.starter); // predict the pace and roll the server validates (content/starters.ts)
+      setStarterMove(meState.starter, g.hud.you?.tree?.nodes); // predict the pace and roll the server validates (starters.ts, tree.ts)
       // The label shows what the server enforces (its flag); the shared zone function says where.
       const p = g.player.pos;
       g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
@@ -437,15 +457,16 @@ export class CombatClient {
       if (this.heavyDueAt && now >= this.heavyDueAt) {
         this.heavyDueAt = 0;
         if (heavyCapable) {
+          g.net.flushInput(now); // the server swings along the facing it has: this frame's
           room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
           g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
           this.lastFire = now;
-          if (t.cooldown) this.special.started(now, t.cooldown);
+          if (t.cooldown) this.special.started(now, t.cooldown * buildStats(g.hud.you?.tree?.nodes).heavyCooldown); // Riposte (tree), as combat.ts
         }
       }
     } else {
       this.heavyDueAt = 0; // switched off the melee weapon: a released heavy is dropped
-      const wantScope = rmb && (def.id === "stillshot" || def.id === "longbow" || def.delivery === "hitscan" || def.delivery === "pellets");
+      const wantScope = rmb && (def.id === "stillshot" || def.id === "longbow" || def.id === "crossbow" || def.delivery === "hitscan" || def.delivery === "pellets");
       if (wantScope !== this.scoped) {
         this.scoped = wantScope;
         room.send("scope", { on: wantScope });
@@ -492,6 +513,7 @@ export class CombatClient {
     // own avatar: swing / shot / cast / throw picked from the held item, without the round trip
     if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
+      g.net.flushInput(now); // the server swings along the facing it has: this frame's (review finding 1)
       room.send("melee", { slot, t: Date.now(), heavy: false });
       g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       const up = g.player.up();
@@ -508,7 +530,7 @@ export class CombatClient {
     }
     const origin = cam.getWorldPosition(new THREE.Vector3());
     const dir = cam.getWorldDirection(new THREE.Vector3());
-    const charge = def.delivery === "arrow" ? Math.min(1, (now - this.chargeStart) / ((t.draw ?? 1) * 1000)) : 1;
+    const charge = def.delivery === "arrow" ? Math.min(1, (now - this.chargeStart) / ((t.draw ?? 1) * 1000 * buildStats(g.hud.you?.tree?.nodes).draw)) : 1;
     room.send("fire", { slot, ox: origin.x, oy: origin.y, oz: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, t: Date.now(), charge });
     if (def.delivery === "arrow" && rmb) {
       // Still holding the draw: the server's timer restarts after each shot, so restart ours too.

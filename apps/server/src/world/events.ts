@@ -110,6 +110,14 @@ export interface PadDiscoveredEvent {
   pad: number;
 }
 
+/** A wild site found for the first time this life (content/wildSites.ts; discovery XP paid). */
+export interface SiteDiscoveredEvent {
+  type: "siteDiscovered";
+  playerId: string;
+  site: string;
+  xp: number;
+}
+
 /** A finished egg (the item is granted by the quests system). The NPC lane emits this for E3. */
 export interface SecretFoundEvent {
   type: "secretFound";
@@ -184,6 +192,20 @@ export interface SpellCastEvent {
   spell: string;
 }
 
+/** A player took a mission from its giver (quests/QuestSystem.ts; the funnel's first mission, #85). */
+export interface MissionAcceptedEvent {
+  type: "missionAccepted";
+  playerId: string;
+  missionId: string;
+}
+
+/** A build-tree node was taken (`node`) or the tree was cleared by a respec (`node` null; #81). */
+export interface TreeEvent {
+  type: "tree";
+  playerId: string;
+  node: string | null;
+}
+
 export type GameEvent =
   | SpellCastEvent
   | KillEvent
@@ -200,7 +222,10 @@ export type GameEvent =
   | AdminActionEvent
   | MissionDoneEvent
   | MedalEvent
-  | SpawnRequestEvent;
+  | SpawnRequestEvent
+  | SiteDiscoveredEvent
+  | MissionAcceptedEvent
+  | TreeEvent;
 
 export type GameEventHandler = (e: GameEvent) => void;
 

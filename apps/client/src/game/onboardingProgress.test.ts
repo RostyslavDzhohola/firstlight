@@ -13,9 +13,9 @@ it("resumes completed client tips on reload/travel for the same account without 
   for (const id of ["move", "look", "jump", "sprint", "dodge", "attack", "switch", "pickup", "map", "wheel", "voice", "portal"] as const) first.steps.complete(id);
   first.save();
   const back = new OnboardingProgress("guest-a", storage);
-  expect(back.steps.doneCount).toBe(STEPS.length - 1); // all but the dummies (server-owned)
+  expect(back.steps.doneCount).toBe(STEPS.length - 1); // all but the attack lesson (server-owned)
   expect(back.steps.current?.id).toBe("attack");
-  expect(back.steps.isDone("portal")).toBe(true);
+  expect(back.steps.isDone("wheel")).toBe(true);
   expect(new OnboardingProgress("guest-b", storage).steps.doneCount).toBe(0);
 });
 

@@ -191,6 +191,26 @@ export const WEAPONS: readonly WeaponDef[] = [
     // headMult 1 (D-balance-8): an explosive, like the Comet (content §2.1); a ×1.5 head hit put Hinoko under the floors.
     tiers: [T(1, 0, { damage: 30, splash: 20, radius: 2.5, burn: 4, rate: 0.4, headMult: 1 }), T(6, 0, { damage: 40, splash: 27, radius: 2.75, burn: 5, rate: 0.4, headMult: 1 }), T(12, 0, { damage: 42, splash: 35, radius: 3, burn: 6, rate: 0.4, headMult: 1 })],
   },
+  // Three families sculpted as code (2026-11-13, lane weapons; tools/blender/props3d, content.md §2.3).
+  // Appended: PlayerState.weapon indexes this list.
+  {
+    id: "boarspear", name: "Winged Boarspear", cls: "melee", delivery: "melee", range: 3.2, arc: 40, maxTargets: 2, windup: 0.15,
+    destroys: "light", stack: 1,
+    // The longest melee reach, in a narrow thrust that runs through two in a line; RMB braces (block).
+    tiers: [T(1, 60, { damage: 22, rate: 0.6, block: 0.4, knockback: 1 }), T(6, 300, { damage: 30, rate: 0.6, block: 0.45, knockback: 1 }), T(12, 900, { damage: 39, rate: 0.6, block: 0.5, knockback: 1 })],
+  },
+  {
+    id: "crossbow", name: "Windlass Crossbow", cls: "ranged", delivery: "projectile", range: 90, speed: 70, gravity: 3,
+    destroys: "light", stack: 1,
+    // One heavy bolt, then the windlass: a heavy weapon (×1.5 price, like the Stillshot). RMB aims 2×.
+    tiers: [T(1, 90, { damage: 50, rate: 1.9, mag: 1, reload: 1.9, headMult: 1.5, zoom: 2 }), T(6, 450, { damage: 68, rate: 1.8, mag: 1, reload: 1.8, headMult: 1.5, zoom: 2 }), T(12, 1350, { damage: 84, rate: 1.7, mag: 1, reload: 1.7, headMult: 1.5, zoom: 2 })],
+  },
+  {
+    id: "lantern", name: "Shepherd's Lantern", cls: "magic", delivery: "projectile", range: 30, speed: 22, gravity: 0,
+    destroys: "light", stack: 1,
+    // Slow drifting lights that pass through a line of foes (pierce); cool-running (more heat).
+    tiers: [T(1, 60, { damage: 17, rate: 0.55, heat: 8, pierce: 2 }), T(6, 300, { damage: 23, rate: 0.55, heat: 9, pierce: 3 }), T(12, 900, { damage: 30, rate: 0.55, heat: 10, pierce: 4 })],
+  },
 ];
 
 export const WEAPON_INDEX: ReadonlyMap<string, number> = new Map(WEAPONS.map((w, i) => [w.id, i]));
@@ -209,7 +229,15 @@ export const STARTERS = [
   { id: "kappa", name: "Kappa", weapon: "riverstaff" },
   { id: "unit7", name: "Unit 7", weapon: "carbine" },
   { id: "ninja", name: "Hinoko", weapon: "kunai" },
+  // #80, the careful version: an ordinary traveller with a basic blade and no special stats. Appended so
+  // every saved character keeps its index; listed first and picked by default (STARTER_ORDER, PLAIN_STARTER).
+  { id: "traveller", name: "Traveller", weapon: "sunbrand" },
 ] as const;
+
+/** The plain starter (#80): base numbers everywhere, a Sunbrand I. New players start as it unless they pick another. */
+export const PLAIN_STARTER = 5;
+/** The order starters are offered in (the pick screen, the home page): the plain one first, then the five by index. */
+export const STARTER_ORDER: readonly number[] = [PLAIN_STARTER, 0, 1, 2, 3, 4];
 
 /** A starter's look: `id` names the client's model and art (assets-dev/characters/<id>.glb). */
 export interface StarterLook {
@@ -225,6 +253,8 @@ export const STARTER_LOOKS: readonly (readonly StarterLook[])[] = [
   [{ id: "kappa", name: "River ninja" }, { id: "kappa_b", name: "Wayfarer" }],
   [{ id: "unit7", name: "Trooper" }, { id: "unit7_b", name: "Scout" }],
   [{ id: "ninja", name: "Hinoko" }],
+  // The Traveller wears Brother Ash's hooded body for now (no new model tonight; D-progress-4).
+  [{ id: "ash", name: "Traveller" }],
 ];
 
 /** A requested or stored look for this starter; anything it doesn't have is the original (0). */

@@ -84,6 +84,12 @@ importers:
       '@colyseus/ws-transport':
         specifier: 0.18.4
         version: 0.18.4(@colyseus/core@0.18.18)(express@5.3.0)
+      '@firstlight/agent-kit':
+        specifier: workspace:*
+        version: link:../../packages/agent-kit
+      '@firstlight/agent-tools':
+        specifier: workspace:*
+        version: link:../../tools/agent
       '@firstlight/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -115,12 +121,6 @@ importers:
       '@colyseus/sdk':
         specifier: 0.18.5
         version: 0.18.5(@colyseus/core@0.18.18)(typescript@7.0.2)(zod@4.6.6)
-      '@firstlight/agent-kit':
-        specifier: workspace:*
-        version: link:../../packages/agent-kit
-      '@firstlight/agent-tools':
-        specifier: workspace:*
-        version: link:../../tools/agent
       '@types/better-sqlite3':
         specifier: 9.6.0
         version: 9.6.0

@@ -26,8 +26,9 @@ function along(p: readonly number[], metres: number, angle: number): V3 {
 }
 
 describe("shops in every safe zone (round 2)", () => {
-  it("has one shop on every body, each with its keeper standing at the spot", () => {
-    for (const b of BODY_IDS) expect(SHOP_SPOTS.filter((s) => s.body === b), b).toHaveLength(1);
+  it("has one shop on every body but the moon, each with its keeper standing at the spot", () => {
+    // Lumen (#6) is a small moon with a pad and no outpost: no shop.
+    for (const b of BODY_IDS) expect(SHOP_SPOTS.filter((s) => s.body === b), b).toHaveLength(b === "lumen" ? 0 : 1);
     expect(new Set(SHOP_SPOTS.map((s) => s.id)).size).toBe(SHOP_SPOTS.length);
     for (const s of SHOP_SPOTS) {
       const keeper = WORLD_OBJECT_BY_ID.get(s.id)!;

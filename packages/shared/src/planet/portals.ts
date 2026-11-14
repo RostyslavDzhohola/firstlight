@@ -1,6 +1,7 @@
 // Portal positions, shared so the server can authorise travel (review: travel bypass) and the
 // client draws them in the same place. Portus has three portals on its plaza; each planet has one
-// portal home beside its main pad.
+// portal home beside its main pad. Arcadia has a second one across the pad, up to its moon Lumen,
+// and Lumen's one portal goes back down to Arcadia (#6).
 
 import type { BodyDef, BodyId } from "./bodies.ts";
 import { padDirs } from "./pads.ts";
@@ -38,6 +39,10 @@ export function tangentFrame(up: V3): { fwd: V3; right: V3 } {
   return { fwd, right: norm(right) };
 }
 
+/** A moon's world (its portal home leads there, not to Portus) and a world's moon (a portal up to it). */
+const MOON_OF: Partial<Record<BodyId, BodyId>> = { lumen: "arcadia" };
+const MOONS: Partial<Record<BodyId, BodyId>> = { arcadia: "lumen" };
+
 export function portalSpots(body: BodyDef, terrain: Terrain): PortalSpot[] {
   const R = body.radius;
   const spots: PortalSpot[] = [];
@@ -61,7 +66,12 @@ export function portalSpots(body: BodyDef, terrain: Terrain): PortalSpot[] {
     const dir0: V3 = [d0[0], d0[1], d0[2]];
     const { fwd } = tangentFrame(dir0);
     const pdir = norm([dir0[0] + (fwd[0] * 8.5) / R, dir0[1] + (fwd[1] * 8.5) / R, dir0[2] + (fwd[2] * 8.5) / R]);
-    make("portus", pdir, (terrain.padHeights[0] ?? 0) - 0.2, [-fwd[0], -fwd[1], -fwd[2]]);
+    make(MOON_OF[body.id] ?? "portus", pdir, (terrain.padHeights[0] ?? 0) - 0.2, [-fwd[0], -fwd[1], -fwd[2]]);
+    const moon = MOONS[body.id];
+    if (moon) {
+      const mdir = norm([dir0[0] - (fwd[0] * 8.5) / R, dir0[1] - (fwd[1] * 8.5) / R, dir0[2] - (fwd[2] * 8.5) / R]);
+      make(moon, mdir, (terrain.padHeights[0] ?? 0) - 0.2, fwd);
+    }
   }
   return spots;
 }

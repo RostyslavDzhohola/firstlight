@@ -31,8 +31,8 @@ const TOGGLES: [Feature, string][] = [
 ];
 
 const TIER_LABEL: Record<Tier | "auto", string> = { auto: "Auto", low: "Low", medium: "Medium", high: "High", ultra: "Ultra" };
-// The Voice slider goes with voice chat (hidden in this build, D-controls-1).
-const VOLUMES: [keyof Game["audio"]["volumes"], string][] = [["master", "Master"], ["music", "Music"], ["sfx", "Effects"], ...(features.voice ? [["voice", "Voice"] as [keyof Game["audio"]["volumes"], string]] : [])];
+// "Voices" is the characters' spoken lines; the Voice chat slider goes with voice chat (hidden in this build, D-controls-1).
+const VOLUMES: [keyof Game["audio"]["volumes"], string][] = [["master", "Master"], ["music", "Music"], ["sfx", "Effects"], ["speech", "Voices"], ...(features.voice ? [["voice", "Voice chat"] as [keyof Game["audio"]["volumes"], string]] : [])];
 
 function range(parent: HTMLElement, id: string, min: number, max: number, step: number, value: number): HTMLInputElement {
   const r = el("input", "fl-range", parent);
@@ -177,6 +177,17 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
       fovOut.textContent = `${fovIn.value}°`;
       setUi({ fov: Number(fovIn.value) });
     });
+    // First person has its own (D-view-fp-1): wider feels right through the eyes.
+    const fovFp = el("div", "fl-setting", gfx);
+    const fovFpRow = el("div", "fl-setting__row", fovFp);
+    const fovFpLab = el("label", "", fovFpRow, "Field of view (first person)");
+    fovFpLab.htmlFor = "fl-fov-first";
+    const fovFpOut = el("output", "num", fovFpRow, `${uiSettings.get().fovFirst}°`);
+    const fovFpIn = range(fovFp, "fl-fov-first", FOV_RANGE[0], FOV_RANGE[1], 1, uiSettings.get().fovFirst);
+    fovFpIn.addEventListener("input", () => {
+      fovFpOut.textContent = `${fovFpIn.value}°`;
+      setUi({ fovFirst: Number(fovFpIn.value) });
+    });
 
     el("hr", "", gfx);
     el("div", "fl-settings__sub", gfx, "Per feature");
@@ -214,6 +225,9 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
   });
   const inv = toggle(mid, "fl-line", "Invert Y", "Pull the mouse back to look up", ui.invertY);
   inv.onchange = () => setUi({ invertY: inv.checked });
+  const fp = toggle(mid, "fl-line", "First person", "Look through your character's eyes. V switches, or scroll all the way in.", ui.view === "first");
+  fp.dataset.e2e = "settings-first-person";
+  fp.onchange = () => setUi({ view: fp.checked ? "first" : "third" });
   el("div", "fl-setting__hint", mid, "Full key list: Menu → How to play.");
 
   // Gamepad (D-controls-5): look speed, invert, stick dead zone and curve, aim slowdown, rumble, the layout.
@@ -263,6 +277,8 @@ export function openSettings(game: Game, host: HTMLElement, back: () => void, es
       flashSaved();
     });
   }
+  const subs = toggle(mid, "fl-line", "Subtitles", "What characters say, at the bottom of the screen", ui.subtitles);
+  subs.onchange = () => setUi({ subtitles: subs.checked });
 
   el("hr", "", mid);
   const comfort = el("h2", "", mid);

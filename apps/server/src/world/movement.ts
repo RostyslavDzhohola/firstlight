@@ -16,7 +16,9 @@ import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
+import { BASE_GRAVITY } from "@firstlight/shared/planet/bodies";
 import { starterMove } from "@firstlight/shared/content/starters";
+import { buildStats, rollReady } from "@firstlight/shared/content/tree";
 import { adminSwitch, inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
 import { activeMoveFx, movementLimits } from "./npc/effects.ts";
@@ -42,7 +44,7 @@ export const MOVE = {
   knockbackWindowMs: 1500,
   groundTolerance: 0.5, // feet may be this far below the ground
   groundedAbove: 0.35, // feet within this of the ground count as grounded (client: the same)
-  gravity: 18, // client PlayerController
+  gravity: BASE_GRAVITY, // client PlayerController; the envelope uses each body's (PlayerActor.airG)
   jumpSpeed: 6.6, // client PlayerController (apex ≈ 1.21 m)
   airSlack: 0.5, // metres above the envelope
   airTimeSlackMs: 350, // packet timing slack on the envelope
@@ -86,6 +88,8 @@ export interface MoveLimits {
    */
   sprint?: number;
   dodgeCooldownMs?: number;
+  /** Dodge rolls held at once (Second Roll, build tree): each refills one cooldown after it was used. Absent = 1. */
+  dodgeCharges?: number;
   /** Admin Speed ×2 (D-admin-1): multiplies the refill and the bank. Admins with the switch on only. */
   boost?: number;
   /**
@@ -93,6 +97,11 @@ export interface MoveLimits {
    * included, is paid from a flying allowance (ADMIN_MODE.flySpeed). Admins with the switch on only.
    */
   fly?: boolean;
+}
+
+/** May a roll start now (content/tree.ts rollReady)? One charge: a cooldown since the last roll; Second Roll: two out at once. */
+export function dodgeReady(a: { lastDodgeAt: number; dodgeTimes?: number[] }, now: number, dodgeMs: number, charges: number): boolean {
+  return rollReady(charges <= 1 ? [a.lastDodgeAt] : (a.dodgeTimes ?? [a.lastDodgeAt]), now, dodgeMs, charges);
 }
 
 /**
@@ -105,9 +114,12 @@ export function moveLimits(a: PlayerActor, now: number): MoveLimits {
   const fx = inSaddle(a, now) ? activeMoveFx(a, now) : null;
   const limits: MoveLimits = fx ? { speed: base.speed, dodge: 0, ride: rideSpeed(true, fx.slow, fx.noSprint) } : base;
   // Per-starter pace and roll (issue #9): the refill and the bank scale with the starter's sprint.
+  // The build tree (#81): Long Stride's pace, Second Roll's second charge. The client predicts the same.
   const sm = starterMove(a.char.starter);
-  limits.sprint = sm.sprint;
+  const build = buildStats(a.char.tree);
+  limits.sprint = sm.sprint * build.pace;
   limits.dodgeCooldownMs = sm.dodgeCooldown * 1000;
+  if (build.dodgeCharges > 1) limits.dodgeCharges = build.dodgeCharges;
   // Admin mode: only for admin identities with the switch on (adminSwitch); everyone else as before.
   if (adminSwitch(a, "speed")) limits.boost = ADMIN_MODE.speedMult;
   if (adminSwitch(a, "fly")) limits.fly = true;
@@ -126,7 +138,7 @@ function swimmingAt(w: MoveWorld, len: number, ground: number): boolean {
 
 /** Highest radius the body may have right now while airborne (the ballistic envelope). */
 export function airCeiling(a: PlayerActor, now: number): number {
-  const g = MOVE.gravity;
+  const g = a.airG;
   const v0 = a.airLiftV;
   const tApex = v0 / g;
   const apex = (v0 * v0) / (2 * g);
@@ -142,8 +154,8 @@ export function groundMotion(a: PlayerActor, len: number, now: number) {
   a.airLiftV = MOVE.jumpSpeed;
 }
 
-/** Height of a standing jump's apex (the client's jump speed and gravity), about 1.21 m. */
-const JUMP_APEX = (MOVE.jumpSpeed * MOVE.jumpSpeed) / (2 * MOVE.gravity);
+/** Height of a standing jump's apex under pull `g` (the client's jump speed): about 1.21 m at the base pull. */
+const jumpApex = (g: number) => (MOVE.jumpSpeed * MOVE.jumpSpeed) / (2 * g);
 
 /**
  * May a step end standing on a prop top `ground` m up (F12 confirmation Opus SF1)? A top counts as
@@ -158,7 +170,7 @@ function reachesTop(a: PlayerActor, w: MoveWorld, ground: number, len: number, n
   const support = supportAt(w, sx, sy, sz, w.groundAt(sx, sy, sz));
   const standing = from - w.radius - support <= MOVE.groundedAbove;
   if (standing && support >= ground - MOVE.groundedAbove) return true;
-  const ceiling = standing ? Math.max(airCeiling(a, now), from + JUMP_APEX + MOVE.airSlack) : airCeiling(a, now);
+  const ceiling = standing ? Math.max(airCeiling(a, now), from + jumpApex(a.airG) + MOVE.airSlack) : airCeiling(a, now);
   return len <= ceiling;
 }
 
@@ -193,6 +205,7 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // The roll is the same 4.5 m in 0.3 s for everyone, so a slower refill leaves it more to cover:
   // about 0.5 m per m/s of sprint under the base over the roll and its slow-down (D-balance-4).
   const dodgeBurst = MOVE.dodgeBurst + Math.max(0, MOVE.maxSpeed - sprint) * MOVE.slowRollBurstPerMps;
+  const charges = limits.dodgeCharges ?? 1;
   const speed = (riding ? limits.ride! : fly ? ADMIN_MODE.flySpeed : (inWater ? MOVE.swimSpeed : sprint) * limits.speed) * boost * MOVE.speedSlack;
   const cap = (riding ? HORSE.budgetCap : fly ? (MOVE.budgetCap * ADMIN_MODE.flySpeed) / MOVE.maxSpeed : inWater ? MOVE.swimBudgetCap : (MOVE.budgetCap * sprint) / MOVE.maxSpeed) * boost;
   const refilled = a.moveBudget + speed * elapsed;
@@ -200,11 +213,13 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // The dodge reserve refills over one dodge cooldown, whatever the bank does: an honest player
   // sprinting and dodging at every cooldown averages ~10.9 m/s (a 15 m/s roll plus its slow-down),
   // more than the sprint allowance, so a reserve fed only by bank overflow ran dry (T9 review).
-  a.dodgeReserve = Math.min(dodgeBurst, a.dodgeReserve + (elapsed * 1000 * dodgeBurst) / dodgeMs);
+  // With more than one charge the reserve holds a roll per charge and refills them side by side.
+  a.dodgeReserve = Math.min(dodgeBurst * charges, a.dodgeReserve + (elapsed * 1000 * dodgeBurst * charges) / dodgeMs);
   if (now >= a.moveBonusUntil) a.moveBonus = 0;
   // Dodge rolls only on foot on land (the client can't roll in the water or from the saddle).
-  if (m.anim === ANIM.DODGE && !riding && !swimming && !a.swimming && limits.dodge > 0 && now - a.lastDodgeAt >= dodgeMs) {
+  if (m.anim === ANIM.DODGE && !riding && !swimming && !a.swimming && limits.dodge > 0 && dodgeReady(a, now, dodgeMs, charges)) {
     a.lastDodgeAt = now;
+    a.dodgeTimes = [...(a.dodgeTimes ?? []).filter((t) => now - t < dodgeMs), now].slice(-charges);
     const burst = Math.min(a.dodgeReserve, dodgeBurst * limits.dodge);
     a.dodgeReserve -= burst;
     a.moveBonus += burst;
@@ -292,7 +307,7 @@ export function settle(a: PlayerActor, w: MoveWorld, now: number): V3 | null {
 /** Upward speed the envelope still allows the body at `now` (its launch speed less gravity, with the timing slack). */
 function upwardSpeedLeft(a: PlayerActor, now: number): number {
   const t = Math.max(0, (now - a.airStartAt - MOVE.airTimeSlackMs) / 1000);
-  return Math.max(0, a.airLiftV - MOVE.gravity * t);
+  return Math.max(0, a.airLiftV - a.airG * t);
 }
 
 /**
@@ -310,8 +325,8 @@ export function noteKnockback(a: PlayerActor, strength: number, now: number) {
   a.airLiftV = v;
 }
 
-/** Fresh motion state for a body placed at radius `len` (join, teleport). */
-export function motionFields(len: number, now: number) {
+/** Fresh motion state for a body placed at radius `len` (join, teleport) on a body pulling with `gravity`. */
+export function motionFields(len: number, now: number, gravity = MOVE.gravity) {
   return {
     moveBudget: MOVE.budgetCap,
     lastBudgetAt: now,
@@ -326,5 +341,6 @@ export function motionFields(len: number, now: number) {
     airStartAt: now,
     airStartLen: len,
     airLiftV: MOVE.jumpSpeed,
+    airG: gravity,
   };
 }

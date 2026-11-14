@@ -9,3 +9,8 @@
 .fl-mpoint .fl-callout.is-edge .fl-callout__box { left: 16px; top: -24px; }
 .fl-mpoint .fl-callout.is-edge.is-flip .fl-callout__box { left: auto; right: 16px; }
 .fl-mpoint .fl-callout.is-flip:not(.is-edge) .fl-callout__box { left: auto; right: 10px; }
+/* A mission object's label (#86, game/missionObjects.ts): what it is, in its mission's colour. */
+.fl-objlabel { position: absolute; left: 0; top: 0; display: grid; gap: 2px; padding: calc(.35 * var(--u)) calc(.6 * var(--u)); border-left: 3px solid var(--mc, var(--hero-gold)); pointer-events: none; white-space: nowrap; will-change: transform; }
+.fl-objlabel[hidden] { display: none; }
+.fl-objlabel b { font: 600 var(--t-sm)/1.15 var(--font-display); letter-spacing: .04em; color: var(--mc, var(--hero-gold)); }
+.fl-objlabel small { font-size: var(--t-xs); color: var(--paper-2); }

@@ -133,6 +133,12 @@ export function getPile<T = unknown>(db: Db, id: number): Pile<T> | null {
   return r ? toPile<T>(r) : null;
 }
 
+/** Move a pile (one a new solid buried). Returns it moved, or null if it is gone. */
+export function movePile<T = unknown>(db: Db, id: number, x: number, y: number, z: number): Pile<T> | null {
+  const r = stmt(db, "UPDATE pile SET pos_x = ?, pos_y = ?, pos_z = ? WHERE id = ? RETURNING *").get(x, y, z, id) as PileRow | undefined;
+  return r ? toPile<T>(r) : null;
+}
+
 export function listPiles<T = unknown>(db: Db, body: string): Pile<T>[] {
   return (stmt(db, "SELECT * FROM pile WHERE body = ? ORDER BY created_at, id").all(body) as PileRow[]).map((r) => toPile<T>(r));
 }

@@ -45,6 +45,8 @@ export const SAMPLE_FALLBACKS = {
   grenade: { preset: "grenade" },
   kunai: { preset: "swing", gain: 0.8, rate: 1.6 }, // a thrown kunai's whip
   ember_seal: { preset: "emberglass", gain: 1.2, rate: 0.8 }, // the Ember Seal fireball
+  crossbow: { preset: "longbow", gain: 1.2, rate: 0.7 }, // a heavy bolt: a deeper bowshot
+  lantern: { preset: "hexquill", gain: 0.9, rate: 0.75 }, // a soft, low light let go
   explosion: { preset: "explosion" },
 } as const satisfies Record<string, Fallback>;
 
@@ -76,6 +78,7 @@ const SWINGS: Record<string, SampleName> = {
   riverstaff: "swing_staff",
   axe: "swing_heavy",
   hammer: "swing_heavy",
+  boarspear: "swing_staff", // a thrust down a long shaft
 };
 
 /** What a weapon appended later sounds like until it gets its own sample, by delivery. */

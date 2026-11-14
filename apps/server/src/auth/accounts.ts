@@ -19,11 +19,13 @@ import { linkAccounts } from "../db/link.ts";
 import { setDisplayName } from "../db/accounts.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
+import { closeFunnel, funnelConfig } from "../db/funnel.ts";
+import { startFunnelService, type FunnelService } from "../db/funnelService.ts";
 import { stmt } from "../db/game-db.ts";
 import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
-import { hmacHex, safeEqual } from "./crypto.ts";
+import { hmacHex, safeEqual, strongSecret } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
-import { banKey, CLIENT_IP_HEADER, normalizeIp, proxiedRequestIp } from "./ip.ts";
+import { banKey, CLIENT_IP_HEADER, localDevRequest, normalizeIp, proxiedRequestIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
 import { classifyMailFailure, DevOutbox, disabledMailer, MailHealth, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
@@ -55,6 +57,12 @@ export interface AccountsConfig {
   rateLimit?: boolean;
   /** Print dev OTP codes to the console (only when the dev outbox is in use). */
   devMailLog?: boolean;
+  /** #84: mount GET /api/account/dev-code (DEV_SIGNIN_CODES=1). Needs the dev outbox and devCodeKey, never in production. */
+  devCodeRoute?: boolean;
+  /** The root `pnpm dev`'s per-run key (DEV_SIGNIN_KEY, tools/dev.ts); a reader of the route must send it. */
+  devCodeKey?: string;
+  /** The funnel (#85; FUNNEL_ENABLED: off in production unless =1, D-ship-12): off, nothing is recorded and no funnel timer or worker starts. */
+  funnelEnabled?: boolean;
   /** Accepted after the Better Auth verifier (dev guest tokens when ALLOW_DEV_GUESTS=1). */
   fallbackVerifier?: TokenVerifier;
   mailer?: Mailer;
@@ -89,7 +97,12 @@ export interface Accounts {
   requireAdmin: (req: Request, res: Response, next: NextFunction) => Promise<void>;
   mountBeforeJson(app: Express): void;
   mountAfterJson(app: Express): void;
-  close(): void;
+  /** The funnel's worker (reports and housekeeping off the game's thread, D-sec3-1); null when the funnel is off or game.db is in memory. */
+  funnel: FunnelService | null;
+  /** The daily housekeeping (also run once at boot): old analytics rows, abandoned guests, and the funnel's in its worker. */
+  housekeep(): Promise<void>;
+  /** Flush what is queued (one overall deadline) and close the databases. */
+  close(): Promise<void>;
 }
 
 export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
@@ -105,6 +118,14 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   authDb.pragma("busy_timeout = 5000");
   const db = openGameDb(cfg.gameDbPath);
   setGameDb(db);
+  // The funnel (#85): on unless switched off. Its reports and housekeeping run in a worker thread on
+  // their own connection (db/funnelService.ts, D-sec3-1), which needs game.db to be a file.
+  funnelConfig.enabled = cfg.funnelEnabled ?? true;
+  const funnel = funnelConfig.enabled && cfg.gameDbPath !== ":memory:" ? startFunnelService(db, cfg.gameDbPath) : null;
+  if (funnel) {
+    // Today's caps start from what today already holds (a restart doesn't reset them); counted in the worker.
+    await funnel.prime().catch((e: Error) => console.warn(`funnel: today's counts not read (${e.message}); today's caps start from zero`));
+  }
 
   let devOutbox: DevOutbox | null = null;
   let mailer: Mailer;
@@ -205,17 +226,26 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const backfilled = backfillTestAccounts(db, (id) => (anonStmt.get(id) as { anon: number | null } | undefined)?.anon === 1);
   if (backfilled !== null) console.log(`test accounts backfill: flagged ${backfilled} automation guest account(s)`);
   // Daily housekeeping (and once at boot): old analytics rows, abandoned guests (F12, see prune.ts).
-  const housekeeping = () => {
+  // The funnel's (old error reports, old cohort days folded into funnel_day) runs in its worker; the
+  // returned promise settles when that is done (tests and the benchmark wait for it).
+  const housekeeping = (): Promise<void> => {
     pruneSessionLog(db);
+    const funnelDone = funnel
+      ? funnel.housekeep().then(
+          () => {},
+          (e: Error) => console.warn(`funnel housekeeping: ${e.message}`),
+        )
+      : Promise.resolve();
     try {
       const n = pruneGuests(authDb, db, { isLive: (userId) => !!sessions.get(userId) });
       if (n) console.log(`pruned ${n} abandoned guest account(s)`);
     } catch (e) {
       console.warn(`guest pruning failed: ${(e as Error).message}`);
     }
+    return funnelDone;
   };
-  housekeeping();
-  const pruneTimer = setInterval(housekeeping, 24 * 3_600_000);
+  void housekeeping();
+  const pruneTimer = setInterval(() => void housekeeping(), 24 * 3_600_000);
   pruneTimer.unref();
 
   const startedAt = Date.now();
@@ -332,10 +362,48 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     },
     mountAfterJson(app) {
       mountAccountRoutes(app, accounts, cfg);
+      // #84: a development server with no mail key sends no email: the save and sign-in cards ask
+      // here for the code the dev outbox kept and show it. It hands out anyone's code, so "not
+      // production" is not enough, and neither is "looks local": a header's absence proves nothing (a
+      // reverse proxy on this machine that adds no forwarding header looks exactly like the developer;
+      // review round two, blocker 1). The code is readable only with the key the root `pnpm dev`
+      // generated for this run (tools/dev.ts), which only the developer's own server and Vite hold,
+      // and Vite shows only in the developer's terminal, as a link (no request returns it; D-sec3-6);
+      // without that key configured the route does not exist. Defence in depth around it: the
+      // DEV_SIGNIN_CODES=1 opt-in, never in production, a loopback socket with a loopback Host and no
+      // forwarding header (localDevRequest), and an Origin that is absent or one of our client
+      // origins (another site's page can't read a code by CORS or a rebound name). Every refusal is
+      // the same 404.
+      const outbox = devOutbox;
+      const key = cfg.devCodeKey ?? "";
+      if (outbox && cfg.devCodeRoute && !cfg.production && strongSecret(key)) {
+        const origins = new Set(cfg.trustedOrigins);
+        app.get("/api/account/dev-code", (req, res) => {
+          res.setHeader("Cache-Control", "no-store");
+          const given = req.headers["x-firstlight-dev-key"];
+          const origin = req.headers.origin;
+          if (typeof given !== "string" || !safeEqual(given, key) || (origin !== undefined && !origins.has(origin)) || !localDevRequest(req)) {
+            res.status(404).json({ error: "not found" });
+            return;
+          }
+          const email = typeof req.query.email === "string" ? req.query.email.trim() : "";
+          res.json({ code: email ? outbox.recentCode(email) : null });
+        });
+      } else if (outbox && cfg.devCodeRoute && !cfg.production) {
+        console.warn("dev-code: DEV_SIGNIN_CODES=1 but no DEV_SIGNIN_KEY, so the cards can't fetch codes; start with the root `pnpm dev` (or DEV_MAIL_LOG=1 prints them)");
+      }
     },
-    close() {
+    funnel,
+    housekeep: housekeeping,
+    async close() {
+      if (closed) return;
       closed = true;
       clearInterval(pruneTimer);
+      // Queued funnel rows and error reports: written in slices without waiting for a lock, until one
+      // overall deadline; the rest is counted lost and logged once (db/funnel.ts closeFunnel). Then the
+      // funnel's worker stops.
+      if (funnel) await funnel.close();
+      else await closeFunnel(db);
       setGameDb(null);
       try {
         db.close();
@@ -374,6 +442,9 @@ export function accountsConfigFromEnv(env: {
   otpDailyBudget: number;
   otpPerEmailPerHour: number;
   devMailLog: boolean;
+  devCodeRoute?: boolean;
+  devSigninKey?: string;
+  funnelEnabled?: boolean;
 }): AccountsConfig {
   return {
     production: env.production,
@@ -391,6 +462,9 @@ export function accountsConfigFromEnv(env: {
     otpDailyBudget: env.otpDailyBudget,
     otpPerEmailPerHour: env.otpPerEmailPerHour,
     devMailLog: env.devMailLog,
+    devCodeRoute: !!env.devCodeRoute && !env.production,
+    devCodeKey: env.production ? "" : (env.devSigninKey ?? ""),
+    funnelEnabled: env.funnelEnabled ?? true,
   };
 }
 

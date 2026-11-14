@@ -1,5 +1,6 @@
 // World markers for race / defend / collect missions (2026-11-12): race rings, the beacon's ring and
-// beam, and shards (also Lark's kite panels). Pooled: one InstancedMesh per kind per body, sized to
+// beam, gleam shards and Lark's kite panels (diamond kites since #86). Every piece glows in its
+// mission's colour (ui/missionColour.ts), the colour of its row in the missions panel. Pooled: one InstancedMesh per kind per body, sized to
 // that body's objects, sharing two module-level emissive node materials (a solid one and a
 // see-through one) (MeshBasicNodeMaterial: works on
 // WebGPU and the WebGL2 fallback) that the shader warm-up compiles from kept samples
@@ -14,13 +15,27 @@ import { objectPos, objectsOn, type WorldObjectDef } from "@firstlight/shared/co
 import type { TrialMsg } from "@firstlight/shared/net/protocol";
 import { atmo } from "../render/atmosphere.ts";
 import { keptSamples } from "../render/warmup.ts";
+import { missionColourHex } from "../ui/missionColour.ts";
 
 /** Ring centres stand this high (the server's TRIAL_RULES.RING_LIFT). */
 export const RING_LIFT = 1.6;
 
 let mat: THREE.MeshBasicNodeMaterial | null = null;
 let softMat: THREE.MeshBasicNodeMaterial | null = null;
-let geos: { ring: THREE.BufferGeometry; flat: THREE.BufferGeometry; fill: THREE.BufferGeometry; column: THREE.BufferGeometry; shard: THREE.BufferGeometry } | null = null;
+let geos: { ring: THREE.BufferGeometry; flat: THREE.BufferGeometry; fill: THREE.BufferGeometry; column: THREE.BufferGeometry; shard: THREE.BufferGeometry; kite: THREE.BufferGeometry } | null = null;
+
+/** A diamond kite, about 0.8 × 1.2 m, a few centimetres thick (#86: a kite panel looks like a kite). */
+function kiteGeometry(): THREE.BufferGeometry {
+  const sh = new THREE.Shape();
+  sh.moveTo(0, 0.62);
+  sh.lineTo(0.4, 0.12);
+  sh.lineTo(0, -0.62);
+  sh.lineTo(-0.4, 0.12);
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 0.05, bevelEnabled: false });
+  g.translate(0, 0, -0.025);
+  return g;
+}
 
 /** One emissive material for every marker; instance colours carry the state (white → bloom-ready). */
 function material(): THREE.MeshBasicNodeMaterial {
@@ -58,6 +73,7 @@ function geometries() {
     fill: new THREE.CircleGeometry(1, 48), // the faint fill inside it (soft material)
     column: new THREE.CylinderGeometry(0.22, 0.32, 7, 10, 1, true),
     shard: new THREE.OctahedronGeometry(0.42, 0),
+    kite: kiteGeometry(),
   };
   return geos;
 }
@@ -74,8 +90,6 @@ const C = {
   beaconIdle: new THREE.Color(0.28, 0.55, 0.62),
   beaconLit: new THREE.Color(0.62, 0.48, 0.18),
   beaconPaused: new THREE.Color(0.62, 0.2, 0.15),
-  shard: new THREE.Color(1.6, 2.3, 2.6),
-  kite: new THREE.Color(2.4, 1.3, 1.6),
 };
 
 interface Spot {
@@ -96,6 +110,14 @@ interface OpenEntry {
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
+/** A collect piece's glow: its mission's colour, lifted over the bloom threshold like the others. */
+const pieceColours = new Map<string, THREE.Color>();
+function pieceColour(mission: string): THREE.Color {
+  let c = pieceColours.get(mission);
+  if (!c) pieceColours.set(mission, (c = new THREE.Color(missionColourHex(mission)).multiplyScalar(2.4)));
+  return c;
+}
+
 /** Scratch for the beacon's ground ring and the shard spin (update allocates nothing per frame). */
 const _q2 = new THREE.Quaternion();
 const _spin = new THREE.Quaternion();
@@ -104,6 +126,7 @@ const _yAxis = new THREE.Vector3(0, 1, 0);
 const LAY_FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
 const FACE_UP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
 const _s = new THREE.Vector3();
+const _s2 = new THREE.Vector3();
 const _c = new THREE.Color();
 /** The torus's outer radius: a ring's post starts at its top. */
 const RING_TOP = 2.76;
@@ -133,12 +156,14 @@ export class TrialMarkers {
   private readonly rings: Spot[];
   private readonly beacons: Spot[];
   private readonly shards: Spot[];
+  private readonly kites: Spot[];
   private readonly ringMesh: THREE.InstancedMesh | null;
   private readonly postMesh: THREE.InstancedMesh | null;
   private readonly flatMesh: THREE.InstancedMesh | null;
   private readonly fillMesh: THREE.InstancedMesh | null;
   private readonly columnMesh: THREE.InstancedMesh | null;
   private readonly shardMesh: THREE.InstancedMesh | null;
+  private readonly kiteMesh: THREE.InstancedMesh | null;
   private t = 0;
   /** Open missions by id, refilled each frame from pooled entries (no per-frame Map or wrappers). */
   private readonly open = new Map<string, OpenEntry>();
@@ -155,7 +180,9 @@ export class TrialMarkers {
     const objs = objectsOn(body);
     this.rings = objs.filter((o) => o.look === "ring").map(spot);
     this.beacons = objs.filter((o) => o.look === "beacon").map(spot);
-    this.shards = objs.filter((o) => o.look === "shard").map(spot);
+    const isKite = (o: WorldObjectDef) => o.look === "shard" && /kite/i.test(o.name);
+    this.shards = objs.filter((o) => o.look === "shard" && !isKite(o)).map(spot);
+    this.kites = objs.filter(isKite).map(spot);
     // Static race order and piece indices, worked out once (was a find() per ring per frame).
     for (const s of this.rings) {
       const race = s.def.mission ? MISSION_BY_ID.get(s.def.mission)?.race : undefined;
@@ -165,7 +192,7 @@ export class TrialMarkers {
       const t = byId(race.rings[Math.min(k + 1, race.rings.length - 1)]) ?? byId(race.rings[Math.max(0, k - 1)]);
       s.race = { mission: s.def.mission!, k, toward: t && t !== s ? t.pos : null };
     }
-    for (const s of this.shards) {
+    for (const s of [...this.shards, ...this.kites]) {
       const c = s.def.mission ? MISSION_BY_ID.get(s.def.mission)?.collect : undefined;
       const k = c ? c.pieces.indexOf(s.def.id) : -1;
       if (c && k >= 0) s.piece = { mission: s.def.mission!, k };
@@ -188,6 +215,7 @@ export class TrialMarkers {
     this.fillMesh = make(g.fill, this.beacons.length, "beaconFill", true);
     this.columnMesh = make(g.column, this.beacons.length, "beaconColumn", true);
     this.shardMesh = make(g.shard, this.shards.length, "shards");
+    this.kiteMesh = make(g.kite, this.kites.length, "kites");
     scene.add(this.group);
   }
 
@@ -296,27 +324,33 @@ export class TrialMarkers {
       if (columnMesh.instanceColor) columnMesh.instanceColor.needsUpdate = true;
     }
 
-    // Shards and kite panels: bobbing, spinning; gone once taken.
-    const shardMesh = this.shardMesh;
-    if (shardMesh) {
-      for (let i = 0; i < this.shards.length; i++) {
-        const s = this.shards[i]!;
-        const pc = s.piece;
-        const mission = pc ? open.get(pc.mission) : undefined;
-        if (!pc || !mission?.def.collect || mission.counts?.[pc.k]) {
-          shardMesh.setMatrixAt(i, HIDDEN);
-          continue;
-        }
-        any = true;
-        const q = this.frame(s, null).multiply(_spin.setFromAxisAngle(_yAxis, this.t * 1.6 + i));
-        _p.copy(s.pos).addScaledVector(s.up, 1.1 + Math.sin(this.t * 2 + i) * 0.15);
-        shardMesh.setMatrixAt(i, _m.compose(_p, q, _s.set(1, 1.5, 1)));
-        shardMesh.setColorAt(i, s.def.mission === "A4" ? C.kite : C.shard);
-      }
-      shardMesh.instanceMatrix.needsUpdate = true;
-      if (shardMesh.instanceColor) shardMesh.instanceColor.needsUpdate = true;
-    }
+    // Shards and kite panels: bobbing, spinning in their mission's colour; gone once taken.
+    if (this.pieces(this.shardMesh, this.shards, open, 1.6, _s.set(1, 1.5, 1))) any = true;
+    if (this.pieces(this.kiteMesh, this.kites, open, 0.7, _s2.set(1, 1, 1))) any = true;
     this.group.visible = any;
+  }
+
+  /** Draw one kind of collect piece; true when any is shown. */
+  private pieces(mesh: THREE.InstancedMesh | null, spots: readonly Spot[], open: ReadonlyMap<string, OpenEntry>, spin: number, scale: THREE.Vector3): boolean {
+    if (!mesh) return false;
+    let any = false;
+    for (let i = 0; i < spots.length; i++) {
+      const s = spots[i]!;
+      const pc = s.piece;
+      const mission = pc ? open.get(pc.mission) : undefined;
+      if (!pc || !mission?.def.collect || mission.counts?.[pc.k]) {
+        mesh.setMatrixAt(i, HIDDEN);
+        continue;
+      }
+      any = true;
+      const q = this.frame(s, null).multiply(_spin.setFromAxisAngle(_yAxis, this.t * spin + i));
+      _p.copy(s.pos).addScaledVector(s.up, 1.1 + Math.sin(this.t * 2 + i) * 0.15);
+      mesh.setMatrixAt(i, _m.compose(_p, q, scale));
+      mesh.setColorAt(i, pieceColour(pc.mission));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    return any;
   }
 
   dispose() {
@@ -339,7 +373,7 @@ export function trialWarmupHook(scene: THREE.Object3D, at: () => THREE.Vector3):
       const group = keptSamples("trialWarmup", () => {
         const g = geometries();
         // The soft material is compiled once per geometry it is drawn with (fill, column).
-        return ([[g.ring, false], [g.flat, false], [g.shard, false], [g.fill, true], [g.column, true]] as const).map(([geo, soft], i) => {
+        return ([[g.ring, false], [g.flat, false], [g.shard, false], [g.kite, false], [g.fill, true], [g.column, true]] as const).map(([geo, soft], i) => {
           const m = new THREE.InstancedMesh(geo, soft ? softMaterial() : material(), 1);
           m.name = `trialWarmup:${i}`;
           m.frustumCulled = false;

@@ -78,7 +78,7 @@ export interface Snap {
   ui: { visibleE2e: string[]; overlays: string[]; pauseMenuMode: string | null; photo: boolean | null; loggedOutCard: boolean };
   lastDenied: { action: string; reason: string; t: number } | null;
   net?: { roomId: string; sessionId: string } | null;
-  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; maxHp?: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
+  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; view?: string | null; viewNow?: string | null; viewBlend?: number | null; name: string | null; starter: number | null; hp: number | null; maxHp?: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
   zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "outpost" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
   /** The nearest pad's centre (Portus: the plaza). */
   pad?: Target | null;
@@ -162,6 +162,29 @@ export interface AttackResult {
 const LOAD_MS = Number(process.env.E2E_LOAD_MS ?? 180_000);
 const ATTACK_ECHOES = new Set(["shot", "projectile", "swing"]);
 const SAFE_NOTICE = /safe zone|holstered/i;
+
+/** Bearings (degrees from the camera) that walk into a portal ring within `within` m: within 30° of one. */
+function intoPortal(s: Snap, within: number): (bearing: number) => boolean {
+  const near = (s.portals ?? []).filter((p) => p.surface < within);
+  return (b) => near.some((p) => Math.abs(wrap180(b - p.bearing)) <= 30);
+}
+
+/**
+ * The bearing furthest (in angle) from every portal within `within` m, or null with none near: straight
+ * away from a lone portal, square to the line through two on either side of a pad. Ties go to the
+ * bearing away from the first (home) portal.
+ */
+function awayFromPortals(s: Snap, within: number): number | null {
+  const near = (s.portals ?? []).filter((p) => p.surface < within);
+  if (!near.length) return null;
+  const home = wrap180(near[0]!.bearing + 180);
+  let best = { b: home, score: -1 };
+  for (let b = -180; b < 180; b += 15) {
+    const score = Math.min(...near.map((p) => Math.abs(wrap180(b - p.bearing))));
+    if (score > best.score + 1e-6 || (Math.abs(score - best.score) < 1e-6 && Math.abs(wrap180(b - home)) < Math.abs(wrap180(best.b - home)))) best = { b, score };
+  }
+  return best.b;
+}
 
 export class Player {
   /** Where Playwright's mouse is. Under pointer lock only the movement matters, so it may leave the viewport. */
@@ -361,6 +384,9 @@ export class Player {
     this.mouse.x += dx;
     await this.page.mouse.move(this.mouse.x, this.mouse.y);
     await this.page.waitForTimeout(80);
+    // The game turns on its next frame: wait for two, or on a loaded machine (300 ms frames) the keys
+    // pressed next walk the old way (J2.4 sprinted off the Arcadia pad into the portal home).
+    await this.page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))).catch(() => {});
   }
 
   /** Look up (+) or down (−) by `rad`. */
@@ -479,8 +505,8 @@ export class Player {
     const offsets = [0, 15, 30, 45, 60, 80, 100, 125, 150];
     const cands = offsets.flatMap((o) => (o === 0 ? [0] : [o * this.lastSide, -o * this.lastSide])).map((o) => wrap180(want + o));
     const got = (await this.clearance(cands)) ?? cands.map((b) => ({ bearing: b, clear: 12 }));
-    const portal = avoidPortal ? (s ?? (await this.snap())).portals?.find((p) => p.surface < 10) : undefined;
-    const ok = (c: { bearing: number }) => !portal || Math.abs(wrap180(c.bearing - portal.bearing)) > 30;
+    const into = avoidPortal ? intoPortal(s ?? (await this.snap()), 10) : () => false;
+    const ok = (c: { bearing: number }) => !into(c.bearing);
     const pick = got.find((c) => c.clear >= need && ok(c)) ?? [...got].filter(ok).sort((a, b) => b.clear - a.clear)[0] ?? got[0]!;
     const side = Math.sign(wrap180(pick.bearing - want));
     if (side) this.lastSide = side; // keep going round the same side of an obstacle
@@ -494,12 +520,25 @@ export class Player {
   async walkTo(target: (s: Snap) => Target | null, arrived: (s: Snap) => boolean, opts: { timeoutMs?: number; sprint?: boolean; avoidPortal?: boolean } = {}) {
     const until = Date.now() + (opts.timeoutMs ?? 30_000);
     const trail: number[][] = [];
-    let side = "KeyD";
+    let stuck = 0;
+    let best = { d: Infinity, at: Date.now() };
+    let leftTown = false;
     while (Date.now() < until) {
       const s = await this.snap();
       if (arrived(s)) return true;
       const t = target(s);
       if (!t) return false;
+      // Inside a walled outpost or town with the target beyond its wall, the walk slides along the
+      // palisade without getting closer (150 s on Arcadia's): no 2 m of progress in 8 s there, and it
+      // leaves through the nearest gate (once per walk), then goes on from outside.
+      const now = Date.now();
+      if (t.surface < best.d - 2) best = { d: t.surface, at: now };
+      else if (!leftTown && !this.leavingTown && now - best.at > 8000 && (s.gates?.length ?? 0) > 0 && s.zone?.server === "safe") {
+        leftTown = true;
+        await this.walkOutOfTown(Math.max(20_000, until - now));
+        best = { d: Infinity, at: Date.now() };
+        continue;
+      }
       const go = await this.steer(t.bearing, Math.min(4, t.surface + 0.5), s, opts.avoidPortal ?? true);
       if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
       const ms = Math.max(150, Math.min(900, (Math.min(t.surface, go.clear) / 6) * 1000));
@@ -509,17 +548,40 @@ export class Player {
         const a = trail[trail.length - 4]!;
         const b = s.player!.pos;
         if (Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1) {
-          // Still stuck (a slope, a creature, a corner the rays missed): back off, side-step, hop.
-          await this.hold(["KeyS"], 400);
-          await this.hold([side], 900);
-          await this.hold([side, "KeyW"], 700);
-          await this.tap("Space");
-          side = side === "KeyD" ? "KeyA" : "KeyD";
+          await this.unstick(t.bearing, ++stuck);
           trail.length = 0;
         }
       }
     }
     return arrived(await this.snap());
+  }
+
+  /**
+   * Stuck on the way to `want` (degrees from the camera; `attempt` counts from 1 per walk): a low
+   * fence or wall the clearance rays see over, a slope, a creature. Back off, turn well off the blocked
+   * line to one side (the most open of 70–130° there, by the rays), sprint round it and hop. The side
+   * stays the same for two attempts before switching, so a long wall (an outpost's) is walked round
+   * instead of bounced along by alternating side-steps. Returns the heading taken.
+   */
+  async unstick(want: number, attempt: number): Promise<number> {
+    if (attempt > 1 && attempt % 2 === 1) this.lastSide = -this.lastSide;
+    await this.hold(["KeyS"], 500);
+    // The sprint goes ~10 m: never along a line into a portal ring (Arcadia's pad has two since Lumen, #6).
+    const into = intoPortal(await this.snap(), 16);
+    const side = (k: number) => [70, 90, 110, 130].map((o) => wrap180(want + k * o)).filter((b) => !into(b));
+    let offs = side(this.lastSide);
+    if (!offs.length) {
+      this.lastSide = -this.lastSide;
+      offs = side(this.lastSide);
+    }
+    if (!offs.length) offs = [wrap180(want + 180)].filter((b) => !into(b));
+    if (!offs.length) return 0; // boxed in by portals: no sprint at all
+    const got = (await this.clearance(offs, 12)) ?? [];
+    const heading = got.find((c) => c.clear >= 6)?.bearing ?? offs[1]!;
+    await this.turn(heading);
+    await this.hold(["ShiftLeft", "KeyW"], 1400);
+    await this.tap("Space");
+    return heading;
   }
 
   /**
@@ -539,10 +601,11 @@ export class Player {
       const s = await this.snap();
       expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
       if (s.zone?.server === "danger" && s.zone.local === "danger" && (s.zone.toSafe ?? s.zone.padDist - s.zone.safeRadius) > 1.5 && !s.player?.swimming) return s;
-      const home = s.portals?.[0];
-      // Near the portal: away from it, with any recovery turn added on top (±70° keeps it ≥ 110° off
-      // the portal); elsewhere the recovery turn alone (relative to where we face).
-      const want = home && home.surface < 25 ? wrap180(home.bearing + 180 + recovery) : recovery;
+      // Near the portals (one home, and on Arcadia a second across the pad up to Lumen, #6): the way
+      // furthest from all of them, with any recovery turn on top (steer keeps it out of their rings);
+      // elsewhere the recovery turn alone (relative to where we face).
+      const away = awayFromPortals(s, 25);
+      const want = away !== null ? wrap180(away + recovery) : recovery;
       const go = await this.steer(want, 4, s);
       if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
       recovery = 0;
@@ -566,6 +629,20 @@ export class Player {
    * plaza and try again (a player who got lost does the same).
    */
   async walkOutOfTown(timeoutMs = 75_000) {
+    // Its own walks (to the plaza, the gate, out of it) never start another way out of town: nested,
+    // the innermost one's failure ended the walk before this loop could try the next attempt.
+    if (this.leavingTown) throw new Error("walkOutOfTown is already running");
+    this.leavingTown = true;
+    try {
+      return await this.leaveTown(timeoutMs);
+    } finally {
+      this.leavingTown = false;
+    }
+  }
+
+  private leavingTown = false;
+
+  private async leaveTown(timeoutMs: number) {
     const until = Date.now() + timeoutMs;
     const s0 = await this.snap();
     expect(s0.gates?.length ?? 0, "Portus has town gates").toBeGreaterThan(0);

@@ -31,6 +31,8 @@ apps/client/e2e/live/fl.mjs quit       # ends it; so do 20 idle minutes (FL_LIVE
   before the first command to just after the last. Wait for the session process to exit before
   opening it (encoding takes a minute or two). `FL_LIVE_VIDEO=0` turns filming off, for frame-time
   runs that shouldn't pay for it.
+  On a heavily loaded machine ffmpeg can fall behind and the film stops early; `FL_LIVE_FRAMES=1`
+  keeps every screencast frame on disk with its time and encodes the film after `quit` instead.
 - A session is one player. Use `start` (a new guest, the real Play flow) or `dev <body>` (local only:
   an admin guest placed on a planet), not both. Quit and start a new session for another player.
 
@@ -72,8 +74,9 @@ apps/client/e2e/live/fl.mjs quit       # ends it; so do 20 idle minutes (FL_LIVE
 
 ## The first part, start to finish
 
-`tutorial` (every step up to the portal; `step` does one and reads its card), `step` again for the
-portal, `talk` (Lark's three missions), then `quest A1`, `quest A2`, `quest A3`. A hunt (A1) fights
+`tutorial` (every step; it ends in the plaza since #68, and its attack step is one click; `step`
+does one and reads its card), `portal arcadia`, `talk` (Lark's three missions), then `quest A1`,
+`quest A2`, `quest A3`. A hunt (A1) fights
 what the mission pointer marks and anything hostile within reach (15 m with a ranged weapon, 8 m with
 a melee one). A find (A2) or a reach (A3) sprints past creatures to the objective (a sprint outruns
 them, and every fight on the way costs HP nothing heals back but tonics and level-ups), presses E at

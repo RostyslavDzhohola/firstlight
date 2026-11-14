@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { trackedMission } from "@firstlight/shared/content/missions";
 import { trackerRows } from "./trackerRows.ts";
 
 const m = (id: string, done = false, progress = 0, goal = 8) => ({ id, done, progress, goal });
@@ -12,28 +13,51 @@ describe("mission tracker rows (D-polish-ux-1)", () => {
     expect(r.more).toBe(2);
   });
 
-  it("a running trial comes first", () => {
+  it("a running trial comes first, shown in full, but it is not called tracked", () => {
     const r = trackerRows(HELD, "arcadia", { trial: "A4" });
     expect(r.lines[0]!.id).toBe("A4");
+    expect(r.lines[0]!.trial).toBe(true);
     expect(r.lines[0]!.progress).toBe("2/5");
+    expect(r.lines[0]!.state).toBe("open");
     expect(r.more).toBe(2);
   });
 
-  it("the mission just taken comes first; a finished trial id no longer counts", () => {
-    expect(trackerRows(HELD, "arcadia", { recent: "T1" }).lines[0]!.id).toBe("T1");
+  // Review 2026-11-13 #2: with A4's trial running and A1 chosen, the panel marked A4 tracked while the
+  // compass and the server followed A1. One effective tracked mission everywhere.
+  it("marks the same mission tracked as the compass and the server follow, while a trial runs", () => {
+    const r = trackerRows(HELD, "arcadia", { trial: "A4", tracked: "A1" });
+    const tracked = r.lines.filter((l) => l.state === "tracked").map((l) => l.id);
+    expect(tracked).toEqual([trackedMission(HELD, "arcadia", "A1")!.id]);
+    expect(tracked).toEqual(["A1"]);
+    expect(r.lines.map((l) => l.id).slice(0, 2)).toEqual(["A4", "A1"]);
+    expect(r.lines.filter((l) => l.trial).map((l) => l.id)).toEqual(["A4"]);
+  });
+
+  it("a trial that is also the tracked mission is both", () => {
+    const r = trackerRows(HELD, "arcadia", { trial: "A4", tracked: "A4" });
+    expect(r.lines[0]).toMatchObject({ id: "A4", trial: true, state: "tracked" });
+    expect(r.lines.filter((l) => l.state === "tracked")).toHaveLength(1);
+  });
+
+  it("the tracked mission comes first and is the one marked tracked (#69); a finished trial id no longer counts", () => {
+    const r = trackerRows(HELD, "arcadia", { tracked: "T1" });
+    expect(r.lines[0]!.id).toBe("T1");
+    expect(r.lines.filter((l) => l.state === "tracked").map((l) => l.id)).toEqual(["T1"]);
     const done = HELD.map((x) => (x.id === "A4" ? { ...x, done: true } : x));
     expect(trackerRows(done, "arcadia", { trial: "A4" }).lines[0]!.id).toBe("A1");
   });
 
   it("missions on another planet say where", () => {
-    const r = trackerRows([m("H1"), m("A1")], "arcadia", { recent: "H1" });
-    expect(r.lines[0]!.detail.startsWith("On Hollowmere · ")).toBe(true);
-    expect(r.lines[1]!.detail.startsWith("On ")).toBe(false);
-    expect(r.lines.find((l) => l.state === "tracked")?.id).toBe("A1");
+    const r = trackerRows([m("H1"), m("A1")], "arcadia");
+    expect(r.lines[0]!.id).toBe("A1"); // nothing chosen: the one here is tracked
+    expect(r.lines[1]!.detail.startsWith("On Hollowmere · ")).toBe(true);
+    expect(r.lines[0]!.detail.startsWith("On ")).toBe(false);
+    expect(trackerRows([m("H1"), m("A1")], "arcadia", { tracked: "H1" }).lines.find((l) => l.state === "tracked")?.id).toBe("H1");
   });
 
   it("done missions fill room only when nothing open is hidden", () => {
     expect(trackerRows([m("A1"), m("A2", true)], "arcadia").lines.map((l) => [l.id, l.progress])).toEqual([["A1", "0/8"], ["A2", "Done"]]);
+    expect(trackerRows([m("A1")], "arcadia").lines[0]!.colour).toMatch(/^#[0-9a-f]{6}$/);
     expect(trackerRows([...HELD, m("A2", true)], "arcadia").lines.every((l) => l.state !== "done")).toBe(true);
     expect(trackerRows([], "arcadia")).toEqual({ lines: [], more: 0, header: "" });
   });

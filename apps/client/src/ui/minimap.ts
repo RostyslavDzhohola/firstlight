@@ -143,7 +143,7 @@ export class Minimap {
     // Active mission targets (recomputed when the `you` state changes).
     if (g.hud.you !== this.targetsFor) {
       this.targetsFor = g.hud.you;
-      this.targets = missionTargets(body, g.hud.you?.missions ?? []);
+      this.targets = missionTargets(body, g.hud.you?.missions ?? [], g.planet.terrain);
     }
     drawMissionStars(ctx, v, me, [...this.targets, ...guideTargets.current()], R, range, rim);
     this.drawNpcs(v, half, rim);

@@ -39,7 +39,7 @@ The models behind the tables were computed in this session. Section 1.1 gives th
 **Formula (new):** `XP_to_next(L) = round_to_5(50 × L^1.5)` for L = 1…19. Total to cap: **33,570 XP**.
 
 **Model assumptions (new):** 2.5 effective kills/min including travel; tier mix ×1.15; on-level kill
-XP `10 + 5E`; onboarding pays **50 XP** (3 dummies × 10 + 20 on completion; a character reborn mid-tutorial is topped up to 50 at completion, D-fixes-4), so **level 2 lands at
+XP `10 + 5E`; onboarding pays **50 XP** (since #68 the attack lesson is one left click: a training dummy it reaches falls for 10 XP and the completion tops a level-1 trainee up to 50, D-fixes-4; a swing that reaches no dummy pays the 50 at completion), so **level 2 lands at
 the end of the ~60 s tutorial**. That is also the moment the game offers "save your character" (D).
 Mission XP is credited at the level it is usually done. Boss XP is excluded, so it only speeds things up.
 
@@ -131,8 +131,9 @@ removes every coin (D), so prices are set for one life.
 |---|---:|---|
 | Small Tonic (potion) | 10 | +40 HP over 3 s; 0.4 s drink; move at 70% while drinking; stack 10; 8 s shared tonic cooldown; damage does not interrupt (new) |
 | Large Tonic (potion) | 35 | +120 HP over 4 s; otherwise as above (new) |
+| Regeneration (no item, #77) | free | **1% of max HP a second** once you have neither taken nor dealt damage for **10 s** (the combat tag: `REGEN` in `progression.ts`); any hit or attack stops it. 0 to full: 100 s. Decided on the server; `pnpm balance` checks it never runs inside a creature fight (longest pause between a hostile's attacks 5.0 s, slowest starter swing 0.45 s). **Held for a whole boss fight and a whole defend attempt** (`REGEN.PAUSED_IN`, D-fixplay-2): their own pauses reach the delay (Tidewrath and the Receiver hold their attacks through an 8 s plate window: 10.4 s; the Hollow King's longest gap 9.0 s; H4's waves 23 s apart, T2's 25 s), so a boss's fighters (inside its arena, or hit it in the last few seconds) and a defend runner don't regenerate until 10 s after the encounter lets them go. The race (T1) and collect (T3) trials raise no encounter of their own: ordinary rule. `pnpm balance` lists every boss and trial and fails if one reaches the delay without being held |
 | Weapon T1 / T2 / T3 (standard families) | 60 / 300 / 900 | [r2-05] |
-| Stillshot Rifle, Comet Launcher T1 / T2 / T3 | 90 / 450 / 1,350 | ×1.5 heavy-weapon premium (new) |
+| Stillshot Rifle, Comet Launcher, Windlass Crossbow T1 / T2 / T3 | 90 / 450 / 1,350 | ×1.5 heavy-weapon premium (new; the crossbow 2026-11-13) |
 | Scrapburst Grenade T1 / T2 / T3 (each) | 15 / 40 / 90 | (new) |
 | Patchkit T1 / T2 / T3 (each) | 25 / 60 / 120 | (new) |
 | Prism Bubble T1 / T2 / T3 | 120 / 400 / 1,000 | (new) |
@@ -161,6 +162,49 @@ make them a coin faucet (F12 review).
 | Hit box | The rider can be shot in the saddle: the server lifts a mounted player's hit capsule 0.8 m (headshots land on the drawn head; shots at the horse's legs miss) |
 | The horse | Never a target, never saved. Leaves 30 s after you get off, and at once when you die, log out, drop your connection, travel (portal or pad fast travel; any teleport), or lose the whistle (sold, dropped). A rider who leaves outside a safe zone lingers on foot |
 | Coats | Six (chestnut, bay, grey, palomino, black, white), each with its own blanket colour; your coat is fixed by your account id |
+
+### 1.7 Build tree (issue #81; code: `packages/shared/src/content/tree.ts`) (new)
+
+Every level past the first gives **one point** (19 at level 20). Points go into five open branches in any
+mix; inside a branch the nodes are taken top-down (a node needs the one above it) and cost **1, 2, 3, 3**
+points by row, so the whole tree (39 points) is about twice what a level-20 character has: two branches to
+the bottom, or the top of everything. Points are lost with the level when you die (a rebirth has none).
+The server decides every spend and respec and saves the tree with the character (migration 13, table
+`character_tree`). Panel: **U**, or Esc → Build on any device.
+
+| Branch | Row | Node | Cost | Effect |
+|---|---|---|---|---|
+| Body | 1 | Hardy | 1 | Max HP ×1.06 (on the starter's level curve) |
+| Body | 2 | Second Roll | 2 | Hold **two** dodge rolls; each comes back one dodge cooldown after it was used (the movement budget holds a roll per charge); two rolls start at least 400 ms apart (`ROLL_GAP_MS`), so a roll's own packets spend one charge |
+| Body | 3 | Tonic Craft | 3 | Tonics heal ×1.2 and **end a running slow/chill and a burn** |
+| Body | 4 | Last Breath | 3 | A blow from someone that would kill leaves 1 HP instead, once per 90 s (falls are not saved). Regeneration is untouched: no Body node heals inside a fight (§1.1) |
+| Blade | 1 | Keen Edge | 1 | Melee damage ×1.08 |
+| Blade | 2 | Cleave | 2 | Each swing hits **one more** target, arc +30° |
+| Blade | 3 | Iron Guard | 3 | Block +5 points (a T1 Sunbrand blocks 75% instead of 70%, T2 80% instead of 75%), capped at 90% |
+| Blade | 4 | Riposte | 3 | Heavy-attack cooldowns ×0.65 (the axe's chop and the hammer's slam: 6 s → 3.9 s) |
+| Bow and gun | 1 | Steady Hands | 1 | Ranged-class damage ×1.08 (guns, bows, crossbow, kunai, launcher; not magic weapons) |
+| Bow and gun | 2 | Quick Hands | 2 | Reloads ×0.7, bow draw ×0.75 |
+| Bow and gun | 3 | Far Sight | 3 | Gun falloff starts ×1.4 farther and the hitscan reach stretches with it |
+| Magic | 1 | Attuned | 1 | Spell power ×1.08 (Frostbloom, Wishfall, the ward's shell), on top of the starter's |
+| Magic | 2 | Quickened | 2 | Spell cooldowns ×0.75 |
+| Magic | 3 | Deep Well | 3 | Aether refill ×1.4 (6 → 8.4 a second) |
+| Magic | 4 | Cool Head | 3 | Magic weapons fire ×1.5 shots before overheating (rounded) |
+| Travel | 1 | Long Stride | 1 | Run and sprint ×1.06 on foot |
+| Travel | 2 | Far Step | 2 | Skipstep reaches 15 m (base 10 m) |
+| Travel | 3 | Featherfall | 3 | Falls do no damage up to 14 m (base 8 m), then 8% a metre as before |
+
+**Respec:** in a safe zone (the Portus town or a pad ring, out of combat), **10 ◎ per point spent**;
+every point comes back at once. **Balance** (`pnpm balance`, "Build tree"): a plain build, a build focused on
+each branch first and a spread build, at levels 5, 10 and 20, each hold the D-balance-4 hard floor (no
+kill of the most fragile plain starter in under 0.75 s or in one hit, server cadence, heavies, specials and
+headshots) and a fight edge over plain of 1.00–1.45, in PvP (a plain attacker with each weapon family) and
+PvE (the level's creatures, packs as their attack tokens allow): best class damage × effective HP, with every
+defensive node counted (max HP, roll charges, the guard with each blocking weapon's tier, Last Breath as half
+a hit absorbed, the share of a large tonic that lands before the plain character would fall, a cleanse ending
+half a burn). Through a guard, the block nodes let at least half of what a plain guard lets through. Attuned
+keeps the spell one-shot and opening-pair checks. Hardy, Tonic Craft, Iron Guard, Keen Edge, Steady Hands and
+Attuned were cut (from ×1.12, ×1.4, +15 points and ×1.1) when the model first counted the defensive nodes
+(build tree review 4): the full Body branch with a guard weapon reached a 1.68 edge at level 20.
 
 ---
 
@@ -306,6 +350,15 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | **Ember Seal** (the kunai's alt; not an item) | I | 1 | **30** (24 under D-balance-3, restored by D-balance-7) direct incl. blast; splash 20 in 2.5 m; burn 4/s × 3 s | cooldown | 30 m | fireball 24 m/s, straight | the kunai tier's cooldown | spends no kunai; the server times the 0.4 s seal; **no weak-point bonus (×1.0, an explosive, D-balance-8)** | heavy | – |
 | | II | 6 | **40** (32 under D-balance-3, restored); splash 27 in 2.75 m; burn 5/s | | same | same | | | heavy | – |
 | | III | 12 | **42** (was 52, D-balance-3, kept); splash 35 in 3.0 m; burn 6/s | | same | same | | | heavy | – |
+| **Winged Boarspear** short spear (melee; new 2026-11-13, sculpted) | I | 1 | 22 | 0.60 | 3.2 m | melee thrust: arc 40°, ≤ 2 targets (a line), windup 0.15 | none | knockback 1 m; RMB brace (block) 40% | light | 60 |
+| | II | 6 | 30 | 0.60 | 3.2 m | same | none | block 45% | light | 300 |
+| | III | 12 | 39 | 0.60 | 3.2 m | same | none | block 50% | light | 900 |
+| **Windlass Crossbow** heavy crossbow (ranged; new 2026-11-13, sculpted) | I | 1 | 50 body; head ×1.5 = 75 | 1.90 (reload) | 90 m | projectile 70 m/s, gravity 3 | mag 1, reload 1.9 s | RMB aim 2×; a burst family (§2.5, D-weapons-2): two bolts kill | light | 90 |
+| | II | 6 | 68 (head 102) | 1.80 | same | same | reload 1.8 s | | light | 450 |
+| | III | 12 | 84 (head 126) | 1.70 | same | same | reload 1.7 s | | light | 1,350 |
+| **Shepherd's Lantern** lantern staff (magic; new 2026-11-13, sculpted) | I | 1 | 17 | 0.55 | 30 m | projectile 22 m/s, straight (a slow drifting light) | heat 8 | pierces 2 (passes through a line of foes) | light | 60 |
+| | II | 6 | 23 | 0.55 | same | same | heat 9 | pierce 3 | light | 300 |
+| | III | 12 | 30 | 0.55 | same | same | heat 10 | pierce 4 | light | 900 |
 
 ### 2.4 Starter weapons (D)
 
@@ -316,6 +369,7 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | Kappa | Riverstaff I (bo staff) | Fists |
 | Unit 7 | Pocket Carbine I (the blaster family) | Fists |
 | Hinoko (the ninja, 5th starter) | Ember Kunai I (with the Ember Seal) | Fists |
+| Traveller (the plain start, #80; listed first, a new player's default) | Sunbrand I | Fists |
 
 On rebirth: level 1, the chosen starter's T1 weapon, 0 coins (D).
 
@@ -613,6 +667,73 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 | Tonic | Arcadia Small Tonic 1/10; Hollowmere and Meridian Large Tonic 1/12 |
 | Scrapburst Grenade (tier as weapon) | 1/25 from listed enemies |
 | Planet cosmetics (any eligible enemy on that planet) | Arcadia Messenger's Winged Cap 1/150 · Hollowmere Crowbeak Mask 1/100 · Meridian Hard Hat (Oversight Issue) 1/75; also Petalwake Mask 1/180 on Arcadia and Fenweave Cape 1/160 on Hollowmere; each guaranteed independently after 3× its expected kills in one life (pity) |
+
+### 3.7 Wild sites (new, 2026-11-13, lane world, issue #72; code `packages/shared/src/content/wildSites.ts`)
+
+Built places out in the wilds, three per planet, each with a level band, a guardian and its pack (member 0, the guardian, holds the chest's key: the chest's loot lands on the chest when it falls, rolled like a camp chest at the guardian's level), and a discovery: feet within the site's footprint + 10 m pay XP once per life (10 % of `xpToNext(band low)`, rounded to 5; 30 % in the first cut, see below) and add it to the map and the journal's Sites tab. Camp respawn (300 s). From each planet's easy site its landmark is in sight (under 300 m).
+
+| Site | Planet | Kind | Band | Guardian | Pack | Chest (coins · weapons · tonics · cosmetic) | Discovery XP |
+|---|---|---|---|---|---|---|---|
+| Bellwether Watch | Arcadia | watchtower (climb to the lookout, 6 m) | 2–3 | Linewyrm L3 | 2 Hopbit L2, 1 Sparkfly L3 | 25 · 0 · 1 | 15 |
+| Emberfall Keep | Arcadia | ruin | 4–5 | Pixel Lancer L5 | 1 Bomblet L4, 1 Hopbit L4, 1 Linewyrm L5 | 45 · 1 · 1 | 40 |
+| Skyhook Arch | Arcadia | landmark (24 m rock arch) | 6–7 | Cabinet Golem L7 | 2 Pixel Lancer L6, 2 Sparkfly L6, 1 Bomblet L7 | 80 · 1 · 2 · Voxel Visor 1/12 | 75 |
+| The Lantern Shrine | Hollowmere | shrine | 7–8 | Cantor L8 | 3 Bonewalker L7, 2 Marsh Wisp L7 | 70 · 0 · 1 · rare: Shepherd's Lantern 1/6 | 95 |
+| The Sunken Barrow | Hollowmere | cave you walk into | 9–11 | Crypt Sentinel L11 | 3 Bonewalker L10, 2 Bone Archer L9 | 120 · 1 · 2 | 135 |
+| The Hollow Elm | Hollowmere | landmark (37 m dead tree) | 12–13 | Crypt Sentinel L13 | 1 Cantor L12, 2 Bone Archer L12, 3 Gnawer L12 | 200 · 1 · 2 · Crowbeak Mask 1/12 | 210 |
+| Relay Mast Four | Meridian | watchtower (climb to the deck, 6 m) | 13–14 | Enforcer L14 | 3 Associate L13, 1 Collector L13 | 150 · 1 · 1 | 235 |
+| The Foreclosed Depot | Meridian | ruin | 15–17 | Compliance Officer L17 | 2 Enforcer L16, 3 Associate L15, 1 Auditor L16 | 260 · 1 · 2 | 290 |
+| The Long Haul wreck | Meridian | landmark (40 m freighter hull) | 19–20 | Compliance Officer L20 | 2 Enforcer L19, 2 Auditor L19, 1 Collector L20 | 420 · 2 · 2 · rare: Windlass Crossbow 1/6 | 415 |
+
+**On the route (`pnpm balance`, review 2026-11-13 finding 3).** The balance model's route does each site
+once at its band's lower level: the discovery, one clear of the guardian and its pack (each kill at the
+member's own level, no search between them) and the chest's coins (weapons and tonics not counted, like
+the camps'), plus 90 s for the trip. With them level 5 comes at 7.8 min and the cap at 78 min (86 without
+the sites); every check is in band. The first cut (discovery 30 % of a level, Bellwether with 4 Hopbits,
+Emberfall with 2 Bomblets and 3 Hopbits) put level 5 at 6.4 min (band 7–13) and level 11 at 2.3 times
+its neighbours (band ≤ 2): discovery is now a token on top of the fight, and the two easy Arcadia packs
+are smaller.
+
+| Site | Done at L | Discovery XP | Fight XP | Coins (chest + kills) | Minutes |
+|---|---:|---:|---:|---:|---:|
+| Bellwether Watch | 2 | 15 | 90 | 41 | 1.6 |
+| Emberfall Keep | 4 | 40 | 165 | 73 | 1.6 |
+| Skyhook Arch | 6 | 75 | 465 | 168 | 1.7 |
+| The Lantern Shrine | 7 | 95 | 275 | 110 | 1.6 |
+| The Sunken Barrow | 9 | 135 | 550 | 222 | 1.7 |
+| The Hollow Elm | 12 | 210 | 720 | 334 | 1.7 |
+| Relay Mast Four | 13 | 235 | 460 | 224 | 1.6 |
+| The Foreclosed Depot | 15 | 290 | 1,085 | 455 | 1.8 |
+| The Long Haul wreck | 19 | 415 | 1,180 | 630 | 1.8 |
+
+
+### 3.8 Lumen, Arcadia's moon (new, 2026-11-13, lane sky, issue #6): the Dustborn
+
+R 240 m, 12 pads (no outposts, shop, eggs or boss), levels 6–9, **gravity 4.5 m/s² (a quarter of the
+base 18)**: the same 6.6 m/s jump rises ~4.8 m and hangs ~2.9 s, and the server's jump envelope and
+fall damage use the body's pull (a drop hurts by its landing speed: 8 m of free fall here is 32 m).
+Reached through the moon portal across Dawnpad on Arcadia; Lumen's one portal goes back to Arcadia.
+No air: always clear, a black sky, Arcadia hanging still 36° up, about 20° across.
+
+| Area | Type | Enemy Lv | Spawns |
+|---|---|---|---|
+| Moonfall Pad (main pad, guide Surveyor Odile) | safe ring | – | none; 3 Glimmerhop L6 at 55 m |
+| the Hush | dry basin (mid of pads 3 and 7) | 7–9 | Glimmerhop packs of 3–5; Dustmoth pairs with 1–2 Glimmerhops |
+| wilds (density 0.22) | craters | 6–9 by distance | Glimmerhops 2–4, Dustmoth pairs, mixed |
+
+| Enemy | Tier | Lv | HP (HP1) | Attacks: damage at L1 (telegraph) | Behaviour | Pack | Drops |
+|---|---|---|---|---|---|---|---|
+| Glimmerhop | Regular | 6–9 | 64–78 (40) | Moon Leap 15 (0.8 s), a 9 m leap that lands in a 2 m circle; Nip 8 (0.5 s) | leaps in from range, then nips | 2–4 | coins; Small Tonic 1/10 |
+| Dustmoth | Regular | 6–9 | 42–51 (26) | Dust Spit 9 (0.6 s), 14 m/s bolt, chill 15% for 1.5 s | hovers 2.4 m up, keeps 9–14 m away | 2–3 | coins; grenade 1/25 |
+| Cratermaw | Elite | 8–9 | 350–372 (190) | Moonquake 24, 4.5 m ring + 4 m knockback (1.2 s); Maw 13 (0.6 s) | steadfast; guards the Quietfall Wreck | 1 | weapon 1/4 |
+
+Tonic on Lumen: Small Tonic 1/9. Planet cosmetic: Messenger's Winged Cap 1/150 (Arcadia's).
+
+| Site | Body | Kind | Band | Guardian | Pack | Chest | Discovery XP |
+|---|---|---|---|---|---|---|---|
+| The Quietfall Wreck | Lumen | landmark (the Long Haul hull prefab, broken across a crater) | 8–9 | Cratermaw L9 | 3 Glimmerhop L8, 2 Dustmoth L8 | 110 · 1 · 1 | 340 |
+
+Mission **L1 The Thing in the Wreck** (hunt, given by Lark on Arcadia, played on Lumen, rec. 6–9):
+the Cratermaw and 4 Glimmerhops; 650 XP, 110 coins, 1 Large Tonic.
 
 ---
 
@@ -1036,6 +1157,7 @@ spell numbers are in §2.7). Magic pips: Hexwick 5, Hinoko 4, Kappa 3, Unit 7 2,
 | Kappa | 1.00 (100 / 290) | 6.24 / 9.36 | 1.0 s | 1.00 | Balanced, Best dodge | crowd clear, evasion |
 | Unit 7 | 1.00 (100 / 290) | 6 / 9 | 1.25 s | 0.95 | Steady aim, Slow roll | duels (the reference body; pays with the roll, crowd clear and spell power) |
 | Hinoko | 0.88 (88 / 255) | 6.6 / 9.9 | 1.1 s | 1.05 | Fast, Fragile | mobility |
+| Traveller (#80) | 1.00 (100 / 290) | 6 / 9 | 1.2 s | 1.00 | Plain, Build it up | none by design: the base numbers, built up through the tree (#81); Brother Ash's body until it has its own |
 
 The calls made for issue #9's open questions (the owner hasn't answered; D-balance-4): (1) max HP, run/sprint
 and dodge cooldown vary (no stamina exists; carry slots, jump and fall damage stay shared); (2) a light layer,
@@ -1059,6 +1181,35 @@ leads at least one role and none leads all, and that no starter duel is more lop
 | Touch look | 0.0058 rad per px at sensitivity 1 (the mouse sensitivity setting scales it) |
 
 ---
+
+### 8.7 Residents who talk (#82, D-agents-3; code `packages/shared/src/content/residentLines.ts`, `apps/server/src/world/residentSpeech.ts`, `tools/agent/resident-talk.ts`)
+
+| Number | Value |
+| --- | --- |
+| A resident line is heard within | 30 m (speech bubble; a subtitle too for the person it answers) |
+| Lines per speaker | one every 2 s, at most 12 a minute (agents only) |
+| A resident greets a person within | 6 m, once per person every 5 min (greeting, then what it is doing) |
+| It answers phrase-wheel lines said within | 15 m; the nearest resident answers, the rest stay quiet |
+| Between two lines of one answer | 2.6 s |
+| Bubble time | 2.5 s + 45 ms per character, at most 9 s |
+| Lines | 12 voices, one per resident of the cast (2026-11-13; a resident in another role, and names past the cast, speak with the role's: the first four), 9 topics, 186 lines, each at most 140 characters; lines without slots are also spoken aloud (§8.8) |
+| Model brain defaults | one call per 6 s at most (whole run), 120 calls and 100,000 tokens per rolling hour, 80 output tokens, 8 s timeout |
+
+### 8.8 Spoken lines and music (2026-11-13, D-voice-1–4; code `packages/shared/src/content/dialogue.ts`, `apps/client/src/audio/speech.ts`, `game/npcTalk.ts`, `audio/music.ts`, `tools/voice`)
+
+| Number | Value |
+| --- | --- |
+| Spoken lines | 247: guides, Sela, four shopkeepers (greet, farewell, idle), 15 mission offers, Sela's 5, 9 boss lines, residents' slot-free lines |
+| Recording | Kokoro-82M v1.0, mono 24 kHz MP3 at 24 kbps, levelled to −17 LUFS under a −1.5 dBFS limiter (lowered when the encoder overshoots); about 3.2 MB in all. Measured 2026-11-14 (`tools/voice/check.ts`): 1.9–7.8 s (median 4.1), −18.7 to −17.3 LUFS (median −17.9), peaks −5.0 to −1.0 dBFS, pauses inside at most 1.2 s (Nell's cut to 0.55 s) |
+| Speech is heard | from the speaker's head (1.6 m), full level within 3 m, fading out by 45 m (inverse rolloff 1.4); bosses everywhere |
+| Music under speech | about −6 dB while a line plays, back over 0.5 s |
+| Subtitle time | shown at once for the recording + 0.9 s, at least 2.5 s + 45 ms per character, at most 9 s; held again when the recording starts, for its length + 0.9 s (D-voice-fix-1); text only: the reading time |
+| Decoded speech cache | 32 MiB, least recently used out first, never a line that is playing (D-voice-fix-2) |
+| Music scheduling | 250 ms ahead on a 50 ms timer; a late tick skips what went by, at most 24 sources a tick (D-voice-fix-3) |
+| Idle remarks | the nearest character 3.5–12 m away, not before 6 s on a body, each character at most every 50 s, anyone at most every 18 s, never with a panel open |
+| Voices volume | default 90 % (Settings → Audio); Subtitles on by default |
+| Music combat layer | in when you hit something or something hits you, out 5 s after the last hit (fades over about 1 s) |
+| Music night variant | follows the sky's night factor: pad cutoff −45 %, theme an octave lower and 35 % softer, arpeggio −60 %, high bells |
 
 ## 9. Asset sources
 
@@ -1117,6 +1268,7 @@ not a trademark search.
 |---|---|---|
 | Decided (D) | FIRSTLIGHT, Portus, Arcadia, Hollowmere, Meridian, Hall of Firsts, Hexwick, Brother Ash, Unit 7, Hexquill, Sunbrand, Pocket Carbine, Woolback, Dusk Wolf, Tidewrath, The Receiver, Meridian Oversight, Hollow Court | OK, with flags: **Hollow King** is one word from *Hollow Knight* (Team Cherry); keep, with fallback "the Barrow King". **Kappa** is folklore (fine), but also an apparel trademark and a Twitch emote; low risk in games. **Tidewrath** is flagged Y in [r2-04] because of the kaiju archetype; mitigated by the design rules in 4.2 |
 | Starter looks (new, round 2) | River ninja, Wayfarer (Kappa); Trooper, Scout (Unit 7) | OK (generic words) |
+| Plain starter (new, #80) | Traveller | OK (a generic word; wears Brother Ash's existing body, no new look) |
 | Ninja starter (new, 6h) | Hinoko, Ember Kunai, Ember Seal | OK. "Hinoko" is the Japanese common noun for flying sparks (火の粉); no franchise character of that name known to us. "Ember Seal" and "Ember Kunai" are generic words (a kunai is a real tool). Rejected: "Kage", "Rin", "Hotaru", "Homura", "Hibana", "Kitsune"/fox motifs (all close to famous anime characters or the nine-tailed fox), "Wren" (already the example player name in UI copy and tests). Reasoned check only |
 | Weapons (new / [05]) | Riverstaff, Bearded Axe, Quarry Hammer, Emberglass Staff [05], Stormcoil, Scatterpipe [05], Yew Longbow, Stillshot Rifle, Comet Launcher, Scrapburst Grenade [05], Patchkit [05], Prism Bubble, Radio, Small/Large Tonic, Ferryman's Oar | OK. I rejected "Skyhammer" (Warhammer), "Boomtube" (DC's "Boom Tube"), "Farsight" (Warhammer 40k) and "Stonemaul" (WoW) |
 | Arcadia creatures (new) | Brightbits (faction), Hopbit, Golden Hopbit, Sparkfly, Linewyrm, Bomblet, Pixel Lancer, Cabinet Golem | OK, except "Hopbit": one letter from a franchise word, which this section's own rule bans; owner decision, still open (display name only, the id can stay). Silhouettes must follow the avoid list in 3.2 |
@@ -1136,6 +1288,9 @@ not a trademark search.
 | The Three Gleams (2026-11-12) | Sela Marchbank, the Three Gleams, the Swift / Steadfast / Patient Gleam, gleam shard, the Gleam Vault, Gleamweave Cape, Gleamkeeper; Kite Season, The Long Vigil, vigil lamp | Original. Deliberately no keys, gates, egg-hunt or scoreboard-book wording from the well-known contest novel and film, and no names from it. Rejected: "Dawnshard" (a published novella), "Vaultwarden" (a software product), "Vance" and "Teague" as surnames (game and film characters), "Merriweather" (a film character). Reasoned check only |
 | Spells (new, 2026-11-12) | Aether; Skipstep, Frostbloom, Wishfall, Glasswing Ward | OK. "Aether" is the old word for the upper air (generic; many games use it as a common noun). "Glasswing" is a real butterfly. Rejected: "Starfall" (a World of Warcraft druid spell and a Warcraft III ability), "Blink" (Dota and Warcraft ability name), "Frost Nova" (Warcraft and Diablo), "Mana" (generic but every other game's word). Reasoned check only |
 | AI residents (2026-11-12, `tools/agent/residents.ts`) | Brindle_Oake, Tamsin_Hollis, Marlo_Thistle, Juniper_Fenn, Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_Reed, Wendell_Crane, Odessa_Larch, Ptolemy_Birch, Isla_Thornby | OK (ordinary given names with plant, bird and tree surnames; none shares a word with a name already in the game, which `apps/server/test/residents.test.ts` checks). Rejected: "Fennick Shaw" (one step from a Star Wars bounty hunter), "Odessa Quill" (a Marvel surname), "Juniper Vane" (too close to Juno Vale, the Portus keeper), anything with "Wren" (the example player name) |
+| Wild sites (2026-11-13, §3.7) | Bellwether Watch, Emberfall Keep, Skyhook Arch, the Lantern Shrine, the Sunken Barrow, the Hollow Elm, Relay Mast Four, the Foreclosed Depot, the Long Haul wreck | OK. Plain English words and compounds; "skyhook" and "long haul" are generic terms, not titles; none names a known game, film or franchise place. |
+| Lumen (lane sky, 2026-11-13) | Lumen, the Dustborn, Glimmerhop, Dustmoth, Cratermaw, Surveyor Odile, Moonfall Pad, the Hush, the Quietfall Wreck, The Thing in the Wreck | Original or ordinary words; "Lumen" is a common Latin word for light (also a unit of light), no franchise moon or character of that name known to us. Reasoned check only |
+| Weapons (2026-11-13, lane weapons) | Winged Boarspear, Windlass Crossbow, Shepherd's Lantern | OK: ordinary words for real tools (a boar spear has wings; a windlass spans a crossbow; a shepherd carries a lantern on a crook). Rejected "Mothlight" (an experimental film title) and "Thornreach" (too close to Thornwood). The looks avoid the red-tasselled opera spear, repeating and wrist crossbows, a crozier spiral and any soul-in-a-lantern or green ring-lantern (recipe headers in `tools/blender/props3d/items`). |
 
 ---
 

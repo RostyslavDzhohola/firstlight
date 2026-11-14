@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
+import { PLAIN_STARTER, STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { watchDisposals } from "./disposeWatch.testutil.ts";
 
@@ -106,8 +106,11 @@ describe("held items", () => {
 describe("avatar warm-up hook", () => {
   it("stands every starter's every look once (T9: each look's material in play compiles behind the loading screen)", () => {
     const looks = mod.avatarWarmupLooks();
-    const n = STARTER_LOOKS.flat().length; // 5 starters + the second looks of Kappa and Unit 7
+    // One sample per model, not per (starter, look): the Traveller wears Brother Ash's body (D-progress-4),
+    // the same build. 5 originals + the second looks of Kappa and Unit 7.
+    const n = new Set(STARTER_LOOKS.flat().map((l) => l.id)).size;
     expect(n).toBe(7);
+    expect(STARTER_LOOKS.flat()).toHaveLength(8);
     // One toon material per look; the palette is a per-object uniform (#39, D-load-4), not a build.
     expect(looks).toHaveLength(n);
     expect(new Set(looks.map((l) => `${l.starter}:${l.look}`)).size).toBe(n);
@@ -148,8 +151,11 @@ describe("looks → models", () => {
   it("draws every look with its own model; the originals come first, in starter order", async () => {
     const { MODEL_FILES, MODEL_SCALE, modelIndex } = await import("./avatars/assets.ts");
     STARTER_LOOKS.forEach((ls, s) => ls.forEach((l, k) => expect(MODEL_FILES[modelIndex(s, k)]).toBe(l.id)));
-    STARTERS.forEach((st, s) => expect(MODEL_FILES[s]).toBe(st.id));
-    expect(MODEL_FILES).toHaveLength(STARTER_LOOKS.flat().length);
+    // The five originals by starter index; the Traveller has no model of its own and draws Ash's.
+    STARTERS.forEach((st, s) => expect(MODEL_FILES[modelIndex(s)]).toBe(STARTER_LOOKS[s]![0]!.id));
+    STARTERS.slice(0, 5).forEach((st, s) => expect(MODEL_FILES[s]).toBe(st.id));
+    expect(modelIndex(PLAIN_STARTER)).toBe(MODEL_FILES.indexOf("ash"));
+    expect(MODEL_FILES).toHaveLength(new Set(STARTER_LOOKS.flat().map((l) => l.id)).size);
     expect(MODEL_SCALE).toHaveLength(MODEL_FILES.length);
     expect(modelIndex(2, 1)).toBe(MODEL_FILES.indexOf("kappa_b"));
     expect(modelIndex(0, 1)).toBe(0); // Hexwick has no second look: the original
@@ -423,5 +429,63 @@ describe("character textures follow the tier up (D-load-6)", () => {
     expect(loads).toBe(0);
     expect(await avatarTexturesFollowTier("high", { lowRes: true, raise })).toBe(true);
     expect(loads).toBe(1);
+  });
+});
+
+describe("the own avatar after a Skipstep (#78)", () => {
+  it("a blink's 10 m move doesn't rez it in or spike its ground speed; an unannounced jump that far does", () => {
+    const dt = 1 / 60;
+    const a = new mod.AvatarView(0, 0);
+    const b = new mod.AvatarView(0, 0);
+    for (const v of [a, b]) for (let i = 0; i < 30; i++) v.set(at(i * 0.1).x, at(i * 0.1).y, at(i * 0.1).z, 1, 0, 0, ANIM.RUN, dt);
+    const to = at(13);
+    a.blinked();
+    a.set(to.x, to.y, to.z, 1, 0, 0, ANIM.RUN, dt);
+    b.set(to.x, to.y, to.z, 1, 0, 0, ANIM.RUN, dt);
+    expect(a.rezzing).toBe(false);
+    expect(a.groundSpeed).toBeLessThan(7);
+    expect(b.rezzing).toBe(true); // fast travel, a rebirth: it materialises
+    a.dispose();
+    b.dispose();
+  });
+
+  it("a hop's way down keeps the jump clip while it runs; the fall's flail only after it (fallClip)", () => {
+    expect(mod.fallClip("jump_air", true)).toBe("jump_air");
+    expect(mod.fallClip("jump_air", false)).toBe("fall");
+    expect(mod.fallClip("run", true)).toBe("fall"); // off a ledge: no jump to keep
+    expect(mod.fallClip("fall", true)).toBe("fall");
+  });
+});
+
+describe("held grips: the Riverstaff's block (#76) and the long weapons' carry while moving (#63)", () => {
+  it("the Riverstaff turns in the hand while the guard is held, eased both ways; other items and guns stay on their mount", () => {
+    const rest = new THREE.Quaternion();
+    const q = new THREE.Quaternion();
+    const axis = (t: number, id = "riverstaff", r = rest) => new THREE.Vector3(0, 0, 1).applyQuaternion(mod.heldWeaponQuat(id, "block", t, r, q));
+    expect(axis(0).z).toBeCloseTo(1, 9);
+    const held = axis(1);
+    expect(held.angleTo(new THREE.Vector3(0, 0, 1))).toBeGreaterThan(0.5); // a real turn, not a nudge
+    const half = axis(0.5);
+    expect(half.angleTo(held)).toBeGreaterThan(0.1);
+    expect(half.angleTo(new THREE.Vector3(0, 0, 1))).toBeGreaterThan(0.1);
+    expect(axis(1, "sunbrand").z).toBeCloseTo(1, 9); // the clip was made for a sword's guard
+    const gun = mod.GUN_GRIP;
+    expect(mod.heldWeaponQuat("carbine", "block", 1, gun, q).angleTo(gun)).toBeCloseTo(0, 9);
+  });
+
+  it("run, sprint and the roll ask for the carry grip, the guard for the block grip, attacks and aiming for none", () => {
+    expect(["run", "sprint", "roll_fast"].map(mod.heldPose)).toEqual(["carry", "carry", "carry"]);
+    expect(mod.heldPose("block_hold")).toBe("block");
+    for (const clip of ["idle", "walk", "aim", "cast", "attack_melee", "heavy_melee", "jump_air"]) expect(mod.heldPose(clip)).toBeNull();
+  });
+
+  it("every long weapon has a carry grip (a turn about the socket's Y axis); short ones and guns don't", () => {
+    for (const id of ["riverstaff", "emberglass", "axe", "longbow", "boarspear"]) {
+      expect(mod.hasHeldGrip(id, "carry"), id).toBe(true);
+      const tip = new THREE.Vector3(0, 0, 1).applyQuaternion(mod.heldWeaponQuat(id, "carry", 1, new THREE.Quaternion(), new THREE.Quaternion()));
+      expect(tip.angleTo(new THREE.Vector3(0, 0, 1)), id).toBeGreaterThan(0.5);
+    }
+    for (const id of ["sunbrand", "carbine", "crossbow", "fists"]) expect(mod.hasHeldGrip(id, "carry"), id).toBe(false);
+    expect(mod.hasHeldGrip("riverstaff", null)).toBe(false);
   });
 });

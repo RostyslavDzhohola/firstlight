@@ -90,8 +90,18 @@ type TextureNode = ReturnType<typeof texture>;
 const cache = new WeakMap<StarterTextures, { material: THREE.MeshToonNodeMaterial; albedo: TextureNode; normal: TextureNode }>();
 let looks = 0;
 
+/** How bright a painted glow burns (sculpted weapons: the emberglass bulb, a lantern's flame). */
+const PAINTED_GLOW = 2.4;
+
+/**
+ * What 1 - the albedo's alpha means. "accent": a painted accent that takes the palette accent and glows
+ * in it (the characters' glyphs and lenses). "painted": the painted colour itself glows (sculpted
+ * weapons, tools/blender/props3d: the staff's bulb keeps its ember in every palette).
+ */
+export type AvatarGlow = "accent" | "painted";
+
 /** The toon material of the look with textures `tex`: every palette (setAvatarPalette on each mesh). */
-export function avatarMaterial(tex: StarterTextures): THREE.MeshToonNodeMaterial {
+export function avatarMaterial(tex: StarterTextures, glow: AvatarGlow = "accent"): THREE.MeshToonNodeMaterial {
   const hit = cache.get(tex);
   if (hit) return hit.material;
   const role = attribute("color", "vec4");
@@ -102,7 +112,7 @@ export function avatarMaterial(tex: StarterTextures): THREE.MeshToonNodeMaterial
   const fres = float(1).sub(saturate(dot(normalView, positionViewDirection))).pow(3);
   const m = new THREE.MeshToonNodeMaterial();
   m.gradientMap = toonRamp();
-  m.colorNode = mix(base.mul(tint), cAcc, painted);
+  m.colorNode = glow === "painted" ? base.mul(tint) : mix(base.mul(tint), cAcc, painted);
   // Blender bakes OpenGL-style normals against Blender UVs; glTF UVs flip V, hence Y = -1.
   const normal = texture(tex.normal, uv());
   m.normalNode = normalMap(normal, vec2(1, -1));
@@ -110,9 +120,9 @@ export function avatarMaterial(tex: StarterTextures): THREE.MeshToonNodeMaterial
   // The rez edge (render/rez.ts) glows in the accent, lifted towards white: 0 on an idle avatar.
   const rezEdge = mix(cAcc, vec3(0.75, 0.95, 1), 0.45).mul(rezGlow() as never).mul(5);
   (m as THREE.MeshToonNodeMaterial & { emissiveNode: THREE.Node | null }).emissiveNode =
-    cAcc.mul(max(role.z, painted)).mul(2.2).add(avatarRim.color.mul(fres).mul(avatarRim.strength.add(atmo.nightRim.mul(NIGHT_RIM)))).add(rezEdge);
+    (glow === "painted" ? cAcc.mul(role.z).mul(2.2).add(base.mul(painted).mul(PAINTED_GLOW)) : cAcc.mul(max(role.z, painted)).mul(2.2)).add(avatarRim.color.mul(fres).mul(avatarRim.strength.add(atmo.nightRim.mul(NIGHT_RIM)))).add(rezEdge);
   m.side = THREE.DoubleSide; // cloth is single-sided: robe hems, hoods and sleeves show their insides
-  m.name = `avatar-look-${looks++}`;
+  m.name = `${glow === "painted" ? "sculpted-prop" : "avatar-look"}-${looks++}`;
   // Quest NPCs (keepers, guides) dissolve between the camera and the player; players never (D-view-5).
   applyOccluderFadeGated(m);
   // Rez-in / de-rez (D-gfx-hub-1): per-object values, the same one shader. Added after the camera

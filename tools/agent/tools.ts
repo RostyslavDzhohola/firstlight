@@ -6,10 +6,11 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AgentError, FirstlightAgent, type ActionResult, type MoveTarget } from "@firstlight/agent-kit";
+import { AgentError, FirstlightAgent, type ActionResult, type ConnectOptions, type MoveTarget } from "@firstlight/agent-kit";
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { MISSIONS, isTrialType } from "@firstlight/shared/content/missions";
 import { SPELL_IDS, SPELLS } from "@firstlight/shared/content/spells";
+import { RESPEC } from "@firstlight/shared/content/tree";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 
@@ -67,13 +68,99 @@ export function checkArgs(schema: Schema, args: unknown): string | null {
   return null;
 }
 
-/** One character per process. */
+/** How many calls a session holds at once, the running one included (the gateway sets its own). */
+export const SESSION_MAX_PENDING = 8;
+
+/** The answer to a call whose caller went away (hung up, or sent a cancellation) before it ran. */
+export const CANCELLED = { ok: false, reason: "cancelled", hint: "the caller cancelled this call" } as const;
+
+interface Pending {
+  start(): void;
+}
+
+/** One character: per process locally, per seat on the server's gateway. */
 export class Session {
   agent: FirstlightAgent | null = null;
   readonly log: (line: string) => void;
+  /** The tools this session answers to (the gateway swaps in its own join). */
+  tools: ReadonlyMap<string, ToolDef> = TOOL_BY_NAME;
+  /** Calls held at once, the running one included; past it a call is refused ("queue full"), not queued. */
+  maxPending = SESSION_MAX_PENDING;
+  private readonly waiting: Pending[] = [];
+  private running = false;
+  private stops = 0;
 
   constructor(log: (line: string) => void = () => {}) {
     this.log = log;
+  }
+
+  /** Calls running or waiting, stops included (the gateway's idle timer doesn't run while one is). */
+  get busy(): number {
+    return this.waiting.length + (this.running ? 1 : 0) + this.stops;
+  }
+
+  /** Calls running or waiting their turn (what `maxPending` bounds). */
+  get pending(): number {
+    return this.waiting.length + (this.running ? 1 : 0);
+  }
+
+  /**
+   * Run a tool, one at a time and in order: a character does one thing at a time. `firstlight_stop`
+   * jumps the queue, so it can interrupt the walk or the fight in progress.
+   *
+   * Bounded: with `maxPending` calls already held, the call is refused at once ("queue full"). When
+   * `signal` aborts (the caller hung up, or cancelled the request), a call still waiting leaves the
+   * queue and answers CANCELLED without running; the call that is running is stopped.
+   */
+  call(name: string, args: unknown, opts: { signal?: AbortSignal } = {}): Promise<Record<string, unknown>> {
+    const { signal } = opts;
+    if (name === "firstlight_stop") return this.stop(args);
+    if (signal?.aborted) return Promise.resolve({ ...CANCELLED });
+    if (this.pending >= this.maxPending) {
+      return Promise.resolve({ ok: false, reason: "queue full", hint: `${this.pending} calls are already running or waiting for this character (at most ${this.maxPending}); wait for one to answer, or call firstlight_stop` });
+    }
+    return new Promise((resolve) => {
+      const job: Pending = {
+        start: () => {
+          signal?.removeEventListener("abort", leave);
+          this.running = true;
+          // The caller goes away while it runs: stop the walk or the fight it was waiting on.
+          const interrupt = () => void this.stop({});
+          signal?.addEventListener("abort", interrupt, { once: true });
+          void callTool(this, name, args)
+            .catch((e: unknown) => ({ ok: false, reason: "error", hint: (e as Error).message }))
+            .then((r) => {
+              signal?.removeEventListener("abort", interrupt);
+              this.running = false;
+              resolve(r);
+              this.next();
+            });
+        },
+      };
+      // The caller goes away while it waits: out of the queue, never run.
+      const leave = () => {
+        const i = this.waiting.indexOf(job);
+        if (i >= 0) this.waiting.splice(i, 1);
+        resolve({ ...CANCELLED });
+      };
+      signal?.addEventListener("abort", leave, { once: true });
+      this.waiting.push(job);
+      this.next();
+    });
+  }
+
+  private next(): void {
+    if (this.running) return;
+    this.waiting.shift()?.start();
+  }
+
+  private async stop(args: unknown): Promise<Record<string, unknown>> {
+    this.stops++;
+    try {
+      return await callTool(this, "firstlight_stop", args);
+    } finally {
+      this.stops--;
+    }
   }
 
   /** The status line and fresh events every action result carries. */
@@ -103,6 +190,25 @@ function sessionFile(url: string, name: string): string | undefined {
   return join(process.env.FL_AGENT_HOME ?? join(homedir(), ".firstlight", "agents"), `${host}-${name.replace(/[^A-Za-z0-9_]+/g, "_") || "agent"}.json`);
 }
 
+/**
+ * Put the session's character in the world (every `firstlight_join` ends here): refused while one
+ * plays; on success the first look around comes with the result.
+ */
+export async function joinWith(s: Session, opts: ConnectOptions): Promise<Record<string, unknown>> {
+  if (s.agent && (s.agent.status === "playing" || s.agent.status === "reconnecting")) return { ok: false, reason: "already playing", hint: "firstlight_leave first to join again", ...s.status() };
+  const agent = new FirstlightAgent();
+  try {
+    const r = await agent.connect({ log: s.log, ...opts });
+    s.agent = agent;
+    // The first private state arrives a moment after the join.
+    for (let i = 0; i < 40 && agent.observe({ peek: true }).self.maxHp === 0; i++) await new Promise((ok) => setTimeout(ok, 50));
+    return { ...r, look: agent.observe().summary };
+  } catch (e) {
+    await agent.close().catch(() => {});
+    return { ok: false, reason: e instanceof AgentError ? e.code : "join failed", hint: (e as Error).message };
+  }
+}
+
 const act = async (s: Session, r: Promise<ActionResult>): Promise<Record<string, unknown>> => ({ ...(await r), ...s.status() });
 
 export const TOOLS: readonly ToolDef[] = [
@@ -118,37 +224,25 @@ export const TOOLS: readonly ToolDef[] = [
         url: { type: "string", description: "Game server origin. Default: $FL_URL, else http://localhost:2567.", maxLength: 200 },
         authUrl: { type: "string", description: "Sign-in origin, when it differs from url (the site origin on a hosted game). Default: $FL_AUTH_URL, else url.", maxLength: 200 },
         name: { type: "string", description: "Display name to ask for: 3-16 letters, digits or _. The server may refuse it (taken, not allowed); you then get a generated one.", minLength: 3, maxLength: 16 },
-        starter: { type: "string", description: "A new character's class: hexwick (magic bolts), ash (sword), kappa (staff), unit7 (carbine, default), ninja (thrown kunai). Ignored when the character already exists.", enum: STARTER_IDS },
+        starter: { type: "string", description: "A new character's class: hexwick (magic bolts), ash (sword), kappa (staff), unit7 (carbine, default), ninja (thrown kunai), traveller (the plain start: a sword and base numbers, built up through the tree). Ignored when the character already exists.", enum: STARTER_IDS },
         body: { type: "string", description: "World to join. Leave out to arrive wherever the character is.", enum: BODY_IDS },
         dev: { type: "boolean", description: "Use a dev guest token instead of the sign-in flow (local servers started with ALLOW_DEV_GUESTS=1). Default: $FL_DEV=1." },
       },
     },
     async run(s, a) {
-      if (s.agent && (s.agent.status === "playing" || s.agent.status === "reconnecting")) return { ok: false, reason: "already playing", hint: "firstlight_leave first to join again", ...s.status() };
       const url = (a.url ?? process.env.FL_URL ?? "http://localhost:2567") as string;
       const name = (a.name ?? process.env.FL_AGENT_NAME) as string | undefined;
       const dev = a.dev ?? process.env.FL_DEV === "1";
-      const agent = new FirstlightAgent();
-      try {
-        const r = await agent.connect({
-          url,
-          authUrl: (a.authUrl ?? process.env.FL_AUTH_URL) as string | undefined,
-          authOrigin: process.env.FL_AUTH_ORIGIN,
-          name,
-          starter: (a.starter ?? "unit7") as string,
-          body: a.body as BodyId | undefined,
-          // A dev identity is its id: the name's (so the same name is the same character), or a new one each run.
-          ...(dev ? { token: `dev:${name ? name.toLowerCase() : `agent${Math.random().toString(36).slice(2, 8)}`}:${name ?? "Agent"}` } : { sessionFile: sessionFile(url, name ?? "agent") }),
-          log: s.log,
-        });
-        s.agent = agent;
-        // The first private state arrives a moment after the join.
-        for (let i = 0; i < 40 && agent.observe({ peek: true }).self.maxHp === 0; i++) await new Promise((ok) => setTimeout(ok, 50));
-        return { ...r, look: agent.observe().summary };
-      } catch (e) {
-        await agent.close().catch(() => {});
-        return { ok: false, reason: e instanceof AgentError ? e.code : "join failed", hint: (e as Error).message };
-      }
+      return joinWith(s, {
+        url,
+        authUrl: (a.authUrl ?? process.env.FL_AUTH_URL) as string | undefined,
+        authOrigin: process.env.FL_AUTH_ORIGIN,
+        name,
+        starter: (a.starter ?? "unit7") as string,
+        body: a.body as BodyId | undefined,
+        // A dev identity is its id: the name's (so the same name is the same character), or a new one each run.
+        ...(dev ? { token: `dev:${name ? name.toLowerCase() : `agent${Math.random().toString(36).slice(2, 8)}`}:${name ?? "Agent"}` } : { sessionFile: sessionFile(url, name ?? "agent") }),
+      });
     },
   },
   {
@@ -360,6 +454,24 @@ export const TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "firstlight_build",
+    description: `Build tree: each level past the first gives a point. action=spend with node (self.tree.open in firstlight_observe lists them and what each does); action=respec takes all points back, in a safe zone, for ${RESPEC.coinsPerPoint} coins a point.`,
+    needsAgent: true,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["action"],
+      properties: {
+        action: { type: "string", description: "spend a point, or respec.", enum: ["spend", "respec"] },
+        node: { type: "string", description: "spend: a node id from self.tree.open.", minLength: 1, maxLength: 40 },
+      },
+    },
+    async run(s, a) {
+      if (a.action === "spend" && !a.node) return { ok: false, reason: "bad arguments", hint: "spend needs node (see self.tree.open)" };
+      return act(s, a.action === "spend" ? s.agent!.spendPoint(a.node) : s.agent!.respec());
+    },
+  },
+  {
     name: "firstlight_trial",
     description:
       "Play a race, defend or collect mission you hold, start to finish, on the body you stand on. race: sprints through the rings in order (ring 1 starts the clock). collect: walks over every piece. defend: lights the beacon, stays in its ring and fights what comes. Returns when done, failed (\"failed: time\", \"failed: left\", \"dead\"), blocked, or out of seconds; call again to retry.",
@@ -392,10 +504,15 @@ export const TOOLS: readonly ToolDef[] = [
 
 export const TOOL_BY_NAME: ReadonlyMap<string, ToolDef> = new Map(TOOLS.map((t) => [t.name, t]));
 
+/** The same tools with another `firstlight_join` (the server's gateway: no url, no dev tokens). */
+export function withJoin(join: ToolDef): ReadonlyMap<string, ToolDef> {
+  return new Map(TOOLS.map((t) => (t.name === "firstlight_join" ? [t.name, join] : [t.name, t])));
+}
+
 /** Run a tool by name with unchecked arguments: validates, guards, never throws. */
 export async function callTool(s: Session, name: string, args: unknown): Promise<Record<string, unknown>> {
-  const tool = TOOL_BY_NAME.get(name);
-  if (!tool) return { ok: false, reason: "unknown tool", hint: `tools: ${TOOLS.map((t) => t.name).join(", ")}` };
+  const tool = s.tools.get(name);
+  if (!tool) return { ok: false, reason: "unknown tool", hint: `tools: ${[...s.tools.keys()].join(", ")}` };
   const bad = checkArgs(tool.inputSchema, args);
   if (bad) return { ok: false, reason: "bad arguments", hint: bad };
   if (tool.needsAgent && !s.agent) return { ok: false, reason: "not in the game", hint: "call firstlight_join first" };
@@ -415,6 +532,6 @@ export const PLAYBOOK = [
   "To level up: on Portus walk to a portal (firstlight_move target=portal:arcadia) and firstlight_travel portal=arcadia. On the planet: firstlight_move target=guide, firstlight_missions action=take, leave the outpost, fight creatures of about your level, pick up loot piles, heal with tonics, return to safety (firstlight_move target=safe) when hurt.",
   "Spells (firstlight_cast) cost aether and unlock by level: skipstep 1 (a blink out of a bad fight), frostbloom 3 (when surrounded), wishfall 6, glasswing 9 (a shell when hurt).",
   "Race, defend and collect missions are played with firstlight_trial. The public hunt: Sela Marchbank in Portus (target=curator) gives trials T1 (Arcadia, levels 4-7), T2 (Hollowmere, 9-12), T3 (Meridian, 14-17); all three open the Gleam Vault beside her.",
-  "Dying costs the character: a new life starts at level 1 (firstlight_respawn). Retreat early.",
+  "Death costs the character and its build points: new life at level 1 (firstlight_respawn). Spend level points with firstlight_build. Retreat early.",
   "Be a good neighbour: don't attack players unless one attacked you first, don't take loot piles that aren't yours while their owner is near, don't crowd people at the guide or the shop.",
 ].join("\n");

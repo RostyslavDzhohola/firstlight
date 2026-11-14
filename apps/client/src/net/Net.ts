@@ -6,6 +6,7 @@ import type { BodyId } from "@firstlight/shared";
 import { NET, PROTOCOL_VERSION, type InputMsg, type PlayResponse } from "@firstlight/shared/net/protocol";
 import { config } from "../config.ts";
 import { getPlayToken, invalidatePlayToken } from "./auth.ts";
+import { beacon } from "./beacon.ts";
 
 export interface Snapshot {
   t: number; // local receive time (ms)
@@ -97,6 +98,8 @@ export class Net {
   readonly remotes = new Map<string, RemotePlayerView>();
   private seq = 0;
   private lastSend = 0;
+  /** The latest input the rate held back (Game reuses one message object: it reads the newest values). */
+  private unsent: Omit<InputMsg, "seq" | "t"> | null = null;
   serverOffset = 0; // serverTime - localTime
   rtt = 0;
   onCorrect: ((x: number, y: number, z: number) => void) | null = null;
@@ -118,7 +121,8 @@ export class Net {
       const res = await fetch(`${config.apiUrl}/api/play`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ body, v: PROTOCOL_VERSION, ...opts }),
+        // The funnel's visit token (net/beacon.ts), so the server can see this visit join a world (#85).
+        body: JSON.stringify({ body, v: PROTOCOL_VERSION, ...opts, visit: beacon().currentToken() ?? undefined }),
         signal: AbortSignal.timeout(20_000), // a server that never answers fails the arrival (retry/reconnect), not a spinner
       });
       if (res.status === 401 && !retried401) {
@@ -191,6 +195,7 @@ export class Net {
     this.room = room;
     this.remotes.clear();
     this.seq = 0;
+    this.unsent = null;
     // Until the state has shown us ourselves, what it holds is the room as we found it.
     let seeding = true;
     room.onStateChange((state: any) => {
@@ -255,10 +260,28 @@ export class Net {
     });
   }
 
+  /** The frame's input (at most NET.INPUT_HZ a second; one the rate held back waits for flushInput). */
   sendInput(now: number, m: Omit<InputMsg, "seq" | "t">) {
-    if (!this.room || now - this.lastSend < 1000 / NET.INPUT_HZ) return;
+    if (!this.room) return;
+    if (now - this.lastSend < 1000 / NET.INPUT_HZ) {
+      this.unsent = m;
+      return;
+    }
+    this.postInput(now, m);
+  }
+
+  /**
+   * Send the input the rate held back, if any, now: call it before a message the server answers from
+   * the body's state (melee reads its facing, so a swing right after a turn goes where the camera looks).
+   */
+  flushInput(now: number) {
+    if (this.room && this.unsent) this.postInput(now, this.unsent);
+  }
+
+  private postInput(now: number, m: Omit<InputMsg, "seq" | "t">) {
     this.lastSend = now;
-    this.room.send("input", { ...m, seq: ++this.seq, t: Date.now() });
+    this.unsent = null;
+    this.room!.send("input", { ...m, seq: ++this.seq, t: Date.now() });
   }
 
   /** Interpolated snapshot `delay` ms in the past (written into `out` when given: no allocation). */

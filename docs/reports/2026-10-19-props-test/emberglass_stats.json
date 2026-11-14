@@ -1,0 +1,15 @@
+{
+ "prop": "emberglass",
+ "tris": 1984,
+ "verts": 1309,
+ "parts": {
+  "shaft": 390,
+  "wrap": 299,
+  "bands": 319,
+  "collar": 219,
+  "bulb": 379,
+  "tines": 378
+ },
+ "tex": 512,
+ "seconds": 318.8
+}

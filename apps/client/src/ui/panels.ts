@@ -2,14 +2,22 @@
 // (missions, medals and titles, wardrobe), the E7 keypad, the HUD mission tracker and the admin
 // console. Panels free the mouse while open and give it back on close.
 
+import { WILD_SITES } from "@firstlight/shared/content/wildSites";
 import "./quests.css";
-import type { BodyId } from "@firstlight/shared";
+import { BODIES, BODY_IDS, type BodyId } from "@firstlight/shared";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
-import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, MISSIONS, missionGiver, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import { trackerRows } from "./trackerRows.ts";
 import { trialWay } from "../game/nextSteps.ts";
-import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
+import { missionTrack } from "../game/missionTrack.ts";
+import { MISSIONS_KEY } from "./missionsPanel.ts";
+import { HOTKEYS } from "../game/keys.ts";
+import { uiSettings } from "./uiSettings.ts";
+import { spellCost, spellEffect, spellPower } from "../game/spellInfo.ts";
+import { SPELLS } from "@firstlight/shared/content/spells";
+import { LEVEL_CAP } from "@firstlight/shared/content/progression";
+import { GLEAMS, gleamsWon, selaLine } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
 import type { Hud, YouPlus } from "./hud.ts";
@@ -25,6 +33,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", parent?: HT
 }
 
 const send = (game: Game, type: string, msg: unknown) => game.net.room?.send(type, msg as never);
+
 
 /** A modal panel. Only one is open at a time. */
 export class Panel {
@@ -67,9 +76,20 @@ export class Panel {
     document.exitPointerLock?.();
   }
 
+  /** Called once each time the panel closes (the character you were talking to says goodbye). */
+  onClosed: (() => void) | null = null;
+  /** Called when a mission is accepted here (its giver says the offer: game/npcTalk.ts). */
+  onAccept: ((missionId: string) => void) | null = null;
+
+  protected accept(missionId: string) {
+    send(this.game, "mission", { action: "accept", id: missionId });
+    this.onAccept?.(missionId);
+  }
+
   close(relock = true) {
     if (!this.isOpen) return;
     this.overlay.remove();
+    this.onClosed?.();
     window.removeEventListener("keydown", this.onKey, true);
     if (Panel.current === this) Panel.current = null;
     overlayClosed("panel");
@@ -119,8 +139,26 @@ function missionCard(parent: HTMLElement, def: MissionDef, you: YouPlus | null, 
   actions(row);
 }
 
+/** Bodies with a guide at the main pad (every planet and the moon; Portus has Sela instead). */
+export function guideBody(body: BodyId): body is Exclude<BodyId, "portus"> {
+  return body !== "portus" && !!GUIDES[body as Exclude<BodyId, "portus">];
+}
+
+/** Who gives a mission and where, for a "given by" line ("Lark on Arcadia"). */
+function giverWhere(id: string): string {
+  const g = Object.values(GUIDES).find((x) => x.id === id);
+  return g ? `${g.name} on ${BODIES[g.body].name}` : id === GLEAMS.curator.id ? `${GLEAMS.curator.name} in Portus` : id;
+}
+
+/**
+ * A guide's panel: the missions this guide hands out (accept / abandon), then the missions on this
+ * body that someone else gives (Lark sends players to Lumen with L1), read-only with their progress,
+ * so Surveyor Odile can tell you how the hunt is going.
+ */
 export class GuidePanel extends Panel {
   private readonly body: Exclude<BodyId, "portus">;
+  /** What the guide said as you walked up (game/npcTalk.ts); the panel quotes it. */
+  line: string | null = null;
   constructor(game: Game, body: Exclude<BodyId, "portus">) {
     super(game);
     this.body = body;
@@ -133,17 +171,22 @@ export class GuidePanel extends Panel {
     b.innerHTML = "";
     el("h2", "", b, g.name.toUpperCase());
     el("p", "sub", b, `${g.role[0]!.toUpperCase()}${g.role.slice(1)} at the main pad`);
-    el("p", "quote", b, `“${g.greeting}”`);
+    el("p", "quote", b, `“${this.line ?? g.greeting}”`);
     const body = el("div", "body", b);
-    for (const def of missionsOn(this.body)) {
+    for (const def of missionsFrom(g.id)) {
       missionCard(body, def, you, (row) => {
         el("span", "quote", row, `“${def.pitch}”`).style.margin = "0";
         const state = you?.missions.find((m) => m.id === def.id);
         if (!state) {
-          el("button", "btn", row, "Accept").onclick = () => send(this.game, "mission", { action: "accept", id: def.id });
+          el("button", "btn", row, "Accept").onclick = () => this.accept(def.id);
         } else if (!state.done) {
           el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
         }
+      });
+    }
+    for (const def of MISSIONS.filter((m) => m.body === this.body && missionGiver(m) !== g.id && !m.trial)) {
+      missionCard(body, def, you, (row) => {
+        el("span", "rw", row, `${giverWhere(missionGiver(def))} gives this one.`);
       });
     }
     const foot = el("div", "foot", b);
@@ -167,7 +210,7 @@ export class CuratorPanel extends Panel {
     el("p", "sub", b, `${c.role[0]!.toUpperCase()}${c.role.slice(1)} · ${GLEAMS.name}`);
     const won = gleamsWon(you?.missions ?? []);
     const opened = !!you?.gleamVault;
-    el("p", "quote", b, `“${opened ? GLEAMS.lines.opened : won >= GLEAMS.trials.length ? GLEAMS.lines.all : won > 0 ? GLEAMS.lines.some : GLEAMS.lines.none}”`);
+    el("p", "quote", b, `“${GLEAMS.lines[selaLine(won, opened)]}”`);
     const body = el("div", "body", b);
     const trials = missionsFrom(c.id);
     for (const def of trials) {
@@ -175,7 +218,7 @@ export class CuratorPanel extends Panel {
         el("span", "rw", row, `Trial ${def.trial}`); // the card's way line names the planet (D-polish-ux-3)
         el("span", "quote", row, `“${def.pitch}”`).style.margin = "0";
         const state = you?.missions.find((m) => m.id === def.id);
-        if (!state) el("button", "btn", row, "Accept").onclick = () => send(this.game, "mission", { action: "accept", id: def.id });
+        if (!state) el("button", "btn", row, "Accept").onclick = () => this.accept(def.id);
         else if (!state.done) el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
       });
     }
@@ -194,7 +237,7 @@ export class CuratorPanel extends Panel {
 // ---------------------------------------------------------------- journal
 
 export class JournalPanel extends Panel {
-  private tab: "missions" | "medals" | "wardrobe" = "missions";
+  private tab: "missions" | "spells" | "medals" | "wardrobe" | "sites" = "missions";
   protected closeKeys = ["KeyJ"];
 
   show(tab?: JournalPanel["tab"]) {
@@ -211,7 +254,7 @@ export class JournalPanel extends Panel {
     const title = you?.title ? MEDALS.find((m) => m.id === you.title)?.title : null;
     el("div", "sub", head, title ? `Title: ${title}` : "No title worn");
     const tabs = el("div", "tabs", b);
-    for (const t of ["missions", "medals", "wardrobe"] as const) {
+    for (const t of ["missions", "spells", "medals", "wardrobe", "sites"] as const) {
       const x = el("button", `tab${this.tab === t ? " on" : ""}`, tabs, t[0]!.toUpperCase() + t.slice(1));
       x.onclick = () => {
         this.tab = t;
@@ -220,7 +263,9 @@ export class JournalPanel extends Panel {
     }
     const body = el("div", "body", b);
     if (this.tab === "missions") this.renderMissions(body, you);
+    else if (this.tab === "spells") this.renderSpells(body, you);
     else if (this.tab === "medals") this.renderMedals(body, you);
+    else if (this.tab === "sites") this.renderSites(body, you);
     else this.renderWardrobe(body, you);
     const foot = el("div", "foot", b);
     el("span", "", foot, "J or Esc to close");
@@ -229,16 +274,57 @@ export class JournalPanel extends Panel {
 
   private renderMissions(body: HTMLElement, you: YouPlus | null) {
     const mine = you?.missions ?? [];
+    // Review #4: the HUD missions panel folds here too (L on a keyboard), so a pad and a touch screen,
+    // which reach the journal from the pause menu, can fold it; the focus navigator reaches this button.
+    const folded = uiSettings.get().missionsCollapsed;
+    const fold = el("button", "btn ghost", el("div", "top", body), `${folded ? "Unfold" : "Fold"} the missions panel (${MISSIONS_KEY.cap})`);
+    fold.dataset.e2e = "journal-fold-missions";
+    fold.onclick = () => {
+      uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
+      this.render();
+    };
     if (!mine.length) el("p", "sub", body, "No missions yet. Each planet's guide waits at its main pad: Lark on Arcadia, Sexton Mabry on Hollowmere, Rook Calder on Meridian. In Portus Plaza, Sela Marchbank gives the three trials of the Three Gleams.");
     for (const m of mine) {
       const def = MISSION_BY_ID.get(m.id);
       if (!def) continue;
       missionCard(body, def, you, (row) => {
         el("span", "rw", row, `${def.body[0]!.toUpperCase()}${def.body.slice(1)} · ${def.trial ? `${GLEAMS.name}, trial ${def.trial}` : def.guide}`);
-        if (!m.done) el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
+        if (!m.done) {
+          const tracked = missionTrack.chosen === def.id;
+          const t = el("button", `btn${tracked ? "" : " ghost"}`, row, tracked ? "Tracking" : "Track");
+          t.dataset.e2e = `journal-track-${def.id}`;
+          t.disabled = tracked;
+          t.onclick = () => {
+            missionTrack.choose(def.id);
+            this.render();
+          };
+          el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
+        }
       });
     }
     el("div", "rw", body, `${mine.filter((m) => m.done).length} of ${MISSIONS.length} missions done this life.`).style.marginTop = "8px";
+  }
+
+  /** #79: each spell's numbers at your level, and what the next level adds. */
+  private renderSpells(body: HTMLElement, you: YouPlus | null) {
+    const level = you?.level ?? 1;
+    const starter = this.game.hud.starterIndex;
+    const tree = you?.tree?.nodes;
+    el("p", "sub", body, `At level ${level}. Spell damage grows 3% a level (and with your starter's spell power); the Magic branch of your build tree (${HOTKEYS.build.caps.join(" ")}) raises the power and cuts the cooldowns.`);
+    for (const s of SPELLS) {
+      const row = el("div", "row", body);
+      row.dataset.e2e = `journal-spell-${s.id}`;
+      const left = el("div", "", row);
+      el("div", "nm", left, `${s.keycap} · ${s.name}`);
+      if (level < s.level) {
+        el("div", "meta", left, `Unlocks at level ${s.level}. ${s.blurb}`);
+        continue;
+      }
+      el("div", "", left, spellEffect(s, level, starter, tree));
+      const now = spellPower(s, level, starter, tree);
+      const next = level < LEVEL_CAP ? spellPower(s, level + 1, starter, tree) : null;
+      el("div", "meta", left, `${spellCost(s, tree)}${now && next && next.value !== now.value ? ` · level ${level + 1}: ${next.value} ${now.unit}` : ""}`);
+    }
   }
 
   private renderMedals(body: HTMLElement, you: YouPlus | null) {
@@ -261,6 +347,27 @@ export class JournalPanel extends Panel {
         const worn = you?.title === m.id;
         const btn = el("button", `btn${worn ? " ghost" : ""}`, row, worn ? "Remove" : "Wear");
         btn.onclick = () => send(this.game, "title", { medalId: worn ? null : m.id });
+      }
+    }
+  }
+
+  /** Wild sites found this life (content/wildSites.ts), by planet, with their level band. */
+  private renderSites(body: HTMLElement, you: YouPlus | null) {
+    const found = new Set(you?.sites ?? []);
+    el("p", "sub", body, `${found.size} of ${WILD_SITES.length} sites found this life. Each guards a chest; finding one is worth XP once per life.`);
+    // Every body with sites, in body order (Lumen's Quietfall Wreck too: it counts in the total).
+    for (const planet of BODY_IDS.filter((b) => WILD_SITES.some((x) => x.body === b))) {
+      el("div", "cat", body, planet);
+      for (const s of WILD_SITES.filter((x) => x.body === planet)) {
+        const row = el("div", "row", body);
+        const left = el("div", "", row);
+        if (!found.has(s.id)) {
+          el("div", "nm", left, "???");
+          el("div", "meta", left, `An unfound place · levels ${s.levels[0]}–${s.levels[1]}`);
+          continue;
+        }
+        el("div", "nm", left, `${s.name} · Lv ${s.levels[0]}–${s.levels[1]}`);
+        el("div", "meta", left, s.blurb);
       }
     }
   }
@@ -354,8 +461,9 @@ export class MissionTracker {
   private last = "";
   /** Open mission ids at the last update (null before the first): a new one is the mission just taken. */
   private static openIds: Set<string> | null = null;
-  /** The mission the player took most recently (survives travel: one tracker per body). */
-  private static recent: string | null = null;
+  private readonly offTrack = missionTrack.onChange(() => {
+    this.last = "";
+  });
 
   constructor(
     private readonly hud: Pick<Hud, "setMissions"> | HTMLElement,
@@ -368,17 +476,19 @@ export class MissionTracker {
     if (you) {
       const open = new Set(all.filter((m) => !m.done).map((m) => m.id));
       const prev = MissionTracker.openIds;
-      if (prev) for (const id of open) if (!prev.has(id)) MissionTracker.recent = id;
+      // #69: the one tracked stays tracked; a mission just taken is tracked only if nothing was.
+      missionTrack.settle(all, body, prev ? [...open].filter((id) => !prev.has(id)) : []);
       MissionTracker.openIds = open;
     }
-    const key = JSON.stringify([all, body, trial, MissionTracker.recent]);
+    const key = JSON.stringify([all, body, trial, missionTrack.chosen]);
     if (key === this.last || this.hud instanceof HTMLElement) return;
     this.last = key;
-    const rows = trackerRows(all, body, { trial, recent: MissionTracker.recent });
+    const rows = trackerRows(all, body, { trial, tracked: missionTrack.chosen });
     this.hud.setMissions(rows.lines, rows.header, rows.more ? { count: rows.more, open: this.onMore } : null);
   }
 
   dispose() {
+    this.offTrack();
     if (!(this.hud instanceof HTMLElement)) this.hud.setMissions([]);
   }
 }

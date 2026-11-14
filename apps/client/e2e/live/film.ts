@@ -4,13 +4,20 @@
 // minutes behind), and frame n is filmed at exactly start + n × 40 ms, so the strip lines up.
 
 import type { Page } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { mkdirSync, rmSync, writeFile, writeFileSync } from "node:fs";
 
 const FPS = 25;
 /** Frames waiting for ffmpeg past this many bytes: it can't keep up, so the film ends there (still in step). */
 const BACKLOG_BYTES = 256 * 1024 * 1024;
 /** How long `stop` waits for ffmpeg to finish the file before asking it to quit, then killing it. */
 const FINISH_MS = 5 * 60_000;
+/**
+ * FL_LIVE_FRAMES=1: keep each screencast frame as a JPEG with its time and encode the film after the
+ * session instead of piping it to ffmpeg live. On a machine so loaded that ffmpeg falls behind (the
+ * film stopped at 194 s and 312 s with four lanes busy, load ~250), the film still covers the session.
+ */
+const FRAMES = process.env.FL_LIVE_FRAMES === "1";
 const ENCODER = process.platform === "darwin" ? ["-c:v", "h264_videotoolbox", "-b:v", "5M"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"];
 
 export class Film {
@@ -25,9 +32,13 @@ export class Film {
   /** Why the film ended early (ffmpeg fell behind or died), if it did. */
   cut: string | null = null;
 
+  private frames: { name: string; at: number }[] = [];
+  private framesDir = "";
+
   constructor(private readonly page: Page, readonly file: string) {}
 
   async start() {
+    if (FRAMES) return this.startFrames();
     const ff = spawn("ffmpeg", ["-y", "-v", "error", "-f", "image2pipe", "-c:v", "mjpeg", "-framerate", String(FPS), "-i", "pipe:0", ...ENCODER, "-pix_fmt", "yuv420p", "-vf", "scale=1280:720", this.file], { stdio: ["pipe", "ignore", "inherit"] });
     this.ff = ff;
     // A missing ffmpeg comes as `error` (no `exit`): settle on either, and fail the start cleanly.
@@ -77,13 +88,50 @@ export class Film {
     }
   }
 
+  /** Frames mode: every screencast frame to disk with its time; nothing encoded until `stop`. */
+  private async startFrames() {
+    this.framesDir = `${this.file}.frames`;
+    rmSync(this.framesDir, { recursive: true, force: true });
+    mkdirSync(this.framesDir, { recursive: true });
+    const cdp = await this.page.context().newCDPSession(this.page);
+    cdp.on("Page.screencastFrame", ({ data, sessionId }: { data: string; sessionId: number }) => {
+      const at = Date.now();
+      if (!this.startedAt) this.startedAt = at;
+      const name = `${String(this.frames.length).padStart(6, "0")}.jpg`;
+      this.frames.push({ name, at });
+      writeFile(`${this.framesDir}/${name}`, Buffer.from(data, "base64"), () => {});
+      cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
+    });
+    await cdp.send("Page.startScreencast", { format: "jpeg", quality: 75, maxWidth: 1280, maxHeight: 720, everyNthFrame: 2 });
+    this.stopCast = async () => {
+      await cdp.send("Page.stopScreencast").catch(() => {});
+      await cdp.detach().catch(() => {});
+    };
+  }
+
+  /** Frames mode: each frame shown until the next one came (the last for 1 s), resampled to 25 fps. */
+  private encodeFrames(): string {
+    const list = this.frames.map((f, i) => `file '${f.name}'\nduration ${(((this.frames[i + 1]?.at ?? f.at + 1000) - f.at) / 1000).toFixed(3)}`);
+    if (this.frames.length) list.push(`file '${this.frames.at(-1)!.name}'`);
+    writeFileSync(`${this.framesDir}/list.txt`, list.join("\n") + "\n");
+    const r = spawnSync("ffmpeg", ["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", "list.txt", "-r", String(FPS), ...ENCODER, "-pix_fmt", "yuv420p", "-vf", "scale=1280:720", this.file], { cwd: this.framesDir, stdio: ["ignore", "ignore", "inherit"] });
+    if (r.status !== 0) throw new Error(`the film failed: ffmpeg exited with ${r.status}`);
+    return this.file;
+  }
+
   /** Seconds filmed so far. */
   get seconds() {
+    if (FRAMES) return this.frames.length ? (this.frames.at(-1)!.at - this.startedAt) / 1000 : 0;
     return this.written / FPS;
   }
 
   /** Stop filming and wait (at most FINISH_MS, then SIGINT, which still writes the file, then SIGKILL) for the file. */
   async stop(): Promise<string> {
+    if (FRAMES) {
+      await this.stopCast?.();
+      await new Promise((r) => setTimeout(r, 500)); // the last frames' writes
+      return this.encodeFrames();
+    }
     clearInterval(this.tick);
     this.catchUp();
     await this.stopCast?.();

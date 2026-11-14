@@ -106,6 +106,8 @@ describe("shouldKeepReconnecting", () => {
     expect(shouldKeepReconnecting(new TypeError("Failed to fetch"))).toBe(true);
     expect(shouldKeepReconnecting(new ConnectionLost(1006, "joining"))).toBe(true);
     expect(shouldKeepReconnecting(new Error("banned"))).toBe(false);
+    // A deploy mid-session whose one automatic reload is used up: rejoining can't work (#85).
+    expect(shouldKeepReconnecting(new Error("version"))).toBe(false);
     expect(shouldKeepReconnecting(new ConnectionLost(CLOSE.KICKED, "joining"))).toBe(false);
   });
 });

@@ -19,6 +19,7 @@ import type { BodyId } from "./bodies.ts";
 import { padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
 import { siteAnchor, townFrame, type SiteAnchor, type TownPlacement } from "./townFrame.ts";
+import { wildSiteSolids } from "./wildSites.ts";
 
 export { POLE_ANCHOR, siteAnchor, siteCoords, siteDir, type SiteAnchor } from "./townFrame.ts";
 
@@ -59,9 +60,9 @@ function emptyPlacement(item: number, prefab: number, scale: number): TownPlacem
 
 // ------------------------------------------------------------------------------------ the sites of a body
 
-/** The pad outpost site data of a body (null on Portus). */
+/** The pad outpost site data of a body (null on Portus and on Lumen, which has bare pads). */
 export function outpostSite(body: BodyId): OutpostSite | null {
-  return body === "portus" ? null : OUTPOSTS[body as OutpostBody];
+  return body === "portus" ? null : (OUTPOSTS[body as OutpostBody] ?? null);
 }
 
 /** Pad 0's anchor on a planet (the outpost's frame). */
@@ -95,8 +96,12 @@ export function sitePlacements(terrain: Terrain): readonly TownPlacement[] {
   if (terrain.body.id === TOWN_BODY) {
     list = TOWN_LAYOUT.map((it, i) => placeTownItem(it, i, terrain));
   } else {
-    const site = outpostSite(terrain.body.id)!;
+    const site = outpostSite(terrain.body.id);
     const out: TownPlacement[] = [];
+    if (!site) {
+      placementCache.set(terrain, out);
+      return out;
+    }
     const a0 = outpostAnchor(terrain);
     site.layout.forEach((it, i) => out.push(placeSiteItem(a0, it[1], it[2], it[3], R, R + it[5], emptyPlacement(i, it[0], it[4]))));
     const pads = padDirs(terrain.body);
@@ -127,7 +132,7 @@ function waystonePlacement(terrain: Terrain, k: number, prefab: number): TownPla
 
 /** The prefab table the placements of `body` index. */
 export function sitePrefabs(body: BodyId): readonly TownPrefab[] {
-  return body === TOWN_BODY ? TOWN_PREFABS : outpostSite(body)!.prefabs;
+  return body === TOWN_BODY ? TOWN_PREFABS : (outpostSite(body)?.prefabs ?? []);
 }
 
 /**
@@ -420,11 +425,21 @@ export class StructureCollider {
 
 const colliderCache = new WeakMap<Terrain, StructureCollider>();
 
-/** The structure collider of `terrain`'s sites (Portus' town, a planet's outpost and waystones). Cached per terrain. */
+/**
+ * Every structure solid `terrain`'s collider holds: siteSolids (Portus' town, or a planet's outpost and
+ * waystones), then the wild sites' (planet/wildSites.ts), numbered on.
+ */
+export function allStructureSolids(terrain: Terrain): readonly StructureSolid[] {
+  const own = siteSolids(terrain);
+  const wild = wildSiteSolids(terrain, own.length);
+  return wild.length ? [...own, ...wild] : own;
+}
+
+/** The structure collider of `terrain`'s sites (Portus' town, a planet's outpost, waystones and wild sites). Cached per terrain. */
 export function structureCollider(terrain: Terrain): StructureCollider {
   let c = colliderCache.get(terrain);
   if (!c) {
-    c = new StructureCollider(siteSolids(terrain));
+    c = new StructureCollider(allStructureSolids(terrain));
     colliderCache.set(terrain, c);
   }
   return c;

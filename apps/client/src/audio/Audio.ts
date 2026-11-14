@@ -1,5 +1,6 @@
-// Game audio: one AudioContext, master/music/SFX/voice buses, positional SFX, and a generative
-// ambient soundtrack per body. SFX are ElevenLabs samples from the asset Worker where the set has
+// Game audio: one AudioContext, master/music/SFX/voice/speech buses, positional SFX, and a generative
+// ambient soundtrack per body (music.ts). `speech` carries the characters' recorded lines (speech.ts); `voice`
+// is voice chat. SFX are ElevenLabs samples from the asset Worker where the set has
 // them (samples.ts, never in the repo) and ZzFX presets (MIT, synthesised) for everything else.
 
 import * as THREE from "three/webgpu";
@@ -9,15 +10,18 @@ import type { BodyId } from "@firstlight/shared";
 import { PRESETS, type PresetName } from "./presets.ts";
 import { resolveSound, SampleBank } from "./samples.ts";
 import { attackSound, impactSound, swingSound, type SoundName } from "./sounds.ts";
+import { MusicGen } from "./music.ts";
 
 export interface Volumes {
   master: number;
   music: number;
   sfx: number;
   voice: number;
+  /** Characters' spoken lines (Settings → Audio → Voices). */
+  speech: number;
 }
 
-const DEFAULT_VOLUMES: Volumes = { master: 0.8, music: 0.35, sfx: 0.8, voice: 1 };
+const DEFAULT_VOLUMES: Volumes = { master: 0.8, music: 0.35, sfx: 0.8, voice: 1, speech: 0.9 };
 
 export class GameAudio {
   readonly ctx: AudioContext;
@@ -25,6 +29,10 @@ export class GameAudio {
   readonly music: GainNode;
   readonly sfx: GainNode;
   readonly voice: GainNode;
+  readonly speech: GainNode;
+  /** Music ducks under speech: this gain sits between the music bus and the master. */
+  private readonly musicDuck: GainNode;
+  private duckUntil = 0;
   private readonly buffers = new Map<PresetName, AudioBuffer>();
   private samples: SampleBank<AudioBuffer> | null = null;
   private musicGen: MusicGen | null = null;
@@ -36,7 +44,10 @@ export class GameAudio {
     this.music = this.ctx.createGain();
     this.sfx = this.ctx.createGain();
     this.voice = this.ctx.createGain();
-    this.music.connect(this.master);
+    this.speech = this.ctx.createGain();
+    this.musicDuck = this.ctx.createGain();
+    this.music.connect(this.musicDuck).connect(this.master);
+    this.speech.connect(this.master);
     this.sfx.connect(this.master);
     this.voice.connect(this.master);
     this.master.connect(this.ctx.destination);
@@ -50,6 +61,7 @@ export class GameAudio {
     this.music.gain.value = this.volumes.music;
     this.sfx.gain.value = this.volumes.sfx;
     this.voice.gain.value = this.volumes.voice;
+    this.speech.gain.value = this.volumes.speech;
     localStorage.setItem("fl.volumes", JSON.stringify(this.volumes));
   }
 
@@ -108,21 +120,37 @@ export class GameAudio {
     }
     const g = this.ctx.createGain();
     g.gain.value = gain * r.gain;
-    if (at) {
-      const p = this.ctx.createPanner();
-      p.panningModel = "equalpower";
-      p.distanceModel = "inverse";
-      p.refDistance = 4;
-      p.maxDistance = 160;
-      p.rolloffFactor = 1.2;
-      p.positionX.value = at.x;
-      p.positionY.value = at.y;
-      p.positionZ.value = at.z;
-      src.connect(g).connect(p).connect(this.sfx);
-    } else {
-      src.connect(g).connect(this.sfx);
-    }
+    src.connect(g).connect(this.spatial(at ?? null, this.sfx));
     src.start();
+  }
+
+  /**
+   * The node a source connects to, to be heard from `at` (a panner on the way to `bus`), or `bus`
+   * itself when there is no position. Speech uses a shorter reach than effects.
+   */
+  spatial(at: THREE.Vector3 | null, bus: AudioNode, o: { refDistance?: number; maxDistance?: number; rolloff?: number } = {}): AudioNode {
+    if (!at) return bus;
+    const p = this.ctx.createPanner();
+    p.panningModel = "equalpower";
+    p.distanceModel = "inverse";
+    p.refDistance = o.refDistance ?? 4;
+    p.maxDistance = o.maxDistance ?? 160;
+    p.rolloffFactor = o.rolloff ?? 1.2;
+    p.positionX.value = at.x;
+    p.positionY.value = at.y;
+    p.positionZ.value = at.z;
+    p.connect(bus);
+    return p;
+  }
+
+  /** Lower the music by about 6 dB for `seconds` (a character is speaking), then bring it back. */
+  duckMusic(seconds: number) {
+    const t = this.ctx.currentTime;
+    this.duckUntil = Math.max(this.duckUntil, t + seconds);
+    const g = this.musicDuck.gain;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(0.5, t, 0.08);
+    g.setTargetAtTime(1, this.duckUntil + 0.2, 0.5);
   }
 
   /** A weapon's fire, cast or throw sound (melee weapons: their swing), by weapon index. */
@@ -163,7 +191,22 @@ export class GameAudio {
   setMusic(body: BodyId | null) {
     this.musicGen?.stop();
     this.musicGen = body ? new MusicGen(this.ctx, this.music, body) : null;
+    this.musicGen?.setNight(this.night);
     this.musicGen?.start();
+  }
+
+  /** You hit something or something hit you: the music's combat layer comes in (and leaves a few seconds after the last call). */
+  fight() {
+    if (this.ctx.state === "running") this.musicGen?.setCombat(true);
+  }
+
+  private night = 0;
+
+  /** The sky's night factor (0 day … 1 night): the music turns to its night variant. Cheap to call every frame. */
+  setNight(n: number) {
+    if (Math.abs(n - this.night) < 0.02) return;
+    this.night = n;
+    this.musicGen?.setNight(n);
   }
 
   private ambience: WeatherAmbience | null = null;
@@ -272,149 +315,5 @@ class WeatherAmbience {
     src.connect(lp).connect(g).connect(this.dest);
     src.start(t, Math.random() * 0.5);
     src.stop(t + 3.8);
-  }
-}
-
-// ---------------------------------------------------------------- generative ambient soundtrack
-
-interface Mood {
-  bpm: number;
-  root: number; // MIDI note
-  scale: number[]; // semitone offsets
-  chords: number[][]; // degrees (indexes into scale) per chord
-  padCutoff: number;
-  arpWave: OscillatorType;
-  arpDensity: number; // 0..1 chance per 8th note
-  kick: boolean;
-}
-
-const MOODS: Record<BodyId, Mood> = {
-  portus: { bpm: 84, root: 57, scale: [0, 2, 4, 7, 9, 12, 14, 16], chords: [[0, 2, 4], [3, 5, 7], [1, 3, 5], [0, 3, 4]], padCutoff: 1400, arpWave: "triangle", arpDensity: 0.55, kick: false },
-  arcadia: { bpm: 96, root: 62, scale: [0, 2, 4, 7, 9, 12, 14, 16, 19], chords: [[0, 2, 4], [4, 6, 8], [3, 5, 7], [1, 3, 5]], padCutoff: 1800, arpWave: "square", arpDensity: 0.7, kick: false },
-  hollowmere: { bpm: 64, root: 50, scale: [0, 2, 3, 7, 8, 12, 14, 15], chords: [[0, 2, 3], [4, 5, 7], [2, 4, 5], [0, 3, 4]], padCutoff: 700, arpWave: "sine", arpDensity: 0.3, kick: false },
-  meridian: { bpm: 108, root: 52, scale: [0, 3, 5, 7, 10, 12, 15, 17], chords: [[0, 2, 3], [1, 3, 4], [2, 4, 5], [0, 3, 5]], padCutoff: 1100, arpWave: "sawtooth", arpDensity: 0.6, kick: true },
-};
-
-const midiHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
-
-class MusicGen {
-  private timer = 0;
-  private nextTime = 0;
-  private step = 0;
-  private readonly mood: Mood;
-  private readonly out: GainNode;
-
-  constructor(private readonly ctx: AudioContext, dest: AudioNode, body: BodyId) {
-    this.mood = MOODS[body];
-    this.out = ctx.createGain();
-    this.out.gain.value = 0;
-    this.out.connect(dest);
-  }
-
-  start() {
-    this.nextTime = this.ctx.currentTime + 0.1;
-    this.out.gain.setTargetAtTime(0.9, this.ctx.currentTime, 2);
-    this.timer = window.setInterval(() => this.schedule(), 50);
-  }
-
-  stop() {
-    clearInterval(this.timer);
-    const t = this.ctx.currentTime;
-    this.out.gain.setTargetAtTime(0, t, 0.6);
-    setTimeout(() => this.out.disconnect(), 3000);
-  }
-
-  private schedule() {
-    const eighth = 60 / this.mood.bpm / 2;
-    while (this.nextTime < this.ctx.currentTime + 0.25) {
-      this.playStep(this.step, this.nextTime, eighth);
-      this.step++;
-      this.nextTime += eighth;
-    }
-  }
-
-  private note(deg: number, octave = 0): number {
-    const s = this.mood.scale;
-    const n = s[((deg % s.length) + s.length) % s.length]! + 12 * (Math.floor(deg / s.length) + octave);
-    return this.mood.root + n;
-  }
-
-  private playStep(step: number, t: number, eighth: number) {
-    const m = this.mood;
-    const bar = Math.floor(step / 8);
-    const chord = m.chords[Math.floor(bar / 2) % m.chords.length]!;
-    if (step % 16 === 0) for (const d of chord) this.pad(midiHz(this.note(d, -1)), t, eighth * 16);
-    if (step % 8 === 0) this.bass(midiHz(this.note(chord[0]!, -2)), t, eighth * 6);
-    if (m.kick && step % 4 === 0) this.kick(t);
-    if (Math.random() < m.arpDensity) {
-      const d = chord[step % chord.length]! + (step % 6 === 5 ? 2 : 0);
-      this.pluck(midiHz(this.note(d, step % 16 < 8 ? 1 : 0)), t, eighth * 0.9);
-    }
-  }
-
-  private pad(freq: number, t: number, dur: number) {
-    const c = this.ctx;
-    const g = c.createGain();
-    const f = c.createBiquadFilter();
-    f.type = "lowpass";
-    f.frequency.value = this.mood.padCutoff;
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.045, t + dur * 0.3);
-    g.gain.linearRampToValueAtTime(0, t + dur);
-    for (const det of [-7, 7]) {
-      const o = c.createOscillator();
-      o.type = "sawtooth";
-      o.frequency.value = freq;
-      o.detune.value = det;
-      o.connect(f);
-      o.start(t);
-      o.stop(t + dur + 0.05);
-    }
-    f.connect(g).connect(this.out);
-  }
-
-  private bass(freq: number, t: number, dur: number) {
-    const c = this.ctx;
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.type = "sine";
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g).connect(this.out);
-    o.start(t);
-    o.stop(t + dur + 0.05);
-  }
-
-  private pluck(freq: number, t: number, dur: number) {
-    const c = this.ctx;
-    const o = c.createOscillator();
-    const g = c.createGain();
-    const f = c.createBiquadFilter();
-    o.type = this.mood.arpWave;
-    o.frequency.value = freq;
-    f.type = "lowpass";
-    f.frequency.setValueAtTime(3000, t);
-    f.frequency.exponentialRampToValueAtTime(400, t + dur);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.03, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(f).connect(g).connect(this.out);
-    o.start(t);
-    o.stop(t + dur + 0.05);
-  }
-
-  private kick(t: number) {
-    const c = this.ctx;
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.frequency.setValueAtTime(120, t);
-    o.frequency.exponentialRampToValueAtTime(40, t + 0.15);
-    g.gain.setValueAtTime(0.12, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
-    o.connect(g).connect(this.out);
-    o.start(t);
-    o.stop(t + 0.3);
   }
 }

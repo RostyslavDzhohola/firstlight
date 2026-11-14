@@ -11,6 +11,9 @@ import { MISSION_BY_ID, type MissionDef } from "@firstlight/shared/content/missi
 import { SPELLS, type SpellDef } from "@firstlight/shared/content/spells";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { SoundName } from "../audio/sounds.ts";
+import { spellGains } from "../game/spellInfo.ts";
+import { playerMaxHp } from "@firstlight/shared/content/tree";
+import { HOTKEYS } from "../game/keys.ts";
 
 export type MomentKind = "level" | "spell" | "mission" | "trial" | "gleam" | "vault" | "medal";
 
@@ -55,12 +58,18 @@ export function nextSpell(level: number): SpellDef | null {
  * A level-up from `prev` to `level`: one banner for the level, and one for each spell it unlocks
  * (with its key). The level banner says what comes next when nothing unlocked.
  */
-export function levelMoments(prev: number, level: number): Moment[] {
+export function levelMoments(prev: number, level: number, starter = 0, tree?: readonly string[]): Moment[] {
   if (level <= prev) return [];
   const next = nextSpell(level);
+  // #79: the banner says what the level changed in the spells you know ("Frostbloom 26 → 27").
+  const gains = spellGains(prev, level, starter, tree);
+  const hp = (l: number) => playerMaxHp({ starter, level: l, tree });
+  // #81: each level is a build point; the banner names the key (the toast and the pause menu say the rest), never a card to click.
+  const points = level - prev;
+  const build = `+${points} build point${points === 1 ? "" : "s"} (${HOTKEYS.build.caps.join(" ")})`; // the toast names the menu too
   const out: Moment[] = [{
     kind: "level", kicker: "Level up", title: `Level ${level}`, sprite: "star", ms: HOLD_MS, merge: "level",
-    reward: next ? `More health and damage · ${next.name} at level ${next.level}` : "More health and damage",
+    reward: [`+${hp(level) - hp(prev)} max HP, +${(level - prev) * 3}% damage`, build, gains, next ? `${next.name} at level ${next.level}` : ""].filter(Boolean).join(" · "),
   }];
   for (const s of spellUnlocks(prev, level)) {
     out.push({ kind: "spell", kicker: "New spell", title: s.name, reward: s.blurb, sprite: `spell-${s.id}`, key: s.keycap, ms: HOLD_LONG_MS });

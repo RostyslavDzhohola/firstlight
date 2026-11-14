@@ -1,18 +1,17 @@
-// Sky life (D-gfx-hub-4): the sky's other worlds have traffic. Thin light trails arc between the sky
-// planets and down towards our horizon, each carrying a few "ships" (a bright head and a fading
-// tail); now and then a shooting star crosses the night; on High and up a soft aurora hangs low in
-// the night sky. Two draws in all (trails + shooting stars in one mesh, the aurora in another),
-// additive, no textures, nothing in the atmosphere code.
+// Sky life (D-gfx-hub-4): now and then a shooting star crosses the night; on High and up a soft
+// aurora hangs low in the night sky. Two draws in all (the shooting stars in one mesh, the aurora in
+// another), additive, no textures, nothing in the atmosphere code. The traffic trails that arced
+// between the sky planets are gone (#75, D-play-4): in play they read as stray lines across the sky.
 //
 // Everything is built once per body in the local sky frame (x east, y up, z north on a unit sphere:
 // sunFrame.ts), where the sky planets stand still; a frame writes one matrix per mesh (that frame at
 // the camera, out at the sky planets' distance). The motion is the shader's, on the shared clock.
 
 import * as THREE from "three/webgpu";
-import { abs, attribute, exp, float, fract, max, mix, normalize, positionLocal, sin, smoothstep, step, time, uniform, uv } from "three/tsl";
+import { attribute, exp, float, fract, max, mix, normalize, positionLocal, sin, smoothstep, step, time, uniform, uv } from "three/tsl";
 import type { BodyId } from "@firstlight/shared";
 import { atmo } from "./atmosphere.ts";
-import { SKY_PLANET_PALETTES, type SkyPlanetSpec } from "./looks.ts";
+import type { SkyPlanetSpec } from "./looks.ts";
 import type { ResolvedSettings } from "./quality.ts";
 import { localFrame, type V3 } from "./sunFrame.ts";
 
@@ -20,9 +19,8 @@ import { localFrame, type V3 } from "./sunFrame.ts";
 const DIST = 3900;
 /** A trail's half-width on the unit sphere (radians): about a pixel and a half at 720p. */
 export const TRAIL_HALF = 0.0019;
-const SEGMENTS = 40;
 export const SHOOTING_STARS = 7;
-const KIND = { lane: 0, star: 1 } as const;
+const KIND = { star: 1 } as const;
 
 /** Unit direction for (elevation, azimuth) degrees in the local sky frame (x east, y up, z north). */
 export function frameDir(elevDeg: number, azDeg: number): V3 {
@@ -62,35 +60,8 @@ function lcg(seed: number) {
   return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
 }
 
-/**
- * The traffic lanes of a sky: one between each pair of sky planets, and one from each planet down
- * to our horizon (the ships coming here). Pure; the same for every player on the body.
- */
-export function skyLanes(specs: readonly SkyPlanetSpec[]): SkyLane[] {
-  const lanes: SkyLane[] = [];
-  const dirs = specs.map((s) => frameDir(s.elevDeg, s.azDeg));
-  const mixHex = (a: number, b: number) => new THREE.Color(a).lerp(new THREE.Color(b), 0.5).getHex();
-  for (let i = 0; i < specs.length; i++) {
-    for (let j = i + 1; j < specs.length; j++) {
-      const w = Math.acos(Math.min(1, Math.max(-1, dot(dirs[i]!, dirs[j]!))));
-      const rad = (d: number) => (d * Math.PI) / 180;
-      lanes.push({
-        from: dirs[i]!, to: dirs[j]!, lift: 0.22, seed: (i * 3 + j) * 0.37 + 0.11,
-        color: mixHex(SKY_PLANET_PALETTES[specs[i]!.body].atmosphere, SKY_PLANET_PALETTES[specs[j]!.body].atmosphere),
-        trim: [Math.min(0.4, rad(specs[i]!.sizeDeg * 1.3) / w), Math.min(0.4, rad(specs[j]!.sizeDeg * 1.3) / w)],
-      });
-    }
-    // Down to our world: the horizon a little way round from under the planet.
-    const s = specs[i]!;
-    const to = frameDir(-1.5, s.azDeg + (i % 2 ? -38 : 38));
-    const w = Math.acos(Math.min(1, Math.max(-1, dot(dirs[i]!, to))));
-    lanes.push({ from: dirs[i]!, to, lift: 0.1, seed: i * 0.53 + 0.71, color: SKY_PLANET_PALETTES[s.body].atmosphere, trim: [Math.min(0.4, ((s.sizeDeg * 1.3 * Math.PI) / 180) / w), 0] });
-  }
-  return lanes;
-}
-
-/** Ribbons for the lanes and the shooting stars, in the local sky frame on the unit sphere. */
-export function skyTrafficGeometry(specs: readonly SkyPlanetSpec[], seed = 1): THREE.BufferGeometry {
+/** Ribbons for the shooting stars, in the local sky frame on the unit sphere (`specs`: kept for the per-body rebuild). */
+export function skyTrafficGeometry(_specs: readonly SkyPlanetSpec[], seed = 1): THREE.BufferGeometry {
   const pos: number[] = [], uvs: number[] = [], lane: number[] = [], col: number[] = [], idx: number[] = [];
   const ribbon = (pt: (s: number) => V3, s0: number, s1: number, half: number, kind: number, sd: number, extra: number, color: THREE.Color, segs: number) => {
     const base = pos.length / 3;
@@ -111,12 +82,6 @@ export function skyTrafficGeometry(specs: readonly SkyPlanetSpec[], seed = 1): T
       idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
     }
   };
-  for (const l of skyLanes(specs)) {
-    const w = Math.acos(Math.min(1, Math.max(-1, dot(l.from, l.to))));
-    // extra: how many ships the lane carries (longer lanes, more), signed by their direction.
-    const ships = Math.max(2, Math.round(w * 2.2)) * (l.seed * 10 % 2 < 1 ? 1 : -1);
-    ribbon((s) => lanePoint(l, s), l.trim[0], 1 - l.trim[1], TRAIL_HALF, KIND.lane, l.seed, ships, new THREE.Color(l.color), SEGMENTS);
-  }
   const rnd = lcg(0x9e3779b9 ^ seed);
   for (let i = 0; i < SHOOTING_STARS; i++) {
     const from = frameDir(28 + rnd() * 45, rnd() * 360);
@@ -168,6 +133,7 @@ export const AURORA_COLORS: Record<BodyId, [number, number]> = {
   arcadia: [0x5dffb0, 0x6fa8ff],
   hollowmere: [0x9a6bff, 0xff7edb],
   meridian: [0xffb060, 0xff6a8a],
+  lumen: [0x9fd8ff, 0xd0b8ff],
 };
 
 export class SkyLife {
@@ -192,22 +158,12 @@ export class SkyLife {
       const a = attribute("aLane", "vec4");
       const u = uv().x;
       const across = float(1).sub(uv().y.mul(uv().y));
-      const isStar = a.x.greaterThan(0.5);
-      // Lanes: a faint thread, and ships along it (a sawtooth: the head at 1, the tail behind).
-      const ships = abs(a.z);
-      const dir = a.z.sign();
-      const x = fract(u.mul(ships).sub(time.mul(0.045).mul(dir)).add(a.y.mul(7)));
-      const saw = mix(x, float(1).sub(x), step(dir, 0)); // the tail trails behind whichever way it flies
-      const ship = saw.pow(9).add(smoothstep(0.975, 1.0, saw).mul(1.6));
-      const ends = smoothstep(0.0, 0.05, u).mul(smoothstep(1.0, 0.95, u));
-      const laneLight = ship.mul(1.15).add(0.06).mul(ends).mul(mix(float(0.55), float(1.5), dark));
       // Shooting stars: each on its own period; lit only while its head crosses the ribbon.
       const phase = fract(time.div(a.z.max(1)).add(a.y));
       const run = phase.div(0.012); // 0 … 1 over about a second of an 80 s period
       const head = smoothstep(run.sub(0.7), run, u).mul(step(u, run)).mul(step(run, 1.3));
       const starLight = head.mul(3.2).mul(atmo.stars);
-      const light = mix(laneLight, starLight, isStar.toFloat());
-      mat.colorNode = attribute("color", "vec3").mul(light.mul(across).mul(through));
+      mat.colorNode = attribute("color", "vec3").mul(starLight.mul(across).mul(through));
     }
     this.traffic = new THREE.Mesh(skyTrafficGeometry(specs), mat);
     this.traffic.name = "skyTraffic";

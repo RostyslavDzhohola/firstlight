@@ -536,14 +536,16 @@ describe("third-person camera and structures (D42)", () => {
     run(pc, fakeInput(["KeyW"]), 3);
     cf.copy(toward(26.2, -30));
     const cam = new THREE.PerspectiveCamera();
-    for (let i = 0; i < 10; i++) pc.placeCamera(cam);
+    for (let i = 0; i < 30; i++) pc.placeCamera(cam);
     const head = pc.pos.clone().addScaledVector(pc.pos.clone().normalize(), 1.65);
-    const v = cam.position.clone().sub(head);
-    const l = v.length();
-    const wall = town.raycast(head.x, head.y, head.z, v.x / l, v.y / l, v.z / l, 5);
+    const back = toward(26.2, 30);
+    const wall = town.raycast(head.x, head.y, head.z, back.x, back.y, back.z, 5);
     expect(wall, "the wall is close behind the head").toBeLessThan(1.2);
-    // The lens sits short of the wall along its line from the head, with room to spare.
-    expect(wall - l).toBeGreaterThan(0.15);
+    // Squeezed that close, the camera frames from the eyes instead (CLOSE_IN, #34): at the head, looking
+    // away from the wall, the lens out of it.
+    expect(pc.closeBlend).toBe(1);
+    expect(cam.position.distanceTo(head)).toBeLessThan(0.5);
+    expect(cam.getWorldDirection(new THREE.Vector3()).dot(back)).toBeLessThan(-0.5);
     expect(town.footing(cam.position.x, cam.position.y, cam.position.z, 0, { radius: 0.01, height: 0.01, step: 0 }).inside).toBe(false);
   });
 });
@@ -861,5 +863,53 @@ describe("the camera and the controller ease by time, not by frames (review B2)"
     const slow = at(4), fast = at(60);
     expect(slow.speed).toBeCloseTo(fast.speed, 1);
     expect(slow.facingDot).toBeCloseTo(fast.facingDot, 1);
+  });
+});
+
+describe("a Skipstep in the middle of a jump (#78)", () => {
+  /** Jump while running; `blinkAt` seconds in, the server's correct puts us 10 m ahead (it stops the body). */
+  function hop(blinkAt: number | null) {
+    const pc = spawn();
+    const input = fakeInput(["KeyW"]);
+    run(pc, input, 0.3);
+    input.pressed.add("Space");
+    pc.update(1 / 60, input, false);
+    input.pressed.clear();
+    let air = 1 / 60;
+    let peak = pc.pos.length();
+    let blinked = blinkAt === null;
+    for (let i = 0; i < 180 && !pc.onGround; i++) {
+      if (!blinked && air >= blinkAt!) {
+        blinked = true;
+        const before = pc.vel.clone(); // SpellClient keeps the velocity from the frame before the blink
+        const to = pc.pos.clone().add(new THREE.Vector3(0, 0, 10)).setLength(pc.pos.length());
+        pc.correct(to.x, to.y, to.z);
+        expect(pc.vel.length()).toBe(0);
+        pc.resumeAfterBlink(before);
+      }
+      pc.update(1 / 60, input, false);
+      air += 1 / 60;
+      peak = Math.max(peak, pc.pos.length());
+    }
+    return { pc, air, peak: peak - R };
+  }
+
+  it("a jump still rising keeps rising: it lasts and peaks like one without the blink", () => {
+    const plain = hop(null);
+    const blink = hop(0.026); // measured in the browser: the correct came 26 ms into the jump
+    expect(plain.air).toBeGreaterThan(0.5);
+    expect(blink.air).toBeGreaterThan(plain.air - 0.05);
+    expect(blink.peak).toBeGreaterThan(plain.peak * 0.9);
+    // ...and the run goes on along the ground (the forward speed from before the blink).
+    expect(blink.pc.vel.z).toBeGreaterThan(3);
+  });
+
+  it("on the way down the blink keeps the run but not the fall's speed", () => {
+    const pc = spawn();
+    pc.vel.set(0, -6, 5); // falling and running forward
+    pc.resumeAfterBlink(pc.vel.clone());
+    expect(pc.vel.y).toBeCloseTo(0, 9);
+    expect(pc.vel.z).toBeCloseTo(5, 9);
+    expect(pc.onGround).toBe(true);
   });
 });

@@ -21,6 +21,9 @@ const WEAPON_COLORS: Record<string, number> = {
   axe: 0xff8866,
   hammer: 0xffdd88,
   kunai: 0xffb27a,
+  boarspear: 0xdfe8f0,
+  crossbow: 0xfff2c4,
+  lantern: 0xffd27a,
   ember_seal: 0xff6a1f,
   fists: 0xffffff,
 };
@@ -188,7 +191,7 @@ export class Effects {
   spawnProjectile(id: number, weaponIndex: number, pos: THREE.Vector3, vel: THREE.Vector3, g: number) {
     const color = weaponColor(weaponIndex);
     const id_ = WEAPONS[weaponIndex]?.id;
-    const mesh = new THREE.Mesh(id_ === "longbow" || id_ === "kunai" ? arrowGeo : boltGeo, glow(color));
+    const mesh = new THREE.Mesh(id_ === "longbow" || id_ === "kunai" || id_ === "crossbow" ? arrowGeo : boltGeo, glow(color));
     if (id_ === "comet" || id_ === "emberglass") mesh.scale.setScalar(1.6);
     if (id_ === "kunai") mesh.scale.set(1.4, 1.4, 0.32); // a short, bright dart
     if (id_ === "ember_seal") mesh.scale.setScalar(2.3);

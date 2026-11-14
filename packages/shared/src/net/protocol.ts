@@ -6,6 +6,7 @@ import type { BodyId } from "../planet/bodies.ts";
 import type { CosmeticSlot } from "../content/items.ts";
 import type { HallLine } from "../content/secrets.ts";
 import type { SpellId, SpellsYou } from "../content/spells.ts";
+import type { TreeYou } from "../content/tree.ts";
 
 export const NET = {
   TICK_MS: 50, // 20 Hz simulation and patches
@@ -38,7 +39,14 @@ export const NET = {
 // corrected as Hinoko, Kappa or Brother Ash), the spellbook (`cast`, Skipstep moves the body on the
 // server), trials (`trial` messages, wave creatures), new world objects, the agent flag in the synced
 // player state, and play tokens bound to their session (D-security).
-export const PROTOCOL_VERSION = 6;
+// 7: the 2026-11-13 run, shared by all of its lanes: the wild sites (D-world-1..3: nine sites whose
+// walls and steps the server blocks movement, shots and NPC sight at, which an older client neither
+// has nor draws, and `you.sites`), out-of-combat regeneration decided by the server, the relaxed
+// tutorial's steps, the tracked mission (`track`), the residents' `speak` / `speech` messages, the moon
+// Lumen (D-sky-1..3: a fifth body id in travel, its own gravity the server validates jumps and falls
+// against, three creature kinds, mission L1), three weapon families appended to the catalogue, and the
+// build tree (#81: `tree` messages, movement bonuses the server derives from the saved nodes).
+export const PROTOCOL_VERSION = 7;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
 
@@ -163,7 +171,29 @@ export type ClientMessages = {
    * `supportSync`): each Glasswing Ward that is up comes back as a `spell` event with `late`.
    */
   spellSync: Record<string, never>;
+  /**
+   * An AI agent (a resident) says an authored line (content/residentLines.ts) by id; the server
+   * fills its slots and checks them (no free text: DECISIONS "No text chat"). `to`: the session it
+   * answers. Agents only; at most one line every 2 s.
+   */
+  speak: SpeakMsg;
+  /** The mission the player tracks (#69; null: none chosen). The hunt pointer's `huntTargets` follow it. Session-only, at most 5 quest ops a second. */
+  track: { id: string | null };
+  /**
+   * The build tree (content/tree.ts, #81; at most 5 a second): take a node, or clear the tree for
+   * coins in a safe zone. Refusals answer `denied {action: "tree", reason}`: "unknown", "taken",
+   * "locked" (the node above isn't taken), "points", "dead", "nothing", "safe zone", "coins", "try again" (the save failed; nothing changed).
+   */
+  tree: { action: "spend"; node: string } | { action: "respec" };
 };
+
+export interface SpeakMsg {
+  line: string;
+  to?: string;
+  place?: string;
+  dist?: number;
+  dir?: string;
+}
 
 /**
  * Cast a spell. The server checks the level gate, aether, cooldown and the attack rules (not dead,
@@ -274,6 +304,8 @@ export type ServerMessages = {
   missionDone: { id: string; xp: number; coins: number };
   /** The tracked hunt mission's NPCs within reach whose kill would count (missions.ts huntCredit): what the mission pointer follows. Sent when the list changes. */
   huntTargets: { id: string; npcs: string[] };
+  /** A `track` was accepted: the hunt targets follow `id` from now on (a throttled one is `denied {action: "track"}`). */
+  tracked: { id: string | null };
   /** Result of buy/sell/wear (a toast carries the human text). */
   shop: { ok: boolean; action: "buy" | "sell" | "wear"; reason?: string };
   /** A personal puzzle light changed state, for its solver only. */
@@ -297,6 +329,8 @@ export type ServerMessages = {
    * (`mission`: T1–T3) or opened the Gleam Vault. Display name only. Older clients ignore it.
    */
   news: { kind: "gleam" | "vault"; name: string; mission?: string };
+  /** A resident said a line (`speak`), rendered by the server, to everyone within 30 m. `to`: the session it answers. Older clients ignore it. */
+  speech: { by: string; text: string; to?: string; line: string };
 };
 
 /**
@@ -350,6 +384,10 @@ export interface YouState {
   adminMode?: AdminModeState;
   /** The spellbook: aether, cooldowns and an active ward (content/spells.ts; set by the spell system). */
   spells?: SpellsYou;
+  /** Wild sites this life has found (content/wildSites.ts ids, every body): the map and journal show them. */
+  sites?: string[];
+  /** The build tree (content/tree.ts, #81): nodes taken, points left, what a respec costs. Set by the tree system. */
+  tree?: TreeYou;
 }
 
 export interface InvItem {

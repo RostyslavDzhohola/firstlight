@@ -163,7 +163,7 @@ function expiryOf(token: string): number {
  * A guest account through Better Auth at `authUrl` (the site origin in production, the game server
  * itself locally). `sessionFile` keeps the session cookie between runs (it is the character: keep it private).
  */
-export function guestSession(authUrl: string, sessionFile?: string, origin?: string, onNewGuest?: (why: string) => void): TokenSource {
+export function guestSession(authUrl: string, sessionFile?: string, origin?: string, onNewGuest?: (why: string) => void, extra?: Record<string, string>): TokenSource {
   const base = authUrl.replace(/\/+$/, "");
   let cookie = readSession(sessionFile, base);
   const hadSaved = !!cookie;
@@ -171,7 +171,7 @@ export function guestSession(authUrl: string, sessionFile?: string, origin?: str
   // Better Auth checks the Origin of requests that carry its cookie against the server's trusted
   // origins (the site's own origin): `origin` names it when `authUrl` isn't it (a dev server reached
   // directly, whose trusted origin is the Vite one).
-  const headers = (): Record<string, string> => ({ Origin: (origin ?? base).replace(/\/+$/, ""), ...(cookie ? { Cookie: cookie } : {}) });
+  const headers = (): Record<string, string> => ({ ...extra, Origin: (origin ?? base).replace(/\/+$/, ""), ...(cookie ? { Cookie: cookie } : {}) });
 
   async function signIn(): Promise<void> {
     const res = await fetch(`${base}/api/auth/sign-in/anonymous`, { method: "POST", headers: { ...headers(), "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(20_000) });
@@ -218,11 +218,11 @@ export function guestSession(authUrl: string, sessionFile?: string, origin?: str
 }
 
 /** Ask for a display name (3-16 letters, digits or _; unique). Returns the name in use, or why not. */
-export async function claimName(url: string, token: string, name: string): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
+export async function claimName(url: string, token: string, name: string, extra?: Record<string, string>): Promise<{ ok: true; name: string } | { ok: false; message: string }> {
   try {
     const res = await fetch(`${url.replace(/\/+$/, "")}/api/account/name`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: { ...extra, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
       signal: AbortSignal.timeout(20_000),
     });

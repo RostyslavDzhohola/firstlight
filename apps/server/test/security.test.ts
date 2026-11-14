@@ -1,6 +1,7 @@
 // Security pass fixes (docs/reviews/2026-11-12-security-pass-gpt-6.1-sol.md, D-security-1…8): each
 // block drives the real server in-process and fails on the code before its fix.
 
+import { networkInterfaces } from "node:os";
 import type { Room } from "@colyseus/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
@@ -252,11 +253,39 @@ describe("finding 4: one trusted-proxy rule for client addresses", () => {
     expect(await send(game.port, "dev:v6x:v6x", { "x-real-ip": "2001:db8:5:6:aaaa::3" })).toBe(429);
   });
 
-  it("keeps loopback free of per-address limits in development (local runs and the tests)", async () => {
+  it("keeps loopback free of per-address limits only for an in-process test server that asks for it", async () => {
     PLAY_LIMITS.ipCalls = 2;
-    game = await startServer();
+    game = await startServer(); // the tests' helper opts in (loopbackExempt)
     for (const id of ["dv1", "dv2", "dv3"]) expect(await send(game.port, `dev:${id}:${id}`, {})).toBe(200);
   });
+
+  // Review round two, blocker 1: a reverse proxy on this machine that adds no forwarding header makes
+  // every remote caller look like loopback. A server started like main.ts (development included)
+  // therefore has no loopback exemption at all: the address budget counts the proxy like anyone.
+  it("gives a headerless same-machine proxy no exemption on a server started like main.ts", async () => {
+    PLAY_LIMITS.ipCalls = 2;
+    PLAY_GATE.ipCalls = 3;
+    game = await startServer({}, { loopbackExempt: false });
+    const proxied = { host: "localhost:2567" };
+    expect(await send(game.port, "dev:px1:px1", proxied)).toBe(200);
+    expect(await send(game.port, "dev:px2:px2", proxied)).toBe(200);
+    expect(await send(game.port, "dev:px3:px3", proxied)).toBe(429);
+    // The pre-verification gate counts it as well.
+    expect(await send(game.port, "bad", proxied)).toBe(429);
+  });
+
+  // Review 2026-11-13 #1 sweep: "not production" is not "this machine". Only the socket's own address
+  // earns the loopback exemption; a header saying 127.0.0.1 from another address does not.
+  const lan = Object.values(networkInterfaces()).flat().find((a) => a && !a.internal && a.family === "IPv4")?.address;
+  it.skipIf(!lan)("does not let a remote caller claim loopback with X-Real-IP in development", async () => {
+    PLAY_LIMITS.ipCalls = 2;
+    game = await startServer();
+    const sendFrom = (id: string) =>
+      fetch(`http://${lan}:${game!.port}/api/play`, { method: "POST", headers: { Authorization: `Bearer dev:${id}:${id}`, "Content-Type": "application/json", "x-real-ip": "127.0.0.1" }, body: JSON.stringify(good) }).then((r) => r.status);
+    expect(await sendFrom("rx1")).toBe(200);
+    expect(await sendFrom("rx2")).toBe(200);
+    expect(await sendFrom("rx3")).toBe(429);
+  }, 90_000);
 });
 
 /** Try to use a reservation; resolves to the room, or null when the server refuses the seat. */

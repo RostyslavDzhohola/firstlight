@@ -4,6 +4,7 @@
 
 import { SHOP_SPOTS } from "@firstlight/shared/content/shops";
 import { BODIES, padDirs, portalSpots, type BodyId, type Terrain } from "@firstlight/shared";
+import { wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { GUIDES, MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import { anchorDir } from "@firstlight/shared/planet/pads";
 import { BOSS_LAIRS, padName, place, placeDir, placesOn } from "@firstlight/shared/content/places";
@@ -28,7 +29,6 @@ export interface MapMarker {
   area?: number;
 }
 
-const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
 
 /** Portus landmarks in the town frame (east, north metres), from the town layout. */
 const PORTUS_SPOTS: readonly [string, number, number][] = [
@@ -79,13 +79,13 @@ export function staticMarkers(body: BodyId, terrain: Terrain): MapMarker[] {
     for (const [name, e, n] of PORTUS_SPOTS) out.push({ id: `town:${name}`, kind: "town", dir: townDir(e, n, def.radius), label: name, priority: 1 });
   }
   for (const s of portalSpots(def, terrain)) {
-    out.push({ id: `portal:${s.to}`, kind: "portal", dir: s.dir, label: body === "portus" ? `${cap(s.to)} portal` : "Portal to Portus", priority: 3, to: s.to });
+    out.push({ id: `portal:${s.to}`, kind: "portal", dir: s.dir, label: body === "portus" ? `${BODIES[s.to].name} portal` : `Portal to ${BODIES[s.to].name}`, priority: 3, to: s.to });
   }
   return out;
 }
 
 /** Where each active mission on this body points (the mission tracker's targets). */
-export function missionTargets(body: BodyId, missions: readonly { id: string; done?: boolean; counts?: readonly number[] }[]): { id: string; dir: V3; label: string }[] {
+export function missionTargets(body: BodyId, missions: readonly { id: string; done?: boolean; counts?: readonly number[] }[], terrain?: Terrain): { id: string; dir: V3; label: string }[] {
   const out: { id: string; dir: V3; label: string }[] = [];
   for (const m of missions) {
     if (m.done) continue;
@@ -104,7 +104,9 @@ export function missionTargets(body: BodyId, missions: readonly { id: string; do
       continue;
     }
     const obj = md.find ? WORLD_OBJECT_BY_ID.get(md.find.object) : undefined;
-    const dir = md.reach ? placeDir(md.reach.place) : obj ? objectDir(obj) : md.hunt?.place ? placeDir(md.hunt.place) : null;
+    // A hunt that leads to a wild site (L1: the Quietfall Wreck) is marked there (needs the terrain).
+    const site = md.hunt?.site && terrain ? wildSitePlacements(terrain).find((w) => w.site.id === md.hunt!.site) : undefined;
+    const dir = md.reach ? placeDir(md.reach.place) : obj ? objectDir(obj) : md.hunt?.place ? placeDir(md.hunt.place) : site ? site.dir : null;
     if (dir) out.push({ id: md.id, dir, label: md.name });
   }
   return out;

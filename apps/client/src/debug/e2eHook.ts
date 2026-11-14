@@ -3,7 +3,7 @@
 // `window.__fl` doesn't exist. It reads game state for the journeys; it changes nothing in the game.
 //
 // window.__fl
-//   snapshot()            plain JSON: stage, body, player (position, heading, animation), zone (server flag,
+//   snapshot()            plain JSON: stage, body, player (position, heading, animation, first/third view), zone (server flag,
 //                         HUD label, local ring test), nearby NPCs (kind, hostile, distance, on screen, aim),
 //                         weapon and hotbar, the last server `denied`, pointer lock, onboarding step, open
 //                         menus/panels/overlays, portals, training dummies, the guide's missions and where
@@ -117,6 +117,10 @@ interface GameLike {
     swimming: boolean;
     frozen: boolean;
     mounted: boolean;
+    /** First / third person (game/view.ts): the choice, what the camera does now, and how far in it is. */
+    view?: string;
+    viewNow?: string;
+    viewBlend?: number;
     getStructures?(): RayCollider | null;
     getColliders?(): RayCollider | null;
     getNature?(): RayCollider | null;
@@ -199,6 +203,8 @@ interface SharedMods {
   }[];
   /** Sela Marchbank's trials (the Three Gleams; Portus). Same shape as missionsOn. */
   missionsFrom(giver: string): ReturnType<SharedMods["missionsOn"]>;
+  /** Every mission, whoever gives it (L1 is Lark's but its objective is on Lumen). */
+  MISSIONS: ReturnType<SharedMods["missionsOn"]>;
   placeDir(id: string): readonly [number, number, number];
   /** The latest race / defend / collect attempt (game/trialState.ts) and its HUD line. */
   trialSeen(): { msg: Record<string, unknown> & { id: string; state: string; progress: number; goal: number; next: string | null }; at: number } | null;
@@ -258,7 +264,7 @@ export function installE2eHook(win: Window & typeof globalThis): void {
     sharedLoading = true;
     void Promise.all([import("@firstlight/shared"), import("@firstlight/shared/content/npcs"), import("@firstlight/shared/net/schema"), import("@firstlight/shared/content/weapons"), import("@firstlight/shared/content/missions"), import("@firstlight/shared/content/places"), import("../game/trialState.ts")])
       .then(([s, n, sc, w, m, pl, ts]) => {
-        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID, missionsOn: m.missionsOn, missionsFrom: m.missionsFrom, placeDir: pl.placeDir, trialSeen: ts.trialSeen, trialHud: ts.trialHud, clockLeft: ts.clockLeft, trialNow: ts.trialNow } as unknown as SharedMods;
+        shared = { BODIES: s.BODIES, padDirs: s.padDirs, isSafe: s.isSafe, PAD_SAFE_RADIUS: s.PAD_SAFE_RADIUS, zoneAt: s.zoneAt, nearestSafeEntry: s.nearestSafeEntry, TOWN_GATES: s.TOWN_GATES, safeGates: s.safeGates, portalSpots: s.portalSpots, NPC_DEFS: n.NPC_DEFS, NF: n.NF, PF: sc.PF, WEAPONS: w.WEAPONS, WEAPON_BY_ID: w.WEAPON_BY_ID, missionsOn: m.missionsOn, missionsFrom: m.missionsFrom, MISSIONS: m.MISSIONS, placeDir: pl.placeDir, trialSeen: ts.trialSeen, trialHud: ts.trialHud, clockLeft: ts.clockLeft, trialNow: ts.trialNow } as unknown as SharedMods;
       })
       .catch((e: unknown) => console.warn("[e2e] shared modules", e))
       .finally(() => (sharedLoading = false));
@@ -778,6 +784,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
         swimming: p.swimming,
         frozen: p.frozen,
         mounted: p.mounted,
+        view: p.view ?? null,
+        viewNow: p.viewNow ?? null,
+        viewBlend: p.viewBlend ?? null,
         name: me?.name ?? null,
         starter: me?.starter ?? null,
         hp: me?.hp ?? null,
@@ -859,8 +868,9 @@ export function installE2eHook(win: Window & typeof globalThis): void {
             return null;
           }
         };
-        // On a planet: its guide's missions and, if taken, Sela's trial there; in Portus: Sela's trials.
-        const list = body === "portus" ? S.missionsFrom("curator_sela") : [...S.missionsOn(body), ...S.missionsFrom("curator_sela").filter((m) => (m as { body?: string }).body === body)];
+        // On a body: every mission whose objective is here (its guide's, Sela's trial, Lark's L1 on
+        // Lumen); in Portus: Sela's trials.
+        const list = body === "portus" ? S.missionsFrom("curator_sela") : S.MISSIONS.filter((m) => (m as { body?: string }).body === body);
         return list.map((m) => {
           const st = you?.missions?.find((x) => x.id === m.id);
           const at = body === "portus" ? null : spotOf(m);

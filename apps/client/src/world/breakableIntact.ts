@@ -54,6 +54,16 @@ const PALETTES: Record<Exclude<BodyId, "portus">, Palette> = {
     cover: 0xc0583a, cover2: 0x3fa8b0,
     woodIn: 0x9aa2ac, stoneIn: 0xd8d0c4, metalIn: 0xdfe4ea, coverIn: 0xb8bec6,
   },
+  // Lumen: survey crates and pale regolith stone.
+  lumen: {
+    wood: 0x8a8e96, wood2: 0x7a7e86, frame: 0xd8e2f0,
+    barrel: 0xc8d4e8, barrel2: 0xb4c0d4, band: 0x2a2e36,
+    stone: 0xb8b4ac, stone2: 0xa8a49c, joint: 0x7a766e,
+    figure: 0xd8dce4, figure2: 0x9fb8ff,
+    wall: [0xb4b0a8, 0xa6a29a, 0xc0bcb4], wallJoint: 0x6a665e,
+    cover: 0x9fb8ff, cover2: 0xe8eeff,
+    woodIn: 0xc0c4cc, stoneIn: 0xe0dcd4, metalIn: 0xe4e8ee, coverIn: 0xe8eeff,
+  },
 };
 const HAZARD = [0xffc23a, 0x26262a];
 

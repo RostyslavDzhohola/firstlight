@@ -3,9 +3,10 @@
 
 import type { BodyId } from "@firstlight/shared";
 import { BACKPACK_SLOTS, type CharacterData, type LifeProgress } from "@firstlight/shared/content/character";
+import { normalizeTree } from "@firstlight/shared/content/tree";
 import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import type { InvItem } from "@firstlight/shared/net/protocol";
-import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, PILE_CAP_PER_BODY, saveCharacter, sweepPiles, takeAll, takeItem, type Db } from "../db/index.ts";
+import { dropPile, ensureAccount, getPile, listPiles, loadCharacter, movePile, PILE_CAP_PER_BODY, saveCharacter, sweepPiles, takeAll, takeItem, type Db } from "../db/index.ts";
 import { tx } from "../db/game-db.ts";
 import type { Pile } from "../db/piles.ts";
 import type { CharacterRepo } from "./characters.ts";
@@ -66,6 +67,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
       ...(life ? { life } : {}),
       travelTo: (inv.travelTo as BodyId | undefined) ?? undefined,
       ...(inv.travelUntil ? { travelUntil: inv.travelUntil } : {}),
+      tree: normalizeTree(c.level, c.tree),
     };
   }
 
@@ -96,6 +98,7 @@ export class SqliteCharacterRepo implements CharacterRepo {
       missionState: { list: d.missions, life: d.life ?? null } satisfies StoredMissions,
       lifeStartedAt: d.lifeStartedAt,
       protectedUntil: 0,
+      tree: d.tree ?? [],
     });
   }
 }
@@ -153,6 +156,11 @@ export class SqlitePileStore implements PileStore {
       expiresAt: input.expiresAt ?? null,
     }, this.cap);
     return { pile: toPileData(pile), evicted: evicted.map(String) };
+  }
+
+  move(id: string, x: number, y: number, z: number): PileData | null {
+    const p = movePile<InvItem>(this.db, Number(id), x, y, z);
+    return p ? toPileData(p) : null;
   }
 
   take(id: string, index?: number) {

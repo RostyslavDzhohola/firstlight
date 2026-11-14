@@ -127,3 +127,20 @@ describe("world callout placement", () => {
     });
   });
 });
+
+// Play-through 2026-11-14: a target off to the right pinned the mission callout on the missions panel
+// (top right). The panel is a kept-clear area: the pinned label drops below it.
+describe("the missions panel is kept clear", () => {
+  it("a pinned label at the right edge goes below the panel, not over it", () => {
+    const w = 1280;
+    const h = 720;
+    const panel = { left: 986, top: 176, right: 1258, bottom: 426 };
+    const box = { w: 120, h: 40 };
+    // Off screen to the right and a little up: the ray meets the right margin at the panel's height.
+    const c = placeCallout({ x: 3, y: 0.9, z: 0.5 }, w, h, box, null, [panel]);
+    expect(c.edge).toBe(true);
+    const left = c.flip ? c.x - 16 - box.w : c.x;
+    const r = { left, top: c.y - box.h / 2, right: left + 16 + box.w, bottom: c.y + box.h / 2 };
+    expect(r.top >= panel.bottom || r.bottom <= panel.top || r.right <= panel.left || r.left >= panel.right).toBe(true);
+  });
+});

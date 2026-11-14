@@ -2,13 +2,14 @@
 // docs/content.md sections, DECISIONS (D), research report [04], or a run decision. A failed check is a
 // number that left its band; `pnpm balance` exits non-zero on any.
 
-import { STARTERS } from "../../packages/shared/src/content/weapons.ts";
-import { maxHp } from "../../packages/shared/src/content/progression.ts";
-import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
+import { PLAIN_STARTER, STARTERS, WEAPONS } from "../../packages/shared/src/content/weapons.ts";
+import { maxHp, REGEN } from "../../packages/shared/src/content/progression.ts";
+import { BASE_MOVE, STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
-  pvpCell, PVP_LEVELS, roleLeaders, spellPeaks, weaponTable, type Family,
+  encounterGaps, oneRun, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, buildRows, GUARD_FAMILIES, type Family,
 } from "./model.ts";
+import { BLOCK_CAP, buildStats, TREE } from "../../packages/shared/src/content/tree.ts";
 import { WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
 export interface Check {
@@ -56,8 +57,20 @@ export const SPELL_POWER_BAND: [number, number] = [0.85, 1.15];
 /** §0's telegraph floor, held for spells too: a hit of this share of base HP or more warns for at least 1.2 s. */
 export const TELEGRAPH_SHARE = 0.4;
 export const TELEGRAPH_S = 1.2;
+/**
+ * #81: a build's edge over a plain character in a fight, PvP and PvE: best class damage × how much longer
+ * it lasts under the same hits, with every defensive node counted (HP, rolls, guard, Last Breath, tonics).
+ */
+export const BUILD_EDGE: [number, number] = [1, 1.45];
+/** #81: through a guard, a build's nodes let at least this share of what a plain guard lets through (a guard is never a wall). */
+export const GUARD_KEEP = 0.5;
 
+/** Every band check, in one model run (the model's per-run memo: model.ts oneRun). */
 export function checks(): Check[] {
+  return oneRun(allChecks);
+}
+
+function allChecks(): Check[] {
   const out: Check[] = [];
   const add = (c: Check) => out.push(c);
 
@@ -121,6 +134,19 @@ export function checks(): Check[] {
     add({ id: `boss.${b.id}`, what: `${b.id} two-player kill (min)`, value: fmt(b.killMin, 1), band: `${BOSS_MIN[0]}–${BOSS_MIN[1]}`, ok: inBand(b.killMin, ...BOSS_MIN), source: "content §4 (4.7 / 5.2 / 5.8 min modelled)" });
   }
 
+  // --- out-of-combat regeneration (#77): it never runs inside a fight
+  const rg = regenSafety();
+  add({ id: "regen.creatureGap", what: `Longest pause between a hostile creature's attacks (${rg.creatureGapId})`, value: fmt(rg.creatureGapS), band: `< ${REGEN.DELAY_S} s (regen's delay)`, ok: rg.creatureGapS < REGEN.DELAY_S, source: "#77 (regen can't out-heal a fight)" });
+  add({ id: "regen.starterSwing", what: "Slowest starter weapon's time between attacks", value: fmt(rg.starterSwingS), band: `< ${REGEN.DELAY_S} s (regen's delay)`, ok: rg.starterSwingS < REGEN.DELAY_S, source: "#77 (a fighting player keeps the tag up)" });
+  add({ id: "regen.full", what: "Regeneration from 0 to full health (s)", value: fmt(rg.fullS, 0), band: "≥ 60 s (slower than a tonic)", ok: rg.fullS >= 60, source: "#77 (very slow self-healing)" });
+  // Bosses and trials (review 2026-11-13: not established there): an encounter whose own pauses reach
+  // the delay must be one the server holds regeneration for (REGEN.PAUSED_IN, D-fixplay-2).
+  for (const e of encounterGaps()) {
+    if (e.kind === "race" || e.kind === "collect") continue;
+    const paused = REGEN.PAUSED_IN.includes(e.kind);
+    add({ id: `regen.${e.kind}.${e.id}`, what: `Longest pause in ${e.kind} ${e.id} (${e.where})${paused ? "; regen held for the encounter" : ""}`, value: fmt(e.gapS), band: paused ? `held (REGEN.PAUSED_IN)` : `< ${REGEN.DELAY_S} s (regen's delay)`, ok: paused || e.gapS < REGEN.DELAY_S, source: "#77, D-fixplay-2 (regen can't out-heal a boss or a trial)" });
+  }
+
   // --- progression and coins
   const prog = progression();
   const at = (L: number) => prog.find((r) => r.level === L)!.reachedAt;
@@ -155,16 +181,52 @@ export function checks(): Check[] {
   add({ id: "starter.dominance", what: "Starters at least as good as another on every stat", value: dom.length ? dom.map((d) => d.join(" > ")).join(", ") : "none", band: "none", ok: dom.length === 0, source: "issue #9" });
   const leaders = roleLeaders();
   const leads = STARTERS.map((s) => Object.values(leaders).filter((names) => names.includes(s.name)).length);
-  STARTERS.forEach((s, i) => add({ id: `starter.${s.id}.role`, what: `${s.name} leads roles`, value: String(leads[i]), band: `1–${Object.keys(leaders).length - 1}`, ok: leads[i]! >= 1 && leads[i]! < Object.keys(leaders).length, source: "issue #9 (each plays differently, none strictly best)" }));
+  // The plain Traveller (#80) is the baseline by design: it leads nothing and has the base numbers.
+  STARTERS.forEach((s, i) => {
+    if (i === PLAIN_STARTER) return;
+    add({ id: `starter.${s.id}.role`, what: `${s.name} leads roles`, value: String(leads[i]), band: `1–${Object.keys(leaders).length - 1}`, ok: leads[i]! >= 1 && leads[i]! < Object.keys(leaders).length, source: "issue #9 (each plays differently, none strictly best)" });
+  });
+  const plain = STARTER_STATS[PLAIN_STARTER]!;
+  const plainBase = plain.hp === 1 && plain.speed === 1 && plain.dodgeCooldown === BASE_MOVE.dodgeCooldown && (plain.spellPower ?? 1) === 1;
+  add({ id: "starter.plain.base", what: `${STARTERS[PLAIN_STARTER]!.name}: HP, pace, roll and spell power at the base, leads ${leads[PLAIN_STARTER]} roles`, value: plainBase ? "base" : "not base", band: "base, leads 0", ok: plainBase && leads[PLAIN_STARTER] === 0, source: "#80 (an ordinary traveller, no special stats)" });
   const worst = Math.min(...duelResults().map((r) => Math.min(r.ratio, 1 / r.ratio)));
   add({ id: "starter.duels", what: "Most lopsided starter duel (loser's speed ÷ winner's)", value: fmt(worst), band: "≥ 0.6", ok: worst >= 0.6, source: "D-balance-4 (no hopeless matchup)" });
+
+  out.push(...buildChecks());
+  // Attuned on the strongest caster: still no spell one-shot, and the opening pair still doesn't kill.
+  const attuned = buildStats(["magic_attuned"]).spellPower;
+  add({ id: "build.spell.oneshot", what: "Largest spell hit with Attuned ÷ the most fragile starter's HP", value: fmt(peaks.hitOfFrail * attuned), band: `≤ ${BIGGEST_HIT}`, ok: peaks.hitOfFrail * attuned <= BIGGEST_HIT + 1e-9, source: "content §2.7 (no one-shots), #81" });
+  add({ id: "build.spell.pair", what: "Opening Frostbloom + Wishfall with Attuned ÷ the most fragile starter's HP", value: fmt(peaks.pairOfFrail * attuned), band: "< 1", ok: peaks.pairOfFrail * attuned < 1, source: "content §2.7, D-spells-9, #81" });
   return out;
 }
 
 function classOf(f: Family): string {
-  return f === "kunai" ? "ranged" : ["sunbrand", "riverstaff", "axe", "hammer"].includes(f) ? "melee" : ["hexquill", "emberglass", "stormcoil"].includes(f) ? "magic" : "ranged";
+  return f === "kunai" ? "ranged" : ["sunbrand", "riverstaff", "axe", "hammer", "boarspear"].includes(f) ? "melee" : ["hexquill", "emberglass", "stormcoil", "lantern"].includes(f) ? "magic" : "ranged";
 }
 
 function planetOf(npcId: string): string {
   return npcId === "bramblehorn" ? "arcadia" : npcId === "fenstalker" ? "hollowmere" : "meridian";
+}
+
+/** The build tree's checks (#81): every build's floor and its PvP and PvE edges, and each guard weapon tier's share through the guard. */
+export function buildChecks(): Check[] {
+  const out: Check[] = [];
+  const add = (c: Check) => out.push(c);
+  // --- the build tree (#81, content §1.6): plain, focused (each branch first) and spread builds at levels 5, 10 and 20
+  for (const r of buildRows()) {
+    const id = `build.${r.build.replace(/\s+/g, "-").toLowerCase()}.L${r.level}`;
+    add({ id: `${id}.floor`, what: `${r.build} build at level ${r.level}: fastest kill of the most fragile plain starter (${r.fastestFamily}, ${r.fastestHits} hits, server cadence)`, value: fmt(r.fastestTtk), band: `≥ ${STARTER_TTK_FLOOR} s and ≥ 2 hits`, ok: r.fastestTtk >= STARTER_TTK_FLOOR - 1e-9 && r.fastestHits >= 2, source: "D-balance-4 hard floor, held for every build" });
+    add({ id: `${id}.edge`, what: `${r.build} build at level ${r.level}: PvP edge over plain (best damage × lasting under a plain attacker, ${r.edgeWeapon}; HP, rolls, guard, Last Breath, tonics)`, value: fmt(r.edge), band: `${BUILD_EDGE[0]}–${BUILD_EDGE[1]}`, ok: inBand(r.edge, ...BUILD_EDGE), source: "#81 (a choice, not a lock-in: in band like a starter's light layer)" });
+    add({ id: `${id}.pve`, what: `${r.build} build at level ${r.level}: PvE edge over plain (best damage × lasting under the level's creatures, ${r.pveWeapon}; HP, rolls, guard, Last Breath, tonics)`, value: fmt(r.pveEdge), band: `${BUILD_EDGE[0]}–${BUILD_EDGE[1]}`, ok: inBand(r.pveEdge, ...BUILD_EDGE), source: "#81 (build tree review 4)" });
+  }
+  // Every guard weapon tier: what gets through a guard with the tree's block nodes ÷ what gets through a plain guard.
+  const guardBuild = buildStats(TREE.map((n) => n.id));
+  for (const fam of GUARD_FAMILIES) {
+    WEAPONS.find((w) => w.id === fam)!.tiers.forEach((t, i) => {
+      if (!t.block) return;
+      const keep = (1 - Math.min(BLOCK_CAP, t.block + guardBuild.block)) / (1 - t.block);
+      add({ id: `build.guard.${fam}.t${i + 1}`, what: `${fam} T${i + 1}: share through the guard with every block node ÷ plain (block ${fmt(t.block)} → ${fmt(Math.min(BLOCK_CAP, t.block + guardBuild.block))})`, value: fmt(keep), band: `≥ ${GUARD_KEEP}`, ok: keep >= GUARD_KEEP - 1e-9, source: "#81 (build tree review 4: T2 Sunbrand 75% → 90%)" });
+    });
+  }
+  return out;
 }

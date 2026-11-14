@@ -9,7 +9,7 @@ import type { Room } from "@colyseus/sdk";
 import type { ClientSystem } from "../game/systems.ts";
 import type { Game } from "../game/Game.ts";
 import { HOTKEYS, hits } from "../game/keys.ts";
-import { Compass, PARTY_COLOURS, type CompassMarker } from "./compass.ts";
+import { Compass, compassGuides, PARTY_COLOURS, type CompassMarker } from "./compass.ts";
 import { el, typing } from "./dom.ts";
 import { InviteCards } from "./invites.ts";
 import { PlayerList } from "./playerList.ts";
@@ -110,6 +110,7 @@ export class SocialUi {
       const at: V3 | null = here ? [here.x, here.y, here.z] : m.x || m.y || m.z ? [m.x, m.y, m.z] : null;
       if (at) markers.push({ key: m.userId, label: m.name, colour: PARTY_COLOURS[i % PARTY_COLOURS.length]!, pos: at });
     });
+    for (const g of compassGuides) markers.push(...g());
     this.compass.update(pos, [f.x, f.y, f.z], this.game.bodyId, !!me && (me.flags & PF.SAFE) !== 0, markers, waypoints.get(this.game.bodyId));
     // HUD party frames (top-left), 4 Hz.
     if (now - this.partyAt > 250) {

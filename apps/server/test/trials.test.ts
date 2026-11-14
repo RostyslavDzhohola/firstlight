@@ -234,6 +234,27 @@ describe("defend (T2, The Steadfast Gleam; H4, The Long Vigil)", () => {
     expect(a.last("missionDone")).toEqual({ id: "H4", xp: 900, coins: 150 });
   });
 
+  // D-fixplay-2: a defend attempt's waves come 20–25 s apart, longer than regeneration's delay, so its
+  // runner doesn't regenerate until the attempt ends, however long since the last hit.
+  it("holds out-of-combat regeneration while a defend attempt runs", async () => {
+    TRIAL_RULES.timeScale = 10; // the first wave at 20 s: no hits during the check
+    const a = await take("vigil_mender", ["H4"], "hollowmere");
+    await tpAndWait(a, objAt("h4_lamp"));
+    a.send("interact", { target: "h4_lamp" });
+    await until("running", () => lastTrial(a, "H4")?.state === "running");
+    a.send("admin", { cmd: "unprotect" });
+    await sleep(120);
+    a.send("admin", { cmd: "damage", args: { target: a.id, amount: 50 } });
+    await until("hurt", () => me(a).hp < me(a).maxHp);
+    const hurt = me(a).hp;
+    const actor = serverRoom(a).actors.get(a.id)!;
+    for (let i = 0; i < 20; i++) {
+      actor.combatUntil = Date.now(); // as if the last hit were long ago
+      await sleep(100);
+    }
+    expect(me(a).hp).toBe(hurt);
+  });
+
   it("a dropped socket ends the attempt at once: no hold time while away, the waves go, idle on reconnect", async () => {
     TRIAL_RULES.timeScale = 0.05; // 4.5 s hold
     const a = await take("dropped_holder", ["T2"], "hollowmere");

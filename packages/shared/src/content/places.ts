@@ -77,6 +77,10 @@ export const PLACES: readonly PlaceDef[] = [
   { id: "last_billboard", body: "meridian", name: "The Last Billboard", kind: "landmark", at: { area: "last_billboard" }, radius: 10 },
   { id: "chrome_spires", body: "meridian", name: "Chrome Spires", kind: "landmark", at: { between: [15, 9, 0.45] }, radius: 140 },
   { id: "oversight_lobby", body: "meridian", name: "the Oversight Lobby", kind: "area", at: { area: "oversight_lobby" }, radius: 25 },
+
+  // ---------------------------------------------------------------- Lumen (Arcadia's moon, levels 6–9)
+  { id: "moonfall_pad", body: "lumen", name: "Moonfall Pad", kind: "pad", at: { pad: 0 }, radius: 12 },
+  { id: "the_hush", body: "lumen", name: "the Hush", kind: "landmark", at: { mid: [3, 7] }, radius: 50 },
 ];
 
 export const PLACE_BY_ID: ReadonlyMap<string, PlaceDef> = new Map(PLACES.map((p) => [p.id, p]));
@@ -88,7 +92,7 @@ export function place(id: string): PlaceDef {
 }
 
 /** Main pad names (pad 0 of each planet). */
-export const MAIN_PAD: Record<Exclude<BodyId, "portus">, string> = { arcadia: "dawnpad", hollowmere: "lanternfall", meridian: "waystation_nine" };
+export const MAIN_PAD: Record<Exclude<BodyId, "portus">, string> = { arcadia: "dawnpad", hollowmere: "lanternfall", meridian: "waystation_nine", lumen: "moonfall_pad" };
 
 /** Boss lairs (the NPC lane should spawn each boss at its lair's position). */
 export const BOSS_LAIRS: Record<BossId, { body: BodyId; place: string; name: string }> = {

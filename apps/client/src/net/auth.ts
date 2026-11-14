@@ -180,6 +180,46 @@ export async function sendEmailCode(email: string): Promise<Result> {
   return { ok: false, message: SEND_MESSAGE[failure], failure };
 }
 
+
+/** This run's dev sign-in key: what the page opened from the link Vite printed kept (net/devKey.ts; never fetched). */
+async function devSigninKey(): Promise<string> {
+  const { devKeyIn } = await import("./devKey.ts");
+  let store: Storage | null = null;
+  try {
+    store = localStorage;
+  } catch {
+    /* blocked storage */
+  }
+  return devKeyIn(store) ?? "";
+}
+
+/**
+ * #84: a local server without a mail key sends no email; it keeps the code and hands it to the card
+ * (GET /api/account/dev-code) when asked with this run's key, which only the root `pnpm dev` gives
+ * the server and the Vite dev server, and Vite only to the developer's terminal, as a link (D-sec3-6).
+ * In every build __FL_DEV_CODES__ is a literal false, so this returns before any of it (which the
+ * bundler drops).
+ * The queued send for a returning player's address goes out just after the answer, so this tries a
+ * few times.
+ */
+export async function devCode(email: string, tries = 6): Promise<string | null> {
+  if (!__FL_DEV_CODES__ || import.meta.env.PROD) return null;
+  const key = await devSigninKey();
+  if (!key) return null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(`${config.apiUrl}/api/account/dev-code?email=${encodeURIComponent(email.trim())}`, { headers: { "x-firstlight-dev-key": key } });
+      if (!res.ok) return null; // not a local server
+      const j = (await res.json()) as { code?: string | null };
+      if (j.code) return j.code;
+    } catch {
+      return null;
+    }
+    await new Promise((ok) => setTimeout(ok, 300));
+  }
+  return null;
+}
+
 /**
  * Can this browser save: a guest session, a saved account, or neither (a `?devguest` token, an
  * offline run, no session yet)? Asks the session every time, never the cached play token: the cookie

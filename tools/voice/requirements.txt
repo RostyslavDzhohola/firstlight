@@ -1,0 +1,18 @@
+# The voice tool's Python environment (tools/voice/setup.ts installs it outside the repo).
+# Pinned to the set that recorded voice set 1 on 2026-11-13; Python 3.11-3.13 (kokoro-onnx 0.6.1 needs <3.14, numpy 2.4 needs 3.11+).
+attrs==26.1.0
+cffi==2.1.1
+cloudpickle==3.1.2
+dlinfo==2.0.0
+espeakng-loader==0.2.4
+flatbuffers==25.12.19
+joblib==1.6.0
+kokoro-onnx==0.6.1
+numpy==2.4.6
+onnxruntime==1.32.0
+packaging==26.3
+phonemizer==3.6.0
+protobuf==7.36.2
+pycparser==3.12
+soundfile==0.14.0
+typing_extensions==4.16.0

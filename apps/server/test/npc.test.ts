@@ -6,7 +6,9 @@ import { BODIES, createTerrain, isSafe, padDirs, type BodyId } from "@firstlight
 import { bossArena, resolveAreaDir } from "@firstlight/shared/content/arenas";
 import { NF, NPC_ANIM, NPC_AREAS } from "@firstlight/shared/content/npcs";
 import { ANIM } from "@firstlight/shared/net/schema";
+import { matchMaker } from "@colyseus/core";
 import type { Game } from "../src/app.ts";
+import type { BodyRoom } from "../src/world/BodyRoom.ts";
 import { NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
 
@@ -287,6 +289,35 @@ describe("bosses (seam 1)", () => {
     const hp = st(A).npcs.get(boss.id).hp;
     B.send("npc", { cmd: "hurt", id: boss.id, amount: 1000, as: B.sessionId });
     await waitFor(() => st(A).npcs.get(boss.id).hp <= hp - 1000 + 40, 2000);
+  }, 30_000);
+
+  // D-fixplay-2: a boss's plate window holds its attacks longer than regeneration's delay, so a boss's
+  // fighters don't regenerate while it is engaged, however long since their last hit; out of the fight,
+  // the ordinary rule is back.
+  it("holds out-of-combat regeneration for a boss's fighters while it is engaged", async () => {
+    NPC_TUNING.bosses = true;
+    NPC_TUNING.bossAttacks = false;
+    NPC_TUNING.bossMechanics = [];
+    const ar = arcadia();
+    const A = await player("boss-mender", "arcadia", ar.plates[0]! as V, 8);
+    await bossUp(A);
+    A.send("admin", { cmd: "damage", args: { target: A.sessionId, amount: 60 } });
+    await waitFor(() => me(A).hp < me(A).maxHp, 3000);
+    const hurt = me(A).hp;
+    const actor = (matchMaker.getLocalRoomById(A.roomId) as unknown as BodyRoom).actors.get(A.sessionId)!;
+    // As if the last hit were long ago: still in the boss fight, nothing comes back.
+    for (let i = 0; i < 20; i++) {
+      actor.combatUntil = Date.now();
+      await sleep(100);
+    }
+    expect(me(A).hp).toBe(hurt);
+    // Out of the arena, and out of the fight's hold too: regeneration runs again.
+    place(A, nearPad("arcadia", 0, 70));
+    await waitFor(() => flat([me(A).x, me(A).y, me(A).z], ar.centre as V) > ar.radius + 20, 3000);
+    await sleep(700); // a boss tick past the arena edge
+    actor.combatUntil = Date.now();
+    actor.noRegenUntil = Date.now();
+    await waitFor(() => me(A).hp > hurt, 6000);
   }, 30_000);
 
   it("boss HP scales with the players inside the arena and keeps its percentage", async () => {

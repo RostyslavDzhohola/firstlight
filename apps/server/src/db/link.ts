@@ -9,6 +9,7 @@ import { loadCharacter } from "./characters.ts";
 import { stmt, tx, type Db } from "./game-db.ts";
 import { isTestAccount, markTestAccount } from "./testAccounts.ts";
 import { isAgentAccount, markAgentAccount } from "./agentAccounts.ts";
+import { ACCOUNT_STEPS, accountSubject, moveFunnel, recordStep } from "./funnel.ts";
 
 export interface LinkResult {
   /** Whose live character survived: the guest's, the account's, or none existed. */
@@ -116,6 +117,11 @@ export function linkAccounts(db: Db, fromUserId: string, toUserId: string, now =
     stmt(db, "UPDATE report SET target = ? WHERE target = ?").run(toUserId, fromUserId);
     stmt(db, "UPDATE ban SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
     if (!fromTest || keepTest) stmt(db, "UPDATE session_log SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
+    // The first-session funnel (#85): the guest's steps follow, and the account records that it saved.
+    if (!fromTest || keepTest) {
+      moveFunnel(db, fromUserId, toUserId);
+      recordStep(db, { subject: accountSubject(toUserId), step: ACCOUNT_STEPS.saved, at: now, kind: fromTest ? "test" : isAgentAccount(db, fromUserId) ? "agent" : "person" });
+    }
     stmt(db, "UPDATE admin_claim SET user_id = ? WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "INSERT OR IGNORE INTO voice_mute (user_id, muted_at) SELECT ?, muted_at FROM voice_mute WHERE user_id = ?").run(toUserId, fromUserId);
     stmt(db, "DELETE FROM voice_mute WHERE user_id = ?").run(fromUserId);

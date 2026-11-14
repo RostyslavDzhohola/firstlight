@@ -2,12 +2,15 @@
 // the whole planet, refilled a few times a second from the props of the loaded chunks (placed by
 // the shared, deterministic chunkProps in the worker). LOD0 (full mesh, large props cast shadows) up to the
 // tier's "full mesh to" distance, LOD1 (low poly, no shadow) to the draw distance.
-// One draw per deterministic model variant/LOD, plus nearby LOD0 shadow draws.
+// One draw per deterministic model variant/LOD, plus nearby LOD0 shadow draws. Between the two the
+// modelled props cross-fade over a distance band (lodFade.ts, #74): an instance in the band is in both.
+// Procedural props (no vegetation assets) have no dither, so they keep one exclusive split.
 
 import * as THREE from "three/webgpu";
 import { hash01, PROP_KINDS, PROP_STRIDE, PROP_STYLES, type BodyId, type PropKind } from "@firstlight/shared";
 import { float, materialColor, mix } from "three/tsl";
 import { atmo } from "./atmosphere.ts";
+import { lodBand, lodRanges, setLodBand, setLodEye } from "./lodFade.ts";
 import { applyOccluderFade } from "./occluderFade.ts";
 import { propGeometry, PROP_PALETTES } from "./propGeometry.ts";
 import { applyVegetationPalette, preloadVegetation, validateVegetationAssets, vegetationMaterial, type VegetationAssets } from "./vegetationAssets.ts";
@@ -32,6 +35,8 @@ interface KindMeshes {
   lod0: THREE.InstancedMesh;
   lod1: THREE.InstancedMesh;
   capacity: number;
+  /** Its materials carry the cross-fade dither (the modelled assets installed), so its levels may overlap. */
+  faded: boolean;
 }
 
 const CAPACITY: Partial<Record<PropKind, number>> = { reed: 6000, oak: 4000, scrub: 4000 };
@@ -90,10 +95,11 @@ export class PropSystem {
           m.receiveShadow = true;
           m.castShadow = lod === 0 && !SMALL.has(kind);
           m.name = `prop:${kind}:${variant}:L${lod}`;
+          m.userData.lodSide = lod === 0 ? 1 : 2; // which side of the cross-fade it draws (lodFade.ts)
           this.group.add(m);
           return m;
         };
-        this.kinds.set(k * 8 + variant, { kind, variant, lod0: mk(0), lod1: mk(1), capacity });
+        this.kinds.set(k * 8 + variant, { kind, variant, lod0: mk(0), lod1: mk(1), capacity, faded: false });
       }
     }
     this.ready = (assets ? Promise.resolve(assets) : preloadVegetation())
@@ -107,7 +113,7 @@ export class PropSystem {
     if (this.disposed) return;
     validateVegetationAssets(assets);
     const mergeRocks = this.kinds.has(PROP_KINDS.indexOf("rock") * 8) && this.kinds.has(PROP_KINDS.indexOf("boulder") * 8);
-    const replacements: { mesh: THREE.InstancedMesh; geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
+    const replacements: { km: KindMeshes; mesh: THREE.InstancedMesh; geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
     const chunks = new Map<string, ChunkProps>();
     try {
       for (const km of this.kinds.values()) {
@@ -118,11 +124,12 @@ export class PropSystem {
           const mesh = lod === 0 ? km.lod0 : km.lod1;
           const geometry = assets.geometry.get(`${name}_L${lod}`)!.clone();
           // Track ownership before preparing so a preparation failure also disposes this clone.
-          const replacement = { mesh, geometry, material: mesh.material as THREE.Material };
+          const replacement = { km, mesh, geometry, material: mesh.material as THREE.Material };
           replacements.push(replacement);
           if (km.kind === "boulder") geometry.scale(2.3 / 0.9, 2.3 / 0.9, 2.3 / 0.9);
           if (km.kind === "blossom") geometry.scale(5.2 / 6.2, 5.2 / 6.2, 5.2 / 6.2);
           geometry.setAttribute("iWind", new THREE.InstancedBufferAttribute(new Float32Array(km.capacity), 1));
+          geometry.setAttribute("iCenter", new THREE.InstancedBufferAttribute(new Float32Array(km.capacity * 3), 3));
           const impostor = lod === 1 && ["oak", "pine", "deadtree", "blossom"].includes(km.kind);
           replacement.material = vegetationMaterial(km.kind, impostor ? assets.impostors! : assets.atlas, impostor);
         }
@@ -138,6 +145,7 @@ export class PropSystem {
     for (const r of replacements) {
       r.mesh.geometry = r.geometry;
       r.mesh.material = r.material;
+      r.km.faded = true; // vegetationMaterial applies the cross-fade
     }
     for (const geometry of old) geometry.dispose();
     if (mergeRocks) {
@@ -160,6 +168,7 @@ export class PropSystem {
     this.enabled = s.on.trees;
     this.group.visible = this.enabled;
     this.fullTo = s.props.fullTo;
+    setLodBand(lodBand(this.fullTo));
     this.lodTo = s.props.lodTo;
     this.castShadow = s.on.shadows && s.shadows.mode === "map";
     for (const k of this.kinds.values()) k.lod0.castShadow = this.castShadow && !SMALL.has(k.kind);
@@ -281,6 +290,7 @@ export class PropSystem {
   }
 
   update(cam: THREE.Vector3, now: number) {
+    setLodEye(cam); // every frame: the shadow pass's fade measures from here (lodFade.ts)
     if (!this.enabled) return;
     if (!this.dirty && now - this.lastUpdate < 400 && cam.distanceToSquared(this.lastPos) < 4) return;
     this.dirty = false;
@@ -293,6 +303,9 @@ export class PropSystem {
       let n0 = 0, n1 = 0;
       const small = SMALL.has(km.kind);
       const kindLod2 = small && !this.forceAll ? Math.min(this.lodTo, 65) ** 2 : lod2;
+      // Faded kinds: far cards start before the near meshes end, the band holds both (lodFade.ts).
+      const farFrom = lodRanges(this.fullTo, km.faded).farFrom;
+      const far2 = this.forceAll ? 0 : farFrom * farFrom;
       // Order-dependent signature of the selected instances: upload only when it changes.
       let sig0 = 0x9e3779b9, sig1 = 0x85ebca6b;
       const a0 = km.lod0.instanceMatrix.array as Float32Array;
@@ -301,6 +314,8 @@ export class PropSystem {
       const c1 = km.lod1.instanceColor!.array as Float32Array;
       const w0 = km.lod0.geometry.getAttribute("iWind")?.array as Float32Array | undefined;
       const w1 = km.lod1.geometry.getAttribute("iWind")?.array as Float32Array | undefined;
+      const p0 = km.lod0.geometry.getAttribute("iCenter")?.array as Float32Array | undefined;
+      const p1 = km.lod1.geometry.getAttribute("iCenter")?.array as Float32Array | undefined;
       for (const ch of this.chunks.values()) {
         const e = ch.byKind.get(k);
         if (!e || e.count === 0) continue;
@@ -314,13 +329,15 @@ export class PropSystem {
             for (let j = 0; j < 16; j++) a0[n0 * 16 + j] = M[i * 16 + j]!;
             c0[n0 * 3] = C[i * 3]!; c0[n0 * 3 + 1] = C[i * 3 + 1]!; c0[n0 * 3 + 2] = C[i * 3 + 2]!;
             if (w0) w0[n0] = e.winds[i]!;
+            if (p0) { p0[n0 * 3] = P[i * 3]!; p0[n0 * 3 + 1] = P[i * 3 + 1]!; p0[n0 * 3 + 2] = P[i * 3 + 2]!; }
             sig0 = Math.imul(sig0 ^ id, 0x27d4eb2d);
             n0++;
           }
-          if ((d2 >= full2 || this.forceAll) && d2 < kindLod2 && n1 < km.capacity) {
+          if (d2 >= far2 && d2 < kindLod2 && n1 < km.capacity) {
             for (let j = 0; j < 16; j++) a1[n1 * 16 + j] = M[i * 16 + j]!;
             c1[n1 * 3] = C[i * 3]!; c1[n1 * 3 + 1] = C[i * 3 + 1]!; c1[n1 * 3 + 2] = C[i * 3 + 2]!;
             if (w1) w1[n1] = e.winds[i]!;
+            if (p1) { p1[n1 * 3] = P[i * 3]!; p1[n1 * 3 + 1] = P[i * 3 + 1]!; p1[n1 * 3 + 2] = P[i * 3 + 2]!; }
             sig1 = Math.imul(sig1 ^ id, 0x27d4eb2d);
             n1++;
           }
@@ -346,6 +363,12 @@ export class PropSystem {
       wind.clearUpdateRanges();
       wind.addUpdateRange(0, n);
       wind.needsUpdate = true;
+    }
+    const centre = mesh.geometry.getAttribute("iCenter") as THREE.InstancedBufferAttribute | undefined;
+    if (centre) {
+      centre.clearUpdateRanges();
+      centre.addUpdateRange(0, n * 3);
+      centre.needsUpdate = true;
     }
     mesh.instanceMatrix.clearUpdateRanges();
     mesh.instanceMatrix.addUpdateRange(0, n * 16);

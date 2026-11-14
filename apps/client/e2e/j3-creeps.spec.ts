@@ -28,7 +28,9 @@ async function takeFirstMission(player: Player): Promise<boolean> {
   await player.face((x) => x.guide?.bearing ?? null, 10);
   await player.tap("KeyE");
   const accept = player.page.locator(".fl-overlay .fl-panel").getByRole("button", { name: /^Accept$/ }).first();
-  if (!(await accept.isVisible({ timeout: 5000 }).catch(() => false))) {
+  // A real wait: isVisible's timeout is ignored (it answers at once), and on a loaded machine the
+  // guide's panel opens a second or more after E.
+  if (!(await accept.waitFor({ state: "visible", timeout: 8000 }).then(() => true, () => false))) {
     await player.note("guide", "no Accept button (panel didn't open?)");
     return false;
   }
@@ -166,14 +168,19 @@ test.describe("J3 creeps", () => {
     let shots = 0;
     let spawned = !near;
     let lastFoeAt = Date.now();
+    /** Shots in a row the server confirmed no hit for (a dune or a bank between us that the clearance rays don't see). */
+    let misses = 0;
     while (Date.now() < until) {
       const s = await player.snap();
       if ((s.you?.xp ?? 0) > xp0 || (s.you?.level ?? 1) > level0 || s.player?.dead) break;
       if ((s.player?.hp ?? 100) < 80) await player.admin("heal");
       // No casting while swimming (the server says "swimming"): back out of the lake first.
+      // Toward land: the nearest hostile stands on it (and is who we fight), else the pad. Turning round
+      // on every look swam back and forth in Glasswater Lake for the rest of the fight.
       if (s.player?.swimming) {
-        await player.turn(180);
-        await player.hold(["KeyW"], 1000);
+        const shore = s.npcs?.find((n) => n.hostile && !n.dead && n.dist < 60) ?? s.pad ?? null;
+        await player.turn(shore ? shore.bearing : 180);
+        await player.hold(["KeyW"], 1200);
         continue;
       }
       // Weapons are holstered in safe zones: fight from outside the ring.
@@ -195,17 +202,40 @@ test.describe("J3 creeps", () => {
       // Walls stop bolts (D43): only shoot along a clear line; otherwise go round toward it.
       const line = (await player.clearance([foe.bearing], foe.surface))?.[0]?.clear ?? foe.surface;
       const blocked = line < foe.surface - 1.5;
-      // Hostiles come to us (Hopbits leap in): only walk when it's far or behind a building, one step at a time.
-      if (foe.dist > 30 || blocked) {
+      // Hostiles come to us (Hopbits leap in): only walk when it's far, behind a building, or our bolts keep
+      // bursting on the ground between us (a Hopbit on the bank above a lake shore), one step at a time.
+      if (foe.dist > 30 || blocked || misses >= 2) {
+        if (misses >= 2) misses = 1; // one step, then try a shot again
         const go = await player.steer(foe.bearing, Math.min(4, foe.surface), s);
         if (Math.abs(go.bearing) > 8) await player.turn(go.bearing);
         await player.hold(["KeyW"], 500);
         continue;
       }
-      // Point blank the bolt (it leaves from the hand) flies past a Hopbit at our feet: back off first.
-      if (foe.dist < 5) {
-        await player.turn(foe.bearing);
-        await player.hold(["KeyS"], 500);
+      // A Hopbit at our feet stands inside us (its centre ~0.5 m from ours): nothing can be aimed at it
+      // there. Backing off never worked (it runs 4 m/s, we walk backwards slower, and on a loaded machine
+      // every look takes seconds): get away like a player, turn, sprint and roll, then turn back and shoot.
+      if (foe.dist < 3) {
+        await player.turn(wrap180(foe.bearing + 180));
+        await player.page.keyboard.down("ShiftLeft");
+        await player.page.keyboard.down("KeyW");
+        await player.page.waitForTimeout(350);
+        await player.tap("KeyC");
+        await player.page.waitForTimeout(450);
+        await player.page.keyboard.up("KeyW");
+        await player.page.keyboard.up("ShiftLeft");
+        const back = (await player.snap()).npcs?.find((n) => n.id === foe.id && !n.dead);
+        if (!back) continue;
+        await player.turn(back.bearing);
+        // Shoot at once from this look: it leaps back in every 1.2 s, and a loaded machine's next look
+        // round the loop comes after it has landed at our feet again.
+        const now = (await player.snap()).npcs?.find((n) => n.id === foe.id && !n.dead);
+        if (now && now.dist >= 2.5 && (await player.aimOnce(now))) {
+          const at = await player.attack();
+          shots++;
+          await player.page.waitForTimeout(800);
+          const hit = (await player.events(at)).some((e) => e.kind === "in" && e.type === "hit" && e.mine === true && !e.targetPlayer);
+          misses = hit ? 0 : misses + 1;
+        }
         continue;
       }
       // Never through another player (journeys share the copy; a bolt would hit them, PvP): side-step.
@@ -215,9 +245,11 @@ test.describe("J3 creeps", () => {
         continue;
       }
       await player.aim((x) => x.npcs?.find((n) => n.id === foe.id && !n.dead) ?? null, 3);
-      await player.attack();
+      const at = await player.attack();
       shots++;
-      await player.page.waitForTimeout(200);
+      await player.page.waitForTimeout(800); // a bolt flies 45 m/s: 36 m by then
+      const hit = (await player.events(at)).some((e) => e.kind === "in" && e.type === "hit" && e.mine === true && !e.targetPlayer);
+      misses = hit ? 0 : misses + 1;
     }
     const end = await player.snap();
     const ev = await player.events();

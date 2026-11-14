@@ -36,6 +36,8 @@ export interface CharacterData {
   worn?: Partial<Record<CosmeticSlot, string>>;
   /** Per-life progress for life-scoped medals and once-per-life eggs (quests lane). */
   life?: LifeProgress;
+  /** Build-tree nodes taken this life (content/tree.ts ids, in the order taken; #81). Absent = none. */
+  tree?: string[];
 }
 
 export interface LifeProgress {
@@ -53,6 +55,8 @@ export interface LifeProgress {
   unofficial?: boolean;
   /** When this life opened the Gleam Vault (gleams.ts; once per life, ms epoch). */
   gleamVault?: number;
+  /** Wild sites found this life (content/wildSites.ts ids; discovery XP is once per life). */
+  sites?: string[];
 }
 
 export function emptyLife(): LifeProgress {

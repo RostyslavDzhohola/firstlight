@@ -36,6 +36,7 @@ describe("breakable placement", () => {
       arcadia: "1a8aeaa6b55d8bb82a9b3b8e4796a554c25b1734cdd47591e4eacc56d081bb17",
       hollowmere: "e77ff916465dc60c96c4f077ecdac9bc43aa445340e7731e0b9065422420a431",
       meridian: "2ca88864f0932b20f98af59c971d04c94fa67144c737466d81b3710b859f43d5",
+      lumen: "ba083c65da3d3535af94c1d3343751bf3249a6dad7f299097de4fa5f025b82a2", // new with Lumen (#6)
     };
     for (const body of BODY_IDS) {
       const bytes = JSON.stringify(bodyBreakables(createTerrain(body)));

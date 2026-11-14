@@ -2,8 +2,8 @@
 // simulated projectiles with splash, damage rules (safe zones, protection, friendly fire on),
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
-import { damageMult, falloff, splashFalloff } from "@firstlight/shared/content/progression";
-import { starterMaxHp } from "@firstlight/shared/content/starters";
+import { damageMult, falloff, REGEN, splashFalloff } from "@firstlight/shared/content/progression";
+import { BLOCK_CAP, buildStats, playerMaxHp, reloadMs, weaponHeat } from "@firstlight/shared/content/tree";
 import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
@@ -16,7 +16,17 @@ import { HORSE } from "@firstlight/shared/content/horse";
 
 /** Lag compensation window: the one shared constant (SPEC §5.3: history ≤ 200 ms). */
 export const REWIND_MS = NET.REWIND_MS;
-export const COMBAT_TAG_MS = 10_000;
+/** No hit taken or dealt for this long: out of combat (logout, pad travel, and regeneration's start, REGEN.DELAY_S). */
+export const COMBAT_TAG_MS = REGEN.DELAY_S * 1000;
+
+/**
+ * An encounter in REGEN.PAUSED_IN (a boss's fight, a defend attempt) holds `p`'s regeneration while it
+ * lasts and for the usual delay after (D-fixplay-2): their own pauses reach the delay, so the combat
+ * tag alone would let it start mid-encounter. Called every tick the encounter counts the player in.
+ */
+export function holdRegen(p: PlayerActor, kind: (typeof REGEN.PAUSED_IN)[number], now: number) {
+  if (REGEN.PAUSED_IN.includes(kind)) p.noRegenUntil = now + COMBAT_TAG_MS;
+}
 export const ORIGIN_SLACK = 7; // metres the shot origin may be from the shooter's head (camera offset)
 
 export interface CombatHost {
@@ -299,17 +309,19 @@ export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, n
   if (now < p.reloadEndsAt) return { ok: false, reason: "reloading" };
   if (now < p.overheatUntil) return { ok: false, reason: "overheated" };
   const item = p.char.hotbar[p.char.selected];
+  const build = buildStats(p.char.tree);
+  const reload = reloadMs(def, tier, build); // Quick Hands (tree)
   if (tier.mag !== undefined && item) {
     const mag = item.mag ?? tier.mag;
     if (mag <= 0) {
-      p.reloadEndsAt = now + (tier.reload ?? 1.5) * 1000;
+      p.reloadEndsAt = now + reload;
       item.mag = tier.mag;
       p.youDirty = true;
       return { ok: false, reason: "empty" };
     }
     item.mag = mag - 1;
     if (item.mag <= 0) {
-      p.reloadEndsAt = now + (tier.reload ?? 1.5) * 1000;
+      p.reloadEndsAt = now + reload;
       item.mag = tier.mag;
       p.youDirty = true;
     } else p.youLazy = true; // the ammo readout catches up within ~0.4 s, not one full 'you' per shot
@@ -318,7 +330,7 @@ export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, n
     // Heat cools at one shot per second of not firing.
     p.heat = Math.max(0, p.heat - (now - p.lastAttackAt) / 1000);
     p.heat += 1;
-    if (p.heat >= tier.heat) {
+    if (p.heat >= weaponHeat(tier.heat, build)) {
       p.overheatUntil = now + 1500;
       p.heat = 0;
     }
@@ -342,7 +354,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
   // Bow draw is timed on the server from the `charge` start message; the client value is ignored.
   let charge = 1;
   if (def.delivery === "arrow") {
-    const drawMs = (tier.draw ?? 1) * 1000;
+    const drawMs = (tier.draw ?? 1) * 1000 * buildStats(p.char.tree).draw; // Quick Hands (tree)
     charge = p.chargeStartedAt > 0 ? Math.max(0, Math.min(1, (now - p.chargeStartedAt) / drawMs)) : 0;
     p.chargeStartedAt = 0;
   }
@@ -353,14 +365,17 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
     p.chargeStartedAt = 0;
     p.chargeItem = null;
   }
-  const lvl = damageMult(p.char.level);
+  // Bows, guns and throws take the Bow-and-gun branch's damage (tree); magic weapons take none.
+  const build = buildStats(p.char.tree);
+  const lvl = damageMult(p.char.level) * (def.cls === "ranged" ? build.rangedDamage : 1);
 
   switch (def.delivery) {
     case "hitscan":
     case "pellets": {
       // The camera ray only chooses the aim point; damage is traced from the authoritative muzzle,
       // so a camera behind cover can't shoot through it.
-      const maxR = def.falloffTo ?? def.range;
+      const reach = build.falloffReach; // Far Sight (tree): the falloff and the reach stretch together
+      const maxR = (def.falloffTo ?? def.range) * reach;
       const aim = aimPoint(host, p, o, d, maxR, head, 1.5);
       const muzzle = head;
       let base: V3 = [aim[0] - muzzle[0], aim[1] - muzzle[1], aim[2] - muzzle[2]];
@@ -373,7 +388,7 @@ export function fire(host: CombatHost, p: PlayerActor, msg: FireInput): FireResu
       let firstDir = base;
       for (let i = 0; i < shots; i++) {
         const dir = jitter(base, spreadDeg, rand);
-        const t = hitscan(host, p, muzzle, dir, maxR, tier.damage * lvl, def, tier);
+        const t = hitscan(host, p, muzzle, dir, maxR, tier.damage * lvl, def, tier, reach);
         if (i === 0) {
           firstHit = t;
           firstDir = dir;
@@ -510,7 +525,8 @@ function actorInsideProp(host: CombatHost, propIdx: number, o: V3, d: V3, maxT: 
   return host.props.contains?.(propIdx, [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t]) ? hit : null;
 }
 
-function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: number, baseDamage: number, def: WeaponDef, tier: TierStats): number | null {
+function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: number, baseDamage: number, def: WeaponDef, tier: TierStats, reach = 1): number | null {
+  const fall = (t: number) => falloff(t, def.range * reach, def.falloffTo === undefined ? undefined : def.falloffTo * reach, def.falloffMin);
   const terrainT = rayTerrain(host.terrain, o, d, maxRange, 1.5);
   // An intact breakable in the way stops the shot and takes it instead (destruction.ts).
   const prop = propOnRay(host, o, d, Math.min(maxRange, terrainT));
@@ -522,16 +538,16 @@ function hitscan(host: CombatHost, p: PlayerActor, o: V3, d: V3, maxRange: numbe
   // Someone standing inside the prop that stops the shot is still hit (F12: props are no shield).
   const hit = raycastActors(host, o, d, Math.min(maxRange, terrainT, propT, shellT), ignore, REWIND_MS) ?? (shellT < propT ? null : actorInsideProp(host, propIdx, o, d, Math.min(maxRange, terrainT), ignore, REWIND_MS));
   if (!hit && shell) {
-    host.bubbles!.absorb(shell.bubble, baseDamage * falloff(shellT, def.range, def.falloffTo, def.falloffMin));
+    host.bubbles!.absorb(shell.bubble, baseDamage * fall(shellT));
     return shellT;
   }
   if (!hit) {
-    if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * falloff(propT, def.range, def.falloffTo, def.falloffMin), def.destroys, def.id, d, p.id);
+    if (propIdx >= 0) host.props!.damage(propIdx, baseDamage * fall(propT), def.destroys, def.id, d, p.id);
     const endT = prop ? propT : terrainT;
     if (endT < maxRange) host.onPropHit?.([o[0] + d[0] * endT, o[1] + d[1] * endT, o[2] + d[2] * endT], def.destroys === "heavy" ? "heavy" : "light", baseDamage);
     return endT === Infinity ? null : endT;
   }
-  const f = falloff(hit.t, def.range, def.falloffTo, def.falloffMin);
+  const f = fall(hit.t);
   const mult = weakMult(hit, tier);
   dealDamage(host, p, hit.actor, baseDamage * f * mult, hit.weak, actorFacingFrom(o, hit.actor));
   return hit.t;
@@ -682,8 +698,11 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   if (heavy && !useHeavy) return { ok: false, reason: "not charged" };
   const res = consumeAttack(p, meleeDef, meleeTier, now, 1, host);
   if (!res.ok) return res;
-  if (useHeavy && meleeTier.cooldown) p.specialReadyAt = now + meleeTier.cooldown * 1000;
-  const lvl = damageMult(p.char.level);
+  // The Blade branch (tree): harder hits, more targets in a wider arc, heavy attacks back sooner.
+  const build = buildStats(p.char.tree);
+  if (useHeavy && meleeTier.cooldown) p.specialReadyAt = now + meleeTier.cooldown * 1000 * build.heavyCooldown;
+  const lvl = damageMult(p.char.level) * build.meleeDamage;
+  const arc = Math.min(360, (meleeDef.arc ?? 90) + build.meleeArc);
   const pos = actorPos(p);
   const facing: V3 = [p.state.fx, p.state.fy, p.state.fz];
   const dmg = (useHeavy ? meleeTier.heavy! : meleeTier.damage) * lvl;
@@ -692,14 +711,14 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
     if (a.id === p.id) continue;
     if (!canHurt(p, a, now, host)) continue;
     const ap = positionAgo(a, now, REWIND_MS);
-    if (!inMeleeArc(pos, facing, ap, meleeDef.range, meleeDef.arc ?? 90)) continue;
+    if (!inMeleeArc(pos, facing, ap, meleeDef.range, arc)) continue;
     if (wallBetween(host, chestOf(p), chestOf(a))) continue; // not through a wall (D-zones-3)
     targets.push({ a, d: dist3(pos, ap) });
   }
   targets.sort((x, y) => x.d - y.d);
   const slam = useHeavy && !!meleeTier.radius;
   const kb = meleeDef.id === "riverstaff" ? staffCombo(p, targets.length > 0, now) : meleeTier.knockback;
-  if (!slam) for (const t of targets.slice(0, meleeDef.maxTargets ?? 1)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), kb);
+  if (!slam) for (const t of targets.slice(0, (meleeDef.maxTargets ?? 1) + build.meleeTargets)) dealDamage(host, p, t.a, dmg, false, actorFacingFrom(pos, t.a), kb);
   // Hammer slam replaces the arc: radius damage around the attacker.
   if (slam && meleeTier.radius) {
     for (const a of allActors(host)) {
@@ -713,7 +732,7 @@ export function melee(host: CombatHost, p: PlayerActor, heavy: boolean): FireRes
   // (the axe's charged chop), fists break nothing (destruction.ts).
   const propCls: Destroys = useHeavy ? "heavy" : meleeDef.destroys;
   if (slam) host.props?.splash(pos, meleeTier.radius!, dmg, propCls, meleeDef.id, p.id, undefined, (c) => wallBetween(host, chestOf(p), c));
-  else host.props?.arc(pos, facing, meleeDef.range, meleeDef.arc ?? 90, dmg, propCls, meleeDef.id, p.id);
+  else host.props?.arc(pos, facing, meleeDef.range, arc, dmg, propCls, meleeDef.id, p.id);
   const reach: V3 = [pos[0] + facing[0] * meleeDef.range, pos[1] + facing[1] * meleeDef.range, pos[2] + facing[2] * meleeDef.range];
   host.onPropHit?.(reach, useHeavy || meleeDef.destroys === "heavy" ? "heavy" : "light", dmg);
   host.broadcastNear("swing", { by: p.id, weapon: WEAPON_INDEX.get(meleeDef.id), heavy: useHeavy, hits: targets.length }, pos, 120);
@@ -735,7 +754,7 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
         const l = Math.hypot(fromDir[0], fromDir[1], fromDir[2]) || 1;
         const fl = Math.hypot(f[0], f[1], f[2]); // facing's direction only (D-security-7); zero length never blocks
         const cos = fl > 1e-3 ? (f[0] * fromDir[0] + f[1] * fromDir[1] + f[2] * fromDir[2]) / (l * fl) : -1;
-        if (cos >= Math.cos((60 * Math.PI) / 180)) dmg *= 1 - tier.block;
+        if (cos >= Math.cos((60 * Math.PI) / 180)) dmg *= 1 - Math.min(BLOCK_CAP, tier.block + buildStats(target.char.tree).block); // Iron Guard (tree)
       }
     }
     target.combatUntil = now + COMBAT_TAG_MS;
@@ -759,6 +778,15 @@ export function dealDamage(host: CombatHost, attacker: PlayerActor | NpcActor | 
   dmg = Math.max(1, Math.round(dmg));
   const hpBefore = target.state.hp;
   target.state.hp = Math.max(0, hpBefore - dmg);
+  // Last Breath (tree): a blow from someone that would kill leaves 1 HP, once per its cooldown.
+  if (target.kind === "player" && attacker && target.state.hp <= 0 && hpBefore > 1) {
+    const s = buildStats(target.char.tree).lastBreathS;
+    if (s > 0 && now >= (target.lastBreathReadyAt ?? 0)) {
+      target.state.hp = 1;
+      target.lastBreathReadyAt = now + s * 1000;
+      target.client?.send("toast", { text: "Last Breath!", kind: "warn" });
+    }
+  }
   // NPC credit counts HP actually removed (an overkill hit can't outrank earlier damage).
   if (target.kind === "npc") target.onDamaged?.(hpBefore - target.state.hp, attacker?.id ?? "");
   const tp = actorPos(target);
@@ -953,6 +981,8 @@ function advance(host: CombatHost, p: Projectile, d: V3, step: number, now: numb
 }
 
 const burnAcc = new WeakMap<PlayerActor, number>();
+/** Fractional HP of out-of-combat regeneration not yet paid (#77). */
+const regenAcc = new WeakMap<PlayerActor, number>();
 
 /** Burning NPCs per room (Emberglass): the attacker's session id gets the credit. */
 const npcBurnLists = new WeakMap<CombatHost, Map<NpcActor, { perSec: number; until: number; by: string; acc: number }>>();
@@ -962,7 +992,7 @@ function npcBurns(host: CombatHost) {
   return m;
 }
 
-/** Per-tick effects: burn (players and NPCs), heals over time. */
+/** Per-tick effects: burn (players and NPCs), heals over time, out-of-combat regeneration (#77). */
 export function stepEffects(host: CombatHost, dt: number) {
   const now = host.now();
   const burning = npcBurnLists.get(host);
@@ -997,7 +1027,7 @@ export function stepEffects(host: CombatHost, dt: number) {
       }
     }
     if (p.heals.length) {
-      const mh = starterMaxHp(p.char.starter, p.char.level);
+      const mh = playerMaxHp(p.char);
       let add = 0;
       p.heals = p.heals.filter((h) => {
         if (h.left === undefined) {
@@ -1019,5 +1049,14 @@ export function stepEffects(host: CombatHost, dt: number) {
         if (p.state.hp < mh) p.state.hp = Math.min(mh, p.state.hp + whole);
       }
     }
+    // Out of combat (no hit taken or dealt for the combat tag, REGEN.DELAY_S, and no boss fight or defend
+    // attempt holding it, holdRegen): slow regeneration.
+    const mh = playerMaxHp(p.char);
+    if (p.state.hp > 0 && p.state.hp < mh && now >= p.combatUntil && now >= (p.noRegenUntil ?? 0) && !p.burn) {
+      const acc = (regenAcc.get(p) ?? 0) + mh * REGEN.PER_SEC * dt;
+      const whole = Math.floor(acc + 1e-6);
+      regenAcc.set(p, acc - whole);
+      if (whole > 0) p.state.hp = Math.min(mh, p.state.hp + whole);
+    } else regenAcc.delete(p);
   }
 }

@@ -22,7 +22,8 @@ describe("shop catalogue", () => {
   it("groups weapons by family with their three tiers, then support, tonics, gear, cosmetics by slot, trophies, secrets", () => {
     const g = shopCatalogue(ctx());
     expect(g.map((x) => x.id)).toEqual(["melee", "magic", "ranged", "support", "tonics", "gear", "cos-hat", "cos-cape", "cos-mask", "cos-backpack", "trophies", "secrets"]);
-    expect(g[0]!.rows.map((r) => r.itemId)).toEqual(["sunbrand", "riverstaff", "axe", "hammer"]);
+    expect(g[0]!.rows.map((r) => r.itemId)).toEqual(["sunbrand", "riverstaff", "axe", "hammer", "boarspear"]);
+    expect(row(ctx(), "boarspear")!.meta).toBe("Melee · 3.2 m reach · blocks 40%");
     const sun = row(ctx(), "sunbrand")!;
     expect(sun.offers.map((o) => [o.label, o.price, o.level, o.stat])).toEqual([["I", 60, 1, "18 dmg"], ["II", 300, 6, "24 dmg"], ["III", 900, 12, "31 dmg"]]);
     expect(sun.meta).toBe("Melee · 2.4 m reach · blocks 70%");

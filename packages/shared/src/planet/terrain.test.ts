@@ -53,6 +53,7 @@ describe("terrain", () => {
     }
   });
 
+  // Builds real chunk meshes for every body: ~1-2 s alone, past 5 s when the full suite loads the machine.
   it("matches the rendered chunk mesh within 1 mm (client/server parity)", () => {
     const rand = mulberry32(11);
     for (const id of ["arcadia", "meridian", "portus"] as const) {
@@ -69,7 +70,7 @@ describe("terrain", () => {
         expect(Math.abs(mh! - terrain.groundHeight(...d))).toBeLessThan(1e-3);
       }
     }
-  });
+  }, 30_000);
 
   it("returns the vertex height exactly at grid vertices", () => {
     const terrain = createTerrain("hollowmere");

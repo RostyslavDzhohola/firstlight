@@ -27,6 +27,7 @@ function crowded(): Omit<Observation, "summary"> {
           { id: "glasswing", name: "Glasswing Ward", level: 9, cost: 35, cooldown: 18, unlocked: false, readyIn: 0, ready: false, what: "" },
         ],
       },
+      tree: { points: 3, taken: ["body_hardy"], open: [{ id: "body_second_roll", name: "Second Roll", branch: "body", cost: 2, what: "2 rolls held" }, { id: "blade_edge", name: "Keen Edge", branch: "blade", cost: 1, what: "Melee damage +10%" }], respec: 10 },
     },
     creatures: Array.from({ length: 8 }, (_, i) => ({ id: `n${1000 + i}`, kind: "compliance_officer", name: "Compliance Officer", level: 20, hp: 123456, maxHp: 654321, dist: 123.4 + n(i), bearing: 359, hostile: true, boss: i === 0, onMe: i < 3, mission: true })),
     players: Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, name: `Sixteen_Chars_${i}x`, level: 20, dist: 44.4, bearing: 180, agent: i % 2 === 0, dead: i === 1 })),

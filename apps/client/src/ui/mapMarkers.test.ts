@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BODIES, createTerrain, padDirs, type BodyId } from "@firstlight/shared";
 import { MISSIONS } from "@firstlight/shared/content/missions";
+import { wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { missionTargets, staticMarkers } from "./mapMarkers.ts";
 
 describe("map markers", () => {
@@ -23,10 +24,13 @@ describe("map markers", () => {
     expect(ms.some((m) => m.kind === "pad")).toBe(false);
   });
 
-  it("planets: every pad, the portal home, the guide and the boss lair", () => {
+  it("planets: every pad, the portal home (and Arcadia's moon portal), the guide and the boss lair", () => {
     const ms = staticMarkers("arcadia", createTerrain("arcadia"));
     expect(ms.filter((m) => m.kind === "pad")).toHaveLength(padDirs(BODIES.arcadia).length);
-    expect(ms.filter((m) => m.kind === "portal").map((m) => m.to)).toEqual(["portus"]);
+    expect(ms.filter((m) => m.kind === "portal").map((m) => m.to)).toEqual(["portus", "lumen"]);
+    // Labelled by where each goes (sky review 4: both said "Portal to Portus").
+    expect(ms.filter((m) => m.kind === "portal").map((m) => m.label)).toEqual(["Portal to Portus", "Portal to Lumen"]);
+    expect(staticMarkers("lumen", createTerrain("lumen")).filter((m) => m.kind === "portal").map((m) => m.label)).toEqual(["Portal to Arcadia"]);
     expect(ms.find((m) => m.kind === "guide")?.label).toBe("Lark · missions");
     expect(ms.find((m) => m.kind === "lair")?.label).toContain("Tidewrath");
     expect(ms.some((m) => m.kind === "peak" || m.label === "Kestrel Peak")).toBe(true);
@@ -39,5 +43,13 @@ describe("map markers", () => {
     expect(t.length).toBeGreaterThanOrEqual(2);
     expect(t.some((m) => m.id === "A1")).toBe(false);
     expect(missionTargets("hollowmere", active)).toEqual([]);
+  });
+
+  it("L1 on Lumen is marked at the Quietfall Wreck (its hunt's site)", () => {
+    const terrain = createTerrain("lumen");
+    const wreck = wildSitePlacements(terrain).find((w) => w.site.id === "quietfall_wreck")!;
+    const [t] = missionTargets("lumen", [{ id: "L1" }], terrain);
+    expect(t?.id).toBe("L1");
+    expect(Math.hypot(t!.dir[0] - wreck.dir[0], t!.dir[1] - wreck.dir[1], t!.dir[2] - wreck.dir[2])).toBeLessThan(1e-6);
   });
 });

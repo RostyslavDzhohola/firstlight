@@ -11,7 +11,8 @@
 //   ?bench=passes per-pass GPU cost (#52, passCost.ts): Portus (unless ?body=…), 120 s warm-up on
 //                 the path, then a fixed view rendered in uncapped batches with each feature off in
 //                 turn, plus a GTAO samples × resolution sweep. WebGPU only (WebGL2: passes null).
-//                 ?benchpasses=ao,bloom,… limits the features; ?benchrounds=N, ?benchbatch=N.
+//                 ?benchpasses=ao,bloom,… limits the features; ?benchrounds=N, ?benchbatch=N;
+//                 ?benchgtao=denoise sweeps where GTAO's denoise runs and its resolution (#66).
 // Overrides: ?benchcrowd=N, ?benchwarm=S, ?benchtime=S.
 
 import * as THREE from "three/webgpu";
@@ -148,6 +149,8 @@ export interface BenchResult {
   frameMs: { p50: number; p95: number; p99: number; mean: number; max: number };
   /** Frames that took over 1.5× the median interval (a missed display refresh at vsync). */
   slowFrames: number;
+  /** Frames whose interval went over 33, 50 and 100 ms (a dropped 30 fps frame, a visible hitch, a freeze). */
+  over: { 33: number; 50: number; 100: number };
   /** Main-thread time of each frame (game update + render submission). */
   cpuMs: { p50: number; p95: number; p99: number };
   fps: { mean: number; p50: number };
@@ -165,6 +168,8 @@ export interface BenchResult {
   grassBlades: number;
   props: number;
   shaderBuildsDuringRun: number;
+  /** three's resource counts and byte estimates at the run's end (renderer.info.memory; bytes are three's own estimate). */
+  memory: { geometries: number; textures: number; programs: number; renderTargets: number; texturesMB: number; buffersMB: number; totalMB: number } | null;
   /** `?bench=passes` only: per-pass GPU cost, or null with `passesNote` on WebGL2. */
   passes?: PassCostReport | null;
   passesNote?: string;
@@ -175,6 +180,25 @@ export interface BenchResult {
 }
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
+
+type InfoMemory = Partial<Record<"geometries" | "textures" | "programs" | "renderTargets" | "texturesSize" | "attributesSize" | "indexAttributesSize" | "storageAttributesSize" | "uniformBuffersSize" | "total", number>>;
+
+/** renderer.info.memory as the bench reports it (null when this three has no memory info). */
+export function memoryOf(info: { memory?: unknown }): BenchResult["memory"] {
+  const m = info.memory as InfoMemory | undefined;
+  if (!m || typeof m.geometries !== "number") return null;
+  const mb = (v: number | undefined) => r2((v ?? 0) / 1048576);
+  const buffers = (m.attributesSize ?? 0) + (m.indexAttributesSize ?? 0) + (m.storageAttributesSize ?? 0) + (m.uniformBuffersSize ?? 0);
+  return {
+    geometries: m.geometries ?? 0,
+    textures: m.textures ?? 0,
+    programs: m.programs ?? 0,
+    renderTargets: m.renderTargets ?? 0,
+    texturesMB: mb(m.texturesSize),
+    buffersMB: mb(buffers),
+    totalMB: mb(m.total),
+  };
+}
 
 export class Bench {
   readonly duration: number;
@@ -421,7 +445,7 @@ export class Bench {
     let report: PassCostReport | null = null;
     try {
       // Inside the try: a failed chunk load or a changed three internal ends the run with passes null.
-      const { measurePassCosts } = await import("./passCost.ts");
+      const { measurePassCosts, GTAO_DENOISE_SWEEP } = await import("./passCost.ts");
       // three runs a pass (scene pass, GTAO, bloom, …) once per node frame, and only its animation
       // loop advances the node frame: each measured frame must advance it, or later frames in a batch
       // reuse the first one's pass textures and draw almost nothing.
@@ -474,7 +498,7 @@ export class Bench {
           shaderBuilds: () => shaderStats().total,
           visible: () => document.visibilityState === "visible",
         },
-        { rounds: p.rounds, framesPerBatch: p.framesPerBatch, gtao: true },
+        { rounds: p.rounds, framesPerBatch: p.framesPerBatch, gtao: true, ...(flags.get("benchgtao") === "denoise" ? { gtaoSweep: GTAO_DENOISE_SWEEP } : {}) },
       );
     } catch (e) {
       console.error("[bench] passes failed", e);
@@ -512,6 +536,7 @@ export class Bench {
       frames: f.length,
       frameMs: { p50: r2(median), p95: r2(percentile(f, 0.95)), p99: r2(percentile(f, 0.99)), mean: r2(mean), max: r2(maxOf(f)) },
       slowFrames: f.filter((v) => v > median * 1.5).length,
+      over: { 33: f.filter((v) => v > 33.4).length, 50: f.filter((v) => v > 50).length, 100: f.filter((v) => v > 100).length },
       cpuMs: { p50: r2(percentile(this.cpu, 0.5)), p95: r2(percentile(this.cpu, 0.95)), p99: r2(percentile(this.cpu, 0.99)) },
       fps: { mean: r2(1000 / Math.max(0.001, mean)), p50: r2(1000 / Math.max(0.001, percentile(f, 0.5))) },
       gpuMs: this.gpu.length ? { p50: r2(percentile(this.gpu, 0.5)), p95: r2(percentile(this.gpu, 0.95)) } : null,
@@ -526,6 +551,7 @@ export class Bench {
       grassBlades: st.grassBlades,
       props: st.props,
       shaderBuildsDuringRun: shaderStats().total - this.shaderBuildsAtStart,
+      memory: memoryOf(ctx.renderer.info),
       ...(this.config.passes ? { passes: passes ?? null, ...(passesNote ? { passesNote } : {}) } : {}),
       packs: this.packsAtStart && this.host.packs ? { start: this.packsAtStart, end: this.host.packs() } : null,
       flags: location.search,

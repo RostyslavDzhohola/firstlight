@@ -11,5 +11,6 @@ export * from "./sessions.ts";
 export * from "./leaderboard.ts";
 export * from "./testAccounts.ts";
 export * from "./agentAccounts.ts";
+export * from "./funnel.ts";
 export { linkAccounts, type LinkResult } from "./link.ts";
 export { displayNameProblem, isOffensiveName, NAME_MESSAGES, type NameProblem } from "./names.ts";
