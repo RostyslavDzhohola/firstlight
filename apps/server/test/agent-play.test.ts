@@ -466,3 +466,20 @@ describe("agents: etiquette", () => {
     }
   }, 90_000);
 });
+
+describe("agents: the build tree (#81)", () => {
+  it("an agent sees its points and the open nodes, spends them through the server, and hears a refusal's reason", async () => {
+    const a = await agent("builder");
+    await put(a, openSpotOutside("arcadia"), 4);
+    await waitFor(() => a.observe({ peek: true }).self.tree.points === 3);
+    const t0 = a.observe({ peek: true }).self.tree;
+    expect(t0.taken).toEqual([]);
+    expect(t0.open.map((n) => n.id).sort()).toEqual(["aim_steady", "blade_edge", "body_hardy", "magic_attuned", "travel_stride"]);
+    expect(a.observe({ peek: true }).summary).toContain("Build: 3 point(s) to spend");
+    expect(await a.spendPoint("blade_edge")).toMatchObject({ ok: true, points: 2, taken: ["blade_edge"] });
+    expect(await a.spendPoint("blade_riposte")).toMatchObject({ ok: false, reason: "locked" });
+    expect(await a.spendPoint("blade_cleave")).toMatchObject({ ok: true, points: 0 });
+    expect(actor(a).char.tree).toEqual(["blade_edge", "blade_cleave"]);
+    expect(await a.respec()).toMatchObject({ ok: false, reason: "safe zone" });
+  }, 30_000);
+});
