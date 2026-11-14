@@ -68,13 +68,14 @@ function scrubUrl(raw: string): string {
   return `${origin}${file ? `/…/${file}` : u.pathname === "/" || !u.pathname ? "" : "/…"}${file ? pos : ""}`;
 }
 
-/** A URL match without the sentence punctuation or unbalanced bracket that followed it. */
+/** A URL match without the sentence punctuation or unbalanced bracket that followed it. Linear (review round three, nit 6): the first "[" is found once. */
 function urlEnd(m: string): number {
+  const open = m.indexOf("[");
   let end = m.length;
   for (;;) {
     const c = m[end - 1];
     if (c === "." || c === "," || c === ";" || c === "!" || c === "?") end--;
-    else if (c === "]" && m.lastIndexOf("[", end - 1) < 0) end--;
+    else if (c === "]" && (open < 0 || open > end - 2)) end--; // no "[" before this "]"
     else return end;
   }
 }
@@ -86,7 +87,25 @@ function scrubPath(token: string): string {
   return parts.map((p, i) => (i > 0 && p && SENSITIVE_SEGMENT.test(parts[i - 1]!.replace(/^\W+/, "")) ? "[redacted]" : p)).join("/");
 }
 
-const SECRET_KEYS = "token|secret|password|passwd|pwd|otp|code|key|apikey|api_key|session|sid|auth|signature|sig";
+/**
+ * Keys whose value is a credential (review round three, #5): these keys exactly, in any case, with
+ * `_`, `-` or nothing between their words, followed by `=` or `:`. Never a longer word that only ends
+ * in one of them, and never a bare `code` or `key`, so diagnostics stay readable: `status_code=`,
+ * `error code:`, `shader code: WGSLValidationError`, `Duplicate key: name`. A long credential under
+ * another key is still caught by the token and hex rules below.
+ */
+export const CREDENTIAL_KEYS: readonly string[] = [
+  "token", "access_token", "refresh_token", "id_token", "auth_token", "session_token", "csrf_token", "xsrf_token", "api_token", "bearer_token", "oauth_token", "reset_token",
+  "secret", "client_secret", "api_secret", "app_secret", "secret_key",
+  "password", "passwd", "pwd", "passphrase",
+  "otp", "otp_code", "verification_code", "auth_code", "authorization_code", "reset_code", "login_code",
+  "api_key", "x_api_key", "access_key", "private_key",
+  "auth", "authorization", "session", "session_id", "sid", "signature", "sig", "cookie", "set_cookie",
+];
+const CREDENTIAL = new RegExp(
+  `(?<![\\w-])(${[...CREDENTIAL_KEYS].sort((a, b) => b.length - a.length).map((k) => k.replace(/_/g, "[-_]?")).join("|")})(\\s*[=:]\\s*)["']?[^\\s"',;&}]{6,}`,
+  "gi",
+);
 
 /** Make any text from an error report safe to keep. Reads at most SCRUB_INPUT characters. */
 export function scrubText(text: string): string {
@@ -102,7 +121,7 @@ export function scrubText(text: string): string {
   t = t.replace(/(?<![\w-])eyJ[\w-]{4,}\.[\w-]{4,}\.[\w-]{4,}/g, "[jwt]");
   t = t.replace(/\b(Bearer|Basic)\s+[^\s"']+/gi, "$1 [redacted]");
   t = t.replace(/(?<![\w.%+-])[\w.%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]");
-  t = t.replace(new RegExp(`(?<![A-Za-z0-9])([\\w-]{0,24}?(?:${SECRET_KEYS}))(\\s*[=:]\\s*)["']?[^\\s"',;&}]{6,}`, "gi"), "$1$2[redacted]");
+  t = t.replace(CREDENTIAL, "$1$2[redacted]");
   t = t.replace(/\b[a-f0-9]{32,}\b/gi, "[hex]");
   // Long token-like runs (base64/base64url ids, API keys): letters and digits mixed, 24+ long.
   t = t.replace(/[A-Za-z0-9_+=-]{24,}/g, (m) => (/[0-9]/.test(m) && /[A-Za-z]/.test(m) ? "[token]" : m));

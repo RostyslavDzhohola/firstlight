@@ -25,6 +25,20 @@ applyUiLook(document.documentElement, location.search);
 installErrorReporting();
 if (innerWidth < 760) funnelStep("narrow", innerWidth); // a phone or a narrow window: how many get that far
 
+// The dev server only (#84, D-sec3-6): the link `pnpm dev` printed carries this run's dev sign-in key
+// in its fragment; keep it and clear the address bar. A literal false in every build: never bundled.
+if (__FL_DEV_CODES__ && !import.meta.env.PROD) {
+  void import("./net/devKey.ts").then((m) => {
+    let store: Storage | null = null;
+    try {
+      store = localStorage;
+    } catch {
+      /* blocked storage */
+    }
+    m.adoptDevKey(location, store, (url) => history.replaceState(history.state, "", url));
+  });
+}
+
 // Playwright journeys only (?e2e): window.__fl, a separate chunk that is never fetched otherwise.
 void maybeInstallE2e(location.search, window, () => import("./debug/e2eHook.ts"));
 

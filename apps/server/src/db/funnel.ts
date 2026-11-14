@@ -6,105 +6,29 @@
 // test_account for accounts our tools flagged later).
 //
 // Bounded by construction (D-ship-6): every write goes through a daily budget per side (visits,
-// accounts, errors) and a bounded queue that one timer flushes in a single transaction, off the room
+// accounts, errors) and a bounded queue that one timer flushes in small transactions, off the room
 // tick and the request; raw rows are kept FUNNEL_LIMITS.retentionDays (longer than a visit lives) and
 // then folded into `funnel_day` aggregates: a visit's rows are deleted, an account's are kept and
 // marked `folded` (a character can come back any time; their number is bounded by accounts, and a
 // deleted account's go). The raw tables therefore never hold more than the caps × retention plus a
 // few rows per existing account.
+//
+// The game server's thread (D-sec3-1, review round three): this file is everything the funnel does
+// there, and none of it scans: the budget is counted in memory, the queue writes in slices that never
+// wait for a lock, the ingest's checks are primary-key lookups, shutdown has one deadline. Reports
+// (/stats), the daily fold and the error pruning read and rewrite whole tables, so they run in the
+// funnel's worker thread on its own connection (db/funnelService.ts, db/funnelWorker.ts,
+// db/funnelReport.ts). The synchronous funnelWindows / funnelReport / rollupFunnel /
+// pruneClientErrors below are for tools (`pnpm metrics --funnel`) and tests only.
+//
+// FUNNEL_ENABLED=0 (funnelConfig) turns all of it off: nothing is queued or stored, no timer starts.
 
-import { VISIT_TOKEN } from "../auth/visitToken.ts";
 import { stmt, type Db } from "./game-db.ts";
+import { DAY, FUNNEL_LIMITS, TUTORIAL_PREFIX, accountSubject, funnelConfig, type FunnelKind } from "./funnelRules.ts";
+import { cohortReport, foldFunnel, pruneErrors, reportWindows, type FunnelReport } from "./funnelReport.ts";
 
-const DAY = 86_400_000;
-
-/**
- * The longest a visit can still take steps after its first row (review round two, #8): renewable for
- * RENEW_MS after it began, each token live for TOKEN_TTL_MS, plus the minute of clock slack visitLive
- * allows. Raw rows are kept at least this long, so a visit whose rows are folded can never act again.
- */
-export const VISIT_LIFE_DAYS = Math.ceil((VISIT_TOKEN.RENEW_MS + VISIT_TOKEN.TOKEN_TTL_MS + 60_000) / DAY);
-
-export type FunnelKind = "person" | "test" | "agent";
-
-/** Steps the server records per account (world/funnel.ts hooks them where the server decides them). */
-export const ACCOUNT_STEPS = {
-  /** The character was created by this join (not one from before the funnel): the cohort's entry. */
-  created: "new",
-  /** First join of a world room. */
-  join: "join",
-  /** First mission accepted. */
-  mission: "mission",
-  /** First creature killed (killing blow or credited). */
-  kill: "kill",
-  level2: "level2",
-  level5: "level5",
-  /** The tutorial finished (the server pays it) or skipped. */
-  tutorialDone: "tutorial_done",
-  /** A guest saved: recorded on the account it became. */
-  saved: "saved",
-  /** The first play session ended; value = its length in ms. */
-  firstSession: "first_session",
-  /** A session on a later UTC day than the first join; value = days after it. */
-  back: "back",
-  /** The first build-tree point spent (#81; world/tree.ts). */
-  firstPoint: "first_point",
-} as const;
-
-/**
- * Visit steps the server records itself: the visit was issued (`page`), its page joined a world room
- * with the visit's token (`join`, from /api/play), it sent an error report (`crash`).
- */
-export const VISIT_SERVER_STEPS = ["page", "join", "crash"] as const;
-/** Visit steps only the page knows (client net/beacon.ts): claims, kept apart from the server's. */
-export const PAGE_STEPS = ["play", "pick", "world", "tutorial_done", "fallback", "boot_fail", "lost", "webgl_none", "narrow", "removed", "version"] as const;
-export type PageStep = (typeof PAGE_STEPS)[number];
-const PAGE_STEP_SET: ReadonlySet<string> = new Set(PAGE_STEPS);
-
-/**
- * Tutorial steps come from the client's step list (game/onboardingSteps.ts, which the play lane owns
- * and may change), so the server takes any short lowercase id and orders them by the index the
- * client sends (`value`). Bounded per visit by MAX_TUTORIAL_STEPS.
- */
-export const TUTORIAL_PREFIX = "tutorial:";
-export const MAX_TUTORIAL_STEPS = 16;
-const TUTORIAL_ID = /^[a-z][a-z0-9_]{0,23}$/;
-
-/** The most rows one visit can ever hold: each server step, each page step and the tutorial's. */
-export const MAX_VISIT_ROWS = VISIT_SERVER_STEPS.length + PAGE_STEPS.length + MAX_TUTORIAL_STEPS;
-
-/** Is `step` one a page may report? */
-export function pageStepAllowed(step: string): boolean {
-  if (PAGE_STEP_SET.has(step)) return true;
-  return step.startsWith(TUTORIAL_PREFIX) && TUTORIAL_ID.test(step.slice(TUTORIAL_PREFIX.length));
-}
-
-/**
- * The funnel's hard limits (D-ship-6). Per UTC day: visits issued, raw rows on each side, error
- * reports; past a cap the write is dropped (and /stats says the day was capped). Raw rows are kept
- * `retentionDays` (longer than a visit can act, VISIT_LIFE_DAYS), error reports `errorRetentionDays`.
- * The queue holds at most `maxPending` writes between flushes. Worst case under a sustained flood the
- * raw table holds visitRowsPerDay × (retentionDays + 1) visit rows (~1.3 M) plus the account rows,
- * which stay while the account exists (at most one per account and step, ~10 per account), and
- * client_error errorsPerDay × errorRetentionDays; `funnel_day` grows by about a hundred small rows a
- * day. Mutable for tests.
- */
-export const FUNNEL_LIMITS = {
-  visitsPerDay: 5_000,
-  visitRowsPerDay: 40_000,
-  accountRowsPerDay: 40_000,
-  errorsPerDay: 1_000,
-  /** Longer than a visit lives (VISIT_LIFE_DAYS); rollupFunnel never uses less whatever this says. */
-  retentionDays: VISIT_LIFE_DAYS + 1,
-  errorRetentionDays: 30,
-  maxPending: 5_000,
-  flushMs: 1_000,
-  /** Rows per write transaction, and the time one flush may hold the event loop before it yields. */
-  flushSlice: 200,
-  flushBudgetMs: 4,
-  /** Flush attempts a queued row gets (each failed one waits twice as long) before it is dropped. */
-  flushTries: 12,
-};
+export * from "./funnelRules.ts";
+export * from "./funnelReport.ts";
 
 export interface FunnelRow {
   subject: string;
@@ -137,37 +61,33 @@ const budgets = new WeakMap<Db, Budget>();
 const capOf = (what: Budgeted) =>
   what === "visits" ? FUNNEL_LIMITS.visitsPerDay : what === "visitRows" ? FUNNEL_LIMITS.visitRowsPerDay : what === "accountRows" ? FUNNEL_LIMITS.accountRowsPerDay : FUNNEL_LIMITS.errorsPerDay;
 
+/**
+ * Today's budget. Never a query (it may run inside a room tick; review round three): a day this
+ * process starts (a new day, the first write, a test's reset) starts from what it has queued, and at
+ * boot the worker's count of what today already holds is added (primeFunnelBudget), so a restart
+ * doesn't reset the cap.
+ */
 function budget(db: Db, now: number): Budget {
   const day = Math.floor(now / DAY);
   let b = budgets.get(db);
-  if (b && b.day !== day) {
-    // A new day in a running server: this process wrote everything since it started, so today starts
-    // from what it has queued, with no query (it may run inside a room tick).
+  if (!b || b.day !== day) {
     b = { day, used: { visits: 0, visitRows: 0, accountRows: 0, errors: 0 } };
-    for (const p of pending) if (p.db === db) b.used[p.kind === "error" ? "errors" : p.row.subject.startsWith("v:") ? "visitRows" : "accountRows"]++;
-    budgets.set(db, b);
-  } else if (!b) {
-    // The first write since start (or a test's reset): count what today already holds, so a restart
-    // doesn't reset the cap.
-    const since = day * DAY;
-    const n = (sql: string) => (stmt(db, sql).get(since) as { n: number }).n;
-    b = {
-      day,
-      used: {
-        visits: n("SELECT COUNT(*) AS n FROM funnel_step WHERE at >= ? AND step = 'page' AND subject LIKE 'v:%'"),
-        visitRows: n("SELECT COUNT(*) AS n FROM funnel_step WHERE at >= ? AND subject LIKE 'v:%'"),
-        accountRows: n("SELECT COUNT(*) AS n FROM funnel_step WHERE at >= ? AND subject LIKE 'u:%'"),
-        errors: n("SELECT COUNT(*) AS n FROM client_error WHERE at >= ?"),
-      },
-    };
     for (const p of pending) if (p.db === db) b.used[p.kind === "error" ? "errors" : p.row.subject.startsWith("v:") ? "visitRows" : "accountRows"]++;
     budgets.set(db, b);
   }
   return b;
 }
 
+/** Add what today already holds in storage (counted by the worker at boot: db/funnelService.ts) to today's budget. */
+export function primeFunnelBudget(db: Db, stored: { day: number } & Record<Budgeted, number>, now = Date.now()): void {
+  const b = budget(db, now);
+  if (b.day !== stored.day) return; // counted yesterday: today starts from the queue
+  for (const k of ["visits", "visitRows", "accountRows", "errors"] as const) b.used[k] += stored[k];
+}
+
 /** Spend one unit of today's budget; false (nothing spent) when the cap is reached. */
 export function takeBudget(db: Db, what: Budgeted, now = Date.now()): boolean {
+  if (!funnelConfig.enabled) return false;
   const b = budget(db, now);
   if (b.used[what] >= capOf(what)) return false;
   b.used[what]++;
@@ -194,9 +114,10 @@ export function resetFunnelBudgets(db?: Db): void {
 // (busy_timeout 0), and yields after flushBudgetMs: a locked or slow database makes it stop at once
 // and try again later (backoff doubling from flushMs), so the simulation never waits on funnel storage
 // for more than a slice (review round two, finding 5). A row that can't be written stays queued; after
-// flushTries attempts (about four minutes of backoff) it is dropped. Every retry and drop is counted (funnelQueueState, /stats), so an
-// accepted step is never lost without a trace (finding 7). Only close() writes with the normal lock
-// wait, everything that is left.
+// flushTries attempts (about four minutes of backoff) it is dropped. Every retry and drop is counted
+// (funnelQueueState, /stats), so an accepted step is never lost without a trace (finding 7). Shutdown
+// (closeFunnel) writes the same way, never waiting for a lock, until one overall deadline; what is
+// left then is counted lost and logged once (review round three, #3).
 
 type Pending = (
   | { db: Db; kind: "step"; row: { subject: string; step: string; at: number; value: number | null; detail: string | null; kind: FunnelKind } }
@@ -247,6 +168,7 @@ const INSERT_ERROR = "INSERT INTO client_error (at, sig, message, stack, build, 
  * False when today's budget for its side is spent or the queue is full: the row is dropped.
  */
 export function queueStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
+  if (!funnelConfig.enabled) return false;
   const row = normalise(r, now);
   if (pendingIndex(db, row.subject, row.step) >= 0) return true; // already on its way
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
@@ -259,6 +181,7 @@ export function queueStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
 
 /** Write a step now, inside the caller's transaction (the account link). Budgeted like queueStep. */
 export function recordStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
+  if (!funnelConfig.enabled) return false;
   const row = normalise(r, now);
   if (!takeBudget(db, row.subject.startsWith("v:") ? "visitRows" : "accountRows", now)) return false;
   return stmt(db, INSERT_STEP).run(row.subject, row.step, row.at, row.value, row.detail, row.kind).changes === 1;
@@ -266,6 +189,7 @@ export function recordStep(db: Db, r: FunnelRow, now = Date.now()): boolean {
 
 /** Queue a client error report (budgeted per day). */
 export function queueClientError(db: Db, e: ClientErrorRow, now = Date.now()): boolean {
+  if (!funnelConfig.enabled) return false;
   if (pending.length >= FUNNEL_LIMITS.maxPending) {
     queueStats.dropped++;
     return false;
@@ -295,13 +219,13 @@ function writeRow(db: Db, p: Pending): number {
 /** A lock held by another connection (or this one's open transaction): try again later, nothing is wrong with the rows. */
 const locked = (err: unknown) => /^SQLITE_(BUSY|LOCKED)/.test(String((err as { code?: unknown }).code ?? ""));
 
-/** Rows that can't be written any more: counted as lost (with the reason) and logged. */
-function drop(rows: Pending[], err: unknown, gone: Set<Pending>): void {
+/** Rows that can't be written any more: counted as lost (with the reason) and logged (unless the caller logs once for all: shutdown). */
+function drop(rows: Pending[], err: unknown, gone: Set<Pending>, quiet = false): void {
   if (!rows.length) return;
   queueStats.lastError = String((err as Error)?.message ?? err).slice(0, 120);
   queueStats.lost += rows.length;
   for (const p of rows) gone.add(p);
-  console.warn(`funnel: ${rows.length} queued write(s) dropped: ${queueStats.lastError}`);
+  if (!quiet) console.warn(`funnel: ${rows.length} queued write(s) dropped: ${queueStats.lastError}`);
 }
 
 /** One failed attempt for `rows`: each spends a try; out of tries it is dropped, else it waits (a retry). */
@@ -323,11 +247,12 @@ function forget(gone: Set<Pending>): void {
 
 /**
  * Write what is queued (for one database, or all) in slices of FUNNEL_LIMITS.flushSlice rows, each
- * its own transaction, without waiting for a lock: a lock stops the attempt at once (every waiting
- * row of that database spends one of its flushTries and the next attempt backs off), and after
- * flushBudgetMs it stops and goes on after the event loop had its turn. `final` (shutdown): wait for
- * locks as usual and write everything; what still fails is counted as lost. Never throws. Returns
- * the rows written.
+ * its own transaction, without ever waiting for a lock: a lock stops the attempt at once (every
+ * waiting row of that database spends one of its flushTries and the next attempt backs off), and
+ * after flushBudgetMs it stops and goes on after the event loop had its turn. `final` (shutdown's
+ * attempts, closeFunnel): the same, but no try is spent and nothing is scheduled; a row that fails
+ * for another reason than a lock is lost quietly (closeFunnel logs once). Never throws. Returns the
+ * rows written.
  */
 export function flushFunnel(only?: Db, opts: { final?: boolean } = {}): number {
   if (!only && timer) {
@@ -349,15 +274,15 @@ export function flushFunnel(only?: Db, opts: { final?: boolean } = {}): number {
     const mine = pending.filter((p) => p.db === db);
     if (!mine.length) continue;
     if (!db.open) {
-      drop(mine, new Error("database closed"), gone);
+      drop(mine, new Error("database closed"), gone, final);
       continue;
     }
-    const wait = final ? null : (db.pragma("busy_timeout", { simple: true }) as number);
-    if (wait !== null) db.pragma("busy_timeout = 0");
+    const wait = db.pragma("busy_timeout", { simple: true }) as number;
+    db.pragma("busy_timeout = 0");
     try {
       for (let i = 0; i < mine.length; i += FUNNEL_LIMITS.flushSlice) {
         // At least one slice per attempt, however slow the machine is; then the time budget.
-        if (!final && written + gone.size > 0 && performance.now() - started >= FUNNEL_LIMITS.flushBudgetMs) {
+        if (written + gone.size > 0 && performance.now() - started >= FUNNEL_LIMITS.flushBudgetMs) {
           outOfTime = true;
           break;
         }
@@ -370,40 +295,65 @@ export function flushFunnel(only?: Db, opts: { final?: boolean } = {}): number {
           written += n;
           for (const p of part) gone.add(p);
         } catch (err) {
-          if (!final && locked(err)) {
-            attemptFailed(mine.slice(i), err, gone);
+          if (locked(err)) {
+            if (final) queueStats.lastError = String((err as Error)?.message ?? err).slice(0, 120);
+            else attemptFailed(mine.slice(i), err, gone);
             stalled = true;
             break; // this database is busy: the rest waits for the next attempt
           }
-          // Not a lock (or shutdown): write row by row; a row that fails spends a try.
+          // Not a lock: write row by row; a row that fails spends a try (at shutdown it is lost).
           for (const p of part) {
             try {
               written += writeRow(db, p);
               gone.add(p);
             } catch (e) {
-              if (final) drop([p], e, gone);
+              if (final) drop([p], e, gone, true);
               else attemptFailed([p], e, gone);
             }
           }
-          if (!final && part.some((p) => !gone.has(p))) stalled = true;
+          if (part.some((p) => !gone.has(p))) stalled = true;
         }
       }
     } finally {
-      if (wait !== null && db.open) db.pragma(`busy_timeout = ${wait}`);
+      if (db.open) db.pragma(`busy_timeout = ${wait}`);
     }
     if (outOfTime) break;
   }
   forget(gone);
-  if (final) {
-    // Shutdown: whatever is left for these databases can't be written any more.
-    const lost = new Set<Pending>();
-    drop(pending.filter((p) => dbs.includes(p.db)), new Error(queueStats.lastError || "not written at shutdown"), lost);
-    forget(lost);
-    return written;
-  }
+  if (final) return written;
   failures = stalled ? failures + 1 : 0;
   if (pending.length) schedule(stalled ? Math.min(FUNNEL_LIMITS.flushMs * 2 ** (failures - 1), 30_000) : outOfTime ? 0 : FUNNEL_LIMITS.flushMs);
   return written;
+}
+
+/**
+ * Shutdown (review round three, #3): write what is queued for `db` the way the timer does (slices,
+ * no lock wait, never more than flushBudgetMs at a time), trying again every few milliseconds, until
+ * the queue is empty or `deadlineMs` has passed overall. What is left then can't be written: counted
+ * as lost and logged once. The game's thread is never held longer than one attempt.
+ */
+export async function closeFunnel(db: Db, deadlineMs = FUNNEL_LIMITS.closeDeadlineMs): Promise<{ written: number; lost: number }> {
+  const end = performance.now() + deadlineMs;
+  const lostBefore = queueStats.lost;
+  const mine = () => pending.some((p) => p.db === db);
+  let written = 0;
+  while (mine() && db.open) {
+    const n = flushFunnel(db, { final: true });
+    written += n;
+    const left = end - performance.now();
+    if (!mine() || left <= 0) break;
+    // Progress: let the event loop turn and go on; a lock (or a failure): try again a little later.
+    await new Promise((ok) => (n > 0 ? setImmediate(ok) : setTimeout(ok, Math.min(20, left))));
+  }
+  const left = pending.filter((p) => p.db === db);
+  if (left.length) {
+    const gone = new Set<Pending>();
+    drop(left, new Error(queueStats.lastError || "not written by the shutdown deadline"), gone, true);
+    forget(gone);
+  }
+  const lost = queueStats.lost - lostBefore;
+  if (lost) console.warn(`funnel: ${lost} queued write(s) not written at shutdown (deadline ${deadlineMs} ms), counted lost: ${queueStats.lastError}`);
+  return { written, lost };
 }
 
 /**
@@ -441,8 +391,6 @@ export function subjectRowCount(db: Db, subject: string): { rows: number; tutori
   return r;
 }
 
-export const accountSubject = (userId: string) => `u:${userId}`;
-export const visitSubject = (visitId: string) => `v:${visitId}`;
 
 /**
  * A guest saved (or signed into an existing account): its funnel rows follow it to the account; where
@@ -463,386 +411,35 @@ export function moveFunnel(db: Db, fromUserId: string, toUserId: string): void {
   stmt(db, "DELETE FROM funnel_step WHERE subject = ?").run(from);
 }
 
-// ---- the report behind /stats ------------------------------------------------------------------
 
-/** The effective kind on read: an account our tools flagged after its rows were written is a test one. */
-const KIND_SQL = `CASE WHEN f.subject LIKE 'u:%' AND EXISTS (SELECT 1 FROM test_account t WHERE t.user_id = substr(f.subject, 3)) THEN 'test' ELSE f.kind END`;
+// ---- for tools and tests: the reports on the caller's thread ---------------------------------------
 
-const hasFoldedColumn = new WeakMap<Db, boolean>();
-/** `f.folded`, or 0 on a game.db from before migration 13 (`pnpm metrics --funnel-db` opens old copies read-only). */
-function foldedSql(db: Db): string {
-  let has = hasFoldedColumn.get(db);
-  if (has === undefined) hasFoldedColumn.set(db, (has = !!db.prepare("SELECT 1 FROM pragma_table_info('funnel_step') WHERE name = 'folded'").get()));
-  return has ? "f.folded" : "0";
+/** Today's caps and the queue, added to a report on the game's thread (cheap: memory only). */
+export function withLimits<T extends { limits: { retentionDays: number; errorRetentionDays: number } }>(r: T, db: Db, now = Date.now()) {
+  return { ...r, limits: { ...r.limits, today: budgetState(db, now), queue: funnelQueueState() } };
 }
 
-export interface FunnelStepCount {
-  step: string;
-  n: number;
-  /** For tutorial steps: the client's index of the step (its order in the tutorial). */
-  order: number | null;
-}
-
-/** A KPI's numerator and denominator: subjects that reached both steps, over those that reached the first. */
-export interface Pair {
-  num: number;
-  den: number;
-}
-
-export interface FunnelReport {
-  since: number;
-  /** Visits (browsers) whose first row is in the window, by step. */
-  visits: Record<string, number>;
-  /** New characters (accounts with a `new` row) whose first row is in the window, by step. */
-  accounts: Record<string, number>;
-  /** Tutorial steps in the tutorial's order (visits). */
-  tutorial: FunnelStepCount[];
-  /** The KPIs' pairs by KPI id (funnelKpis). */
-  pairs: Record<string, Pair>;
-  /** Median seconds from Play to the world on screen (the page's timing, visits the server saw join), and how many. */
-  medianWorldS: number | null;
-  worldN: number;
-  /** Median length of the first play session (new characters), and how many. */
-  medianFirstSessionMs: number | null;
-  firstSessionN: number;
-  /** Renderer backend / tier the visits that got in picked (`world` detail, "webgpu/medium"). */
-  backend: Record<string, number>;
-  tier: Record<string, number>;
-  /** Renderer fallbacks by reason. */
-  fallback: Record<string, number>;
-  /** Subjects by kind in the window: people's are the figures, the others are counted apart. */
-  apart: { test: number; agent: number };
-}
-
-const median = (xs: number[]): number | null => {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)]!;
-};
-
-/** The KPIs' pair ids, in funnelKpis' order. */
-const PAIR_IDS = ["gets_in", "gets_in_page", "tutorial", "mission", "level5", "back_week", "level2_saved", "crash_free"] as const;
-
-/**
- * The funnel for subjects whose first row falls in [since, until), people only. A visit counts from
- * its issue; an account only if its character was created under the funnel (`new`: returning
- * characters are not new ones). Every KPI counts subjects that reached both of its steps.
- */
-export function funnelReport(db: Db, since = 0, now = Date.now(), until = Number.MAX_SAFE_INTEGER): FunnelReport {
-  flushFunnel(db); // queued rows count too
-  // Subjects whose cohort day was folded (funnel_day holds them) are left out, whatever they did since.
-  const rows = stmt(
-    db,
-    `WITH f AS (SELECT subject, step, at, value, detail, ${KIND_SQL} AS kind, ${foldedSql(db)} AS folded FROM funnel_step f),
-          cohort AS (SELECT subject FROM f GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MIN(kind = 'person') = 1 AND MAX(folded) = 0)
-     SELECT f.subject, f.step, f.at, f.value, f.detail FROM f JOIN cohort USING (subject)`,
-  ).all(since, until) as { subject: string; step: string; at: number; value: number | null; detail: string | null }[];
-  const apartRows = stmt(
-    db,
-    `WITH f AS (SELECT subject, at, ${KIND_SQL} AS kind, ${foldedSql(db)} AS folded FROM funnel_step f),
-          live AS (SELECT subject FROM f GROUP BY subject HAVING MAX(folded) = 0)
-     SELECT kind, COUNT(DISTINCT subject) AS n FROM f JOIN live USING (subject) WHERE at >= ? AND at < ? AND kind != 'person' GROUP BY kind`,
-  ).all(since, until) as { kind: string; n: number }[];
-  const out: FunnelReport = {
-    since,
-    visits: {},
-    accounts: {},
-    tutorial: [],
-    pairs: Object.fromEntries(PAIR_IDS.map((id) => [id, { num: 0, den: 0 }])),
-    medianWorldS: null,
-    worldN: 0,
-    medianFirstSessionMs: null,
-    firstSessionN: 0,
-    backend: {},
-    tier: {},
-    fallback: {},
-    apart: { test: 0, agent: 0 },
-  };
-  for (const a of apartRows) if (a.kind === "test" || a.kind === "agent") out.apart[a.kind] = a.n;
-  const bump = (m: Record<string, number>, k: string) => (m[k] = (m[k] ?? 0) + 1);
-  const pair = (id: (typeof PAIR_IDS)[number], den: boolean, num: boolean) => {
-    if (!den) return;
-    out.pairs[id]!.den++;
-    if (num) out.pairs[id]!.num++;
-  };
-  const bySubject = new Map<string, Map<string, { at: number; value: number | null; detail: string | null }>>();
-  for (const r of rows) {
-    let steps = bySubject.get(r.subject);
-    if (!steps) bySubject.set(r.subject, (steps = new Map()));
-    steps.set(r.step, { at: r.at, value: r.value, detail: r.detail });
-  }
-  const worldS: number[] = [];
-  const firstSession: number[] = [];
-  const tutorial = new Map<string, { n: number; orders: number[] }>();
-  for (const [subject, steps] of bySubject) {
-    const has = (s: string) => steps.has(s);
-    if (subject.startsWith("v:")) {
-      for (const step of steps.keys()) bump(out.visits, step);
-      for (const [step, s] of steps) {
-        if (!step.startsWith(TUTORIAL_PREFIX)) continue;
-        const id = step.slice(TUTORIAL_PREFIX.length);
-        let t = tutorial.get(id);
-        if (!t) tutorial.set(id, (t = { n: 0, orders: [] }));
-        t.n++;
-        if (s.value !== null) t.orders.push(s.value);
-      }
-      const play = has("play");
-      const join = has("join");
-      pair("gets_in", play, join); // the headline: the server saw the visit join a world
-      pair("gets_in_page", play, has("world")); // the page's own report of the world on screen
-      pair("crash_free", join, has("crash"));
-      const world = steps.get("world");
-      if (world) {
-        if (play && join && world.value !== null) worldS.push(world.value);
-        const [backend, tier] = (world.detail ?? "").split("/");
-        bump(out.backend, backend || "unknown");
-        bump(out.tier, tier || "unknown");
-      }
-      const fb = steps.get("fallback");
-      if (fb) bump(out.fallback, fb.detail || "unknown");
-      continue;
-    }
-    // Accounts: new characters only.
-    if (!has(ACCOUNT_STEPS.created)) continue;
-    for (const step of steps.keys()) bump(out.accounts, step);
-    const join = steps.get(ACCOUNT_STEPS.join);
-    pair("tutorial", !!join, has(ACCOUNT_STEPS.tutorialDone));
-    pair("mission", !!join, has(ACCOUNT_STEPS.mission));
-    pair("level5", !!join, has(ACCOUNT_STEPS.level5));
-    const back = steps.get(ACCOUNT_STEPS.back);
-    pair("back_week", !!join && now - join.at >= 7 * DAY, !!back && back.value !== null && back.value <= 7);
-    pair("level2_saved", has(ACCOUNT_STEPS.level2), has(ACCOUNT_STEPS.saved));
-    const fs = steps.get(ACCOUNT_STEPS.firstSession);
-    if (join && fs && fs.value !== null) firstSession.push(fs.value);
-  }
-  out.tutorial = [...tutorial.entries()]
-    .map(([step, t]) => ({ step, n: t.n, order: median(t.orders) }))
-    .sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || b.n - a.n);
-  out.medianWorldS = median(worldS);
-  out.worldN = worldS.length;
-  out.medianFirstSessionMs = median(firstSession);
-  out.firstSessionN = firstSession.length;
-  return out;
-}
-
-// ---- retention: old cohort days folded into funnel_day ----------------------------------------------
-
-const dayKey = (day: number) => new Date(day * DAY).toISOString().slice(0, 10);
-
-/**
- * Fold every cohort day older than the retention into `funnel_day` (daily housekeeping). A subject
- * belongs to the day of its first row; its later rows go with it. A subject that can still act is
- * never forgotten (review round two, #8), by construction: raw rows are kept longer than a visit can
- * take steps (VISIT_LIFE_DAYS, whatever FUNNEL_LIMITS says), so a folded visit's rows are deleted;
- * an account can come back any time, so a folded account's rows stay, marked `folded` (its first
- * join and steps stay known, and reports leave it out: its day is in funnel_day). Their number is
- * bounded by accounts: when an account is deleted (guest pruning) its rows go here too.
- */
-export function rollupFunnel(db: Db, now = Date.now()): number {
-  flushFunnel(db);
-  const keepDays = Math.max(FUNNEL_LIMITS.retentionDays, VISIT_LIFE_DAYS);
-  const cutoff = Math.floor(now / DAY) * DAY - keepDays * DAY;
-  const days = (stmt(db, "SELECT DISTINCT first / 86400000 AS d FROM (SELECT MIN(at) AS first FROM funnel_step GROUP BY subject HAVING MAX(folded) = 0) WHERE first < ? ORDER BY d").all(cutoff) as { d: number }[]).map((r) => Math.floor(r.d));
-  const put = stmt(db, "INSERT INTO funnel_day (day, metric, num, den, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT (day, metric) DO UPDATE SET num = num + excluded.num, den = den + excluded.den, value = COALESCE(excluded.value, value)");
-  const cohort = "SELECT subject FROM funnel_step GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MAX(folded) = 0";
-  for (const d of days) {
-    const since = d * DAY;
-    const r = funnelReport(db, since, now, since + DAY);
-    const key = dayKey(d);
-    db.transaction(() => {
-      for (const [id, p] of Object.entries(r.pairs)) if (p.den) put.run(key, `pair:${id}`, p.num, p.den, null);
-      for (const [step, n] of Object.entries(r.visits)) put.run(key, `visit:${step}`, n, 0, null);
-      for (const [step, n] of Object.entries(r.accounts)) put.run(key, `account:${step}`, n, 0, null);
-      for (const t of r.tutorial) put.run(key, `tutorial:${t.step}`, t.n, 0, t.order);
-      if (r.worldN) put.run(key, "median:world", r.worldN, 0, r.medianWorldS);
-      if (r.firstSessionN) put.run(key, "median:first_session", r.firstSessionN, 0, r.medianFirstSessionMs);
-      if (r.apart.test) put.run(key, "apart:test", r.apart.test, 0, null);
-      if (r.apart.agent) put.run(key, "apart:agent", r.apart.agent, 0, null);
-      stmt(db, `DELETE FROM funnel_step WHERE subject LIKE 'v:%' AND subject IN (${cohort})`).run(since, since + DAY);
-      stmt(db, `UPDATE funnel_step SET folded = 1 WHERE subject LIKE 'u:%' AND subject IN (${cohort})`).run(since, since + DAY);
-    })();
-  }
-  // A folded account that no longer exists can't come back: its rows go.
-  stmt(db, "DELETE FROM funnel_step WHERE subject IN (SELECT DISTINCT subject FROM funnel_step f WHERE f.folded = 1 AND f.subject LIKE 'u:%' AND NOT EXISTS (SELECT 1 FROM account a WHERE a.user_id = substr(f.subject, 3)))").run();
-  return days.length;
-}
-
-/** The folded days as one report (everything before the retained raw rows). */
-export function storedReport(db: Db): FunnelReport {
-  // A game.db opened read-only from before migration 12 (`pnpm metrics --funnel-db`) has no folded days.
-  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'funnel_day'").get()) return funnelReportEmpty(0);
-  const rows = stmt(db, "SELECT metric, num, den, value FROM funnel_day").all() as { metric: string; num: number; den: number; value: number | null }[];
-  const out = funnelReportEmpty(0);
-  const worlds: [number, number][] = [];
-  const sessions: [number, number][] = [];
-  const tutorial = new Map<string, { n: number; orders: [number, number][] }>();
-  for (const r of rows) {
-    const [kind, name] = [r.metric.slice(0, r.metric.indexOf(":")), r.metric.slice(r.metric.indexOf(":") + 1)];
-    if (kind === "pair") {
-      const p = (out.pairs[name] ??= { num: 0, den: 0 });
-      p.num += r.num;
-      p.den += r.den;
-    } else if (kind === "visit") out.visits[name] = (out.visits[name] ?? 0) + r.num;
-    else if (kind === "account") out.accounts[name] = (out.accounts[name] ?? 0) + r.num;
-    else if (kind === "tutorial") {
-      let t = tutorial.get(name);
-      if (!t) tutorial.set(name, (t = { n: 0, orders: [] }));
-      t.n += r.num;
-      if (r.value !== null) t.orders.push([r.value, r.num]);
-    } else if (kind === "median" && r.value !== null) (name === "world" ? worlds : sessions).push([r.value, r.num]);
-    else if (kind === "apart" && (name === "test" || name === "agent")) out.apart[name] += r.num;
-  }
-  out.tutorial = [...tutorial].map(([step, t]) => ({ step, n: t.n, order: weightedMedian(t.orders) }));
-  out.medianWorldS = weightedMedian(worlds);
-  out.worldN = worlds.reduce((a, w) => a + w[1], 0);
-  out.medianFirstSessionMs = weightedMedian(sessions);
-  out.firstSessionN = sessions.reduce((a, w) => a + w[1], 0);
-  return out;
-}
-
-function funnelReportEmpty(since: number): FunnelReport {
-  return { since, visits: {}, accounts: {}, tutorial: [], pairs: Object.fromEntries(PAIR_IDS.map((id) => [id, { num: 0, den: 0 }])), medianWorldS: null, worldN: 0, medianFirstSessionMs: null, firstSessionN: 0, backend: {}, tier: {}, fallback: {}, apart: { test: 0, agent: 0 } };
-}
-
-/** The median of values each standing for `weight` subjects (folded days keep their medians, not every value). */
-function weightedMedian(xs: [number, number][]): number | null {
-  const total = xs.reduce((a, x) => a + x[1], 0);
-  if (!total) return null;
-  const s = [...xs].sort((a, b) => a[0] - b[0]);
-  let seen = 0;
-  for (const [v, w] of s) {
-    seen += w;
-    if (seen > total / 2) return v;
-  }
-  return s[s.length - 1]![0];
-}
-
-/** Two reports over disjoint cohorts as one (the retained raw rows and the folded days). Medians are weighted medians. */
-export function mergeReports(a: FunnelReport, b: FunnelReport): FunnelReport {
-  const add = (x: Record<string, number>, y: Record<string, number>) => {
-    const o = { ...x };
-    for (const [k, n] of Object.entries(y)) o[k] = (o[k] ?? 0) + n;
-    return o;
-  };
-  const pairs: Record<string, Pair> = {};
-  for (const id of new Set([...Object.keys(a.pairs), ...Object.keys(b.pairs)])) pairs[id] = { num: (a.pairs[id]?.num ?? 0) + (b.pairs[id]?.num ?? 0), den: (a.pairs[id]?.den ?? 0) + (b.pairs[id]?.den ?? 0) };
-  const tut = new Map<string, { n: number; orders: [number, number][] }>();
-  for (const t of [...a.tutorial, ...b.tutorial]) {
-    let m = tut.get(t.step);
-    if (!m) tut.set(t.step, (m = { n: 0, orders: [] }));
-    m.n += t.n;
-    if (t.order !== null) m.orders.push([t.order, t.n]);
-  }
-  const med = (x: number | null, xn: number, y: number | null, yn: number) => weightedMedian([...(x === null ? [] : [[x, xn] as [number, number]]), ...(y === null ? [] : [[y, yn] as [number, number]])]);
-  return {
-    since: Math.min(a.since, b.since),
-    visits: add(a.visits, b.visits),
-    accounts: add(a.accounts, b.accounts),
-    tutorial: [...tut].map(([step, t]) => ({ step, n: t.n, order: weightedMedian(t.orders) })).sort((x, y) => (x.order ?? 99) - (y.order ?? 99) || y.n - x.n),
-    pairs,
-    medianWorldS: med(a.medianWorldS, a.worldN, b.medianWorldS, b.worldN),
-    worldN: a.worldN + b.worldN,
-    medianFirstSessionMs: med(a.medianFirstSessionMs, a.firstSessionN, b.medianFirstSessionMs, b.firstSessionN),
-    firstSessionN: a.firstSessionN + b.firstSessionN,
-    backend: add(a.backend, b.backend),
-    tier: add(a.tier, b.tier),
-    fallback: add(a.fallback, b.fallback),
-    apart: { test: a.apart.test + b.apart.test, agent: a.apart.agent + b.apart.agent },
-  };
-}
-
-// ---- client errors ------------------------------------------------------------------------------
-
-export interface ClientErrorSummary {
-  sig: string;
-  message: string;
-  stack: string;
-  build: string;
-  count: number;
-  lastAt: number;
-  /** "webgpu/medium: 3, webgl2/low: 1" */
-  where: string;
-}
-
-/** People's client errors since `since`, grouped by kind (newest first), and the reports kept apart. */
-export function clientErrorReport(db: Db, since = 0, limit = 20): { total: number; kinds: ClientErrorSummary[]; apart: number } {
-  const rows = stmt(
-    db,
-    `SELECT sig, message, stack, build, tier, backend, at FROM client_error WHERE at >= ? AND kind = 'person' ORDER BY at DESC`,
-  ).all(since) as { sig: string; message: string; stack: string; build: string; tier: string | null; backend: string | null; at: number }[];
-  const apart = (stmt(db, "SELECT COUNT(*) AS n FROM client_error WHERE at >= ? AND kind != 'person'").get(since) as { n: number }).n;
-  const by = new Map<string, ClientErrorSummary & { places: Map<string, number> }>();
-  for (const r of rows) {
-    let s = by.get(r.sig);
-    if (!s) by.set(r.sig, (s = { sig: r.sig, message: r.message, stack: r.stack, build: r.build, count: 0, lastAt: r.at, where: "", places: new Map() }));
-    s.count++;
-    const place = `${r.backend ?? "?"}/${r.tier ?? "?"}`;
-    s.places.set(place, (s.places.get(place) ?? 0) + 1);
-  }
-  const kinds = [...by.values()]
-    .sort((a, b) => b.count - a.count || b.lastAt - a.lastAt)
-    .slice(0, limit)
-    .map(({ places, ...s }) => ({ ...s, where: [...places].map(([k, n]) => `${k}: ${n}`).join(", ") }));
-  return { total: rows.length, kinds, apart };
-}
-
-export function pruneClientErrors(db: Db, olderThanMs = FUNNEL_LIMITS.errorRetentionDays * DAY, now = Date.now()): number {
-  flushFunnel(db);
-  return stmt(db, "DELETE FROM client_error WHERE at < ?").run(now - olderThanMs).changes;
-}
-
-// ---- the #85 launch KPIs from a report (shared by /stats and `pnpm metrics`) ------------------------
-
-export interface FunnelKpi {
-  id: string;
-  /** #85's wording. */
-  label: string;
-  /** "80%", "under 30 s" … */
-  target: string;
-  unit: "share" | "s" | "ms";
-  /** Who vouches for the figure: the server decided both steps, or the numerator is the page's report. */
-  source: "server" | "page";
-  /** The figure (a share 0–1, seconds or ms), null with no data. */
-  value: number | null;
-  num?: number;
-  den?: number;
-  /** Target met (null: no data). */
-  ok: boolean | null;
-}
-
-export function funnelKpis(r: FunnelReport): FunnelKpi[] {
-  const share = (id: (typeof PAIR_IDS)[number], label: string, target: number, source: FunnelKpi["source"], below = false): FunnelKpi => {
-    const { num, den } = r.pairs[id] ?? { num: 0, den: 0 };
-    const value = den ? num / den : null;
-    return { id, label, target: below ? (target === 0 ? "none" : `${Math.round(target * 100)}% or less`) : `${Math.round(target * 100)}%`, unit: "share", source, value, num, den, ok: value === null ? null : below ? value <= target : value >= target };
-  };
-  return [
-    share("gets_in", "Play presses that reach the world", 0.8, "server"),
-    share("gets_in_page", "Play presses that show the world (the page's report)", 0.8, "page"),
-    { id: "gets_in_s", label: "Median Play → world (the page's timing)", target: "under 30 s", unit: "s", source: "page", value: r.medianWorldS, num: r.worldN, ok: r.medianWorldS === null ? null : r.medianWorldS < 30 },
-    share("tutorial", "New characters that finish the tutorial", 0.6, "server"),
-    share("mission", "New characters that take a mission", 0.4, "server"),
-    { id: "first_session_ms", label: "Median first session", target: "over 10 min", unit: "ms", source: "server", value: r.medianFirstSessionMs, num: r.firstSessionN, ok: r.medianFirstSessionMs === null ? null : r.medianFirstSessionMs > 600_000 },
-    share("level5", "New characters that reach level 5", 0.25, "server"),
-    share("back_week", "Back within a week (characters at least 7 days old)", 0.15, "server"),
-    share("level2_saved", "Level-2 players who save", 0.3, "server"),
-    share("crash_free", "Visits in the world that hit a client error", 0, "page", true),
-  ];
-}
-
-/** The funnel's steps in their order, for the step tables (visits, then accounts). */
-export const VISIT_FUNNEL: readonly string[] = ["page", "play", "pick", "join", "world", "tutorial_done"];
-export const ACCOUNT_FUNNEL: readonly string[] = [ACCOUNT_STEPS.join, ACCOUNT_STEPS.kill, ACCOUNT_STEPS.mission, ACCOUNT_STEPS.level2, ACCOUNT_STEPS.tutorialDone, ACCOUNT_STEPS.level5, ACCOUNT_STEPS.saved, ACCOUNT_STEPS.firstSession, ACCOUNT_STEPS.back];
-
-/** The funnel over the last day, 7 days and all time (retained rows plus folded days): what /stats shows and `pnpm metrics --funnel` reads. */
+/** The funnel over the last day, 7 days and all time, synchronously. Tools and tests only: the server's /stats asks the worker (db/funnelService.ts). */
 export function funnelWindows(db: Db, now = Date.now()) {
-  flushFunnel(db);
-  const windows = { day: funnelReport(db, now - DAY, now), week: funnelReport(db, now - 7 * DAY, now), all: mergeReports(funnelReport(db, 0, now), storedReport(db)) };
-  return {
-    windows,
-    kpis: { day: funnelKpis(windows.day), week: funnelKpis(windows.week), all: funnelKpis(windows.all) },
-    errors: { day: clientErrorReport(db, now - DAY), week: clientErrorReport(db, now - 7 * DAY), all: clientErrorReport(db, 0) },
-    limits: { today: budgetState(db, now), queue: funnelQueueState(), retentionDays: FUNNEL_LIMITS.retentionDays, errorRetentionDays: FUNNEL_LIMITS.errorRetentionDays },
-  };
+  flushFunnel(db); // queued rows count too
+  return withLimits(reportWindows(db, now), db, now);
 }
 export type FunnelWindows = ReturnType<typeof funnelWindows>;
+
+/** One cohort window, synchronously (tests). */
+export function funnelReport(db: Db, since = 0, now = Date.now(), until = Number.MAX_SAFE_INTEGER): FunnelReport {
+  flushFunnel(db);
+  return cohortReport(db, since, now, until);
+}
+
+/** Fold old cohort days, synchronously (tests; the server's daily housekeeping runs it in the worker). */
+export function rollupFunnel(db: Db, now = Date.now()): number {
+  flushFunnel(db);
+  return foldFunnel(db, now, { retentionDays: FUNNEL_LIMITS.retentionDays });
+}
+
+/** Delete old client error reports, synchronously (tests; the server's housekeeping runs it in the worker). */
+export function pruneClientErrors(db: Db, olderThanMs = FUNNEL_LIMITS.errorRetentionDays * DAY, now = Date.now()): number {
+  flushFunnel(db);
+  return pruneErrors(db, olderThanMs, now);
+}

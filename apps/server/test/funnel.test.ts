@@ -18,6 +18,8 @@ import { INGEST, ingestConfig } from "../src/ops/funnel.ts";
 import {
   FUNNEL_LIMITS,
   MAX_VISIT_ROWS,
+  closeFunnel,
+  funnelConfig,
   VISIT_LIFE_DAYS,
   accountSubject,
   clientErrorReport,
@@ -27,6 +29,7 @@ import {
   funnelReport,
   funnelWindows,
   hasStep,
+  type FunnelWindows,
   queueStep,
   recordStep,
   resetFunnelBudgets,
@@ -49,18 +52,21 @@ afterEach(async () => {
   Object.assign(INGEST, saved.ingest);
   Object.assign(FUNNEL_LIMITS, saved.limits);
   ingestConfig.loadtestSecret = saved.tool;
+  funnelConfig.enabled = true;
   for (const r of harness.rooms.splice(0)) await safeLeave(r);
   harness.game = null;
   await server?.close();
   server = null;
 });
 
-async function start() {
+async function start(over: Parameters<typeof startAuthServer>[0] = {}) {
   server = await startAuthServer({
+    ...over,
     adminClaimToken: CLAIM_TOKEN,
     extraRoutes: (app, a) => mountOps(app, { db: a.db, requireAdmin: a.requireAdmin, allowedOrigins: [ORIGIN] }),
   });
   harness.game = server.game;
+  if (server.accounts.funnel) await server.accounts.housekeep(); // the boot housekeeping (in the funnel's worker) is done before a test writes old rows
   resetFunnelBudgets(server.accounts.db);
   return server;
 }
@@ -624,6 +630,95 @@ describe("funnel writes never hold the game's thread, and an accepted step is ne
         other.exec("ROLLBACK");
       } catch {}
       done();
+    }
+  }, 30_000);
+});
+
+// The off switch (FUNNEL_ENABLED=0): the owner can deploy with the funnel off and turn it on later
+// with a server restart, no new client (the page takes 204 as "not now": net/beacon.ts).
+describe("FUNNEL_ENABLED", () => {
+  async function admin(s: AuthServer) {
+    const owner = new Browser(s, "198.51.100.1");
+    await owner.playToken();
+    await owner.saveWithEmail(`funnel-owner-${Math.random().toString(36).slice(2)}@example.test`);
+    expect((await owner.fetch("/admin/claim", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: CLAIM_TOKEN }).toString() })).status).toBeLessThan(400);
+    return owner;
+  }
+  const stored = (s: AuthServer) => count(s, "SELECT (SELECT COUNT(*) FROM funnel_step) + (SELECT COUNT(*) FROM client_error) AS n");
+
+  it("off: the three endpoints answer 204 and store nothing, the rooms record nothing, no timer or worker, /stats says so", async () => {
+    const s = await start({ funnelEnabled: false });
+    expect(s.accounts.funnel).toBeNull(); // no worker
+    const before = funnelQueueState();
+    for (const [path, body] of [["/api/visit", {}], ["/api/funnel", { visit: "v1.x.p.1.1.mac", steps: [{ step: "play" }] }], ["/api/client-error", { visit: "v1.x.p.1.1.mac", message: "boom" }]] as const) {
+      const r = await post(s, path, body);
+      expect(r.status, path).toBe(204);
+    }
+    // A character's first join, a visit token on /api/play, a level: nothing recorded.
+    const b = await bot("funneloff1", "arcadia", "admin", { visit: "v1.x.p.1.1.mac" });
+    serverRoom(b).grantXp(serverRoom(b).playerById(b.id)!, 100_000);
+    expect(queueStep(s.accounts.db, { subject: "u:direct", step: "join" })).toBe(false);
+    expect(recordStep(s.accounts.db, { subject: "u:direct", step: "join" })).toBe(false);
+    expect(funnelQueueState().pending).toBeLessThanOrEqual(before.pending); // nothing queued, so no flush timer
+    expect(stored(s)).toBe(0);
+    const owner = await admin(s);
+    expect(await (await owner.fetch("/stats")).text()).toContain("The funnel is off (FUNNEL_ENABLED=0)");
+    expect(((await (await owner.fetch("/stats?format=json")).json()) as { funnel: unknown }).funnel).toEqual({ off: true });
+    expect(stored(s)).toBe(0);
+  });
+
+  it("on (the default): a worker runs, visits are issued and recorded, /stats has the report", async () => {
+    const s = await start();
+    expect(s.accounts.funnel).toBeTruthy();
+    const token = await visit(s);
+    expect((await post(s, "/api/funnel", { visit: token, steps: [{ step: "play" }] })).status).toBe(200);
+    expect(rows(s, `v:${visitId(token)}`).map((r) => r.step)).toEqual(["page", "play"]);
+    const owner = await admin(s);
+    const json = (await (await owner.fetch("/stats?format=json")).json()) as { funnel: FunnelWindows };
+    expect(json.funnel.windows.all.visits).toMatchObject({ page: 1, play: 1 });
+  });
+});
+
+// Review round three, #3: shutdown wrote each queued row with the usual five-second lock wait, so
+// 5,000 rows under a persistent lock took about seven hours. Now one deadline for the whole flush.
+describe("shutdown's flush", () => {
+  it("a locked database: one overall deadline, every attempt returns at once, the rest counted lost and logged once", async () => {
+    Object.assign(FUNNEL_LIMITS, { accountRowsPerDay: 1e6, flushMs: 60_000 });
+    const dir = mkdtempSync(join(tmpdir(), "fl-funnel-close-"));
+    const db = openGameDb(join(dir, "game.db"));
+    const other = new Database(join(dir, "game.db"));
+    const warn = console.warn;
+    const warnings: string[] = [];
+    try {
+      resetFunnelBudgets(db);
+      await waitFor(() => (flushFunnel(), funnelQueueState().pending === 0), 15_000); // nothing left from earlier tests
+      for (let i = 0; i < 5_000; i++) queueStep(db, { subject: `u:closing${i}`, step: "join" });
+      const lost = funnelQueueState().lost;
+      other.exec("BEGIN IMMEDIATE");
+      console.warn = (...a: unknown[]) => void warnings.push(a.join(" "));
+      const t0 = performance.now();
+      const r = await closeFunnel(db, 400);
+      const took = performance.now() - t0;
+      console.warn = warn;
+      expect(r).toEqual({ written: 0, lost: 5_000 });
+      expect(took).toBeGreaterThanOrEqual(390);
+      expect(took).toBeLessThan(400 + 1_500); // a loaded machine's slack; the old flush: 5 s per row
+      expect(funnelQueueState().lost - lost).toBe(5_000);
+      expect(funnelQueueState().pending).toBe(0);
+      expect(warnings.filter((w) => w.includes("funnel"))).toHaveLength(1);
+      expect(warnings[0]).toMatch(/5000 queued write\(s\) not written at shutdown/);
+      // Free: all written within the deadline, nothing lost.
+      other.exec("ROLLBACK");
+      for (let i = 0; i < 5_000; i++) queueStep(db, { subject: `u:closing${i}`, step: "kill" });
+      expect(await closeFunnel(db, 5_000)).toEqual({ written: 5_000, lost: 0 });
+    } finally {
+      console.warn = warn;
+      try {
+        other.exec("ROLLBACK");
+      } catch {}
+      other.close();
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
 });

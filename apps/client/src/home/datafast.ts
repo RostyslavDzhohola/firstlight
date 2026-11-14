@@ -61,7 +61,7 @@ export function privacyText(s: DataFastScript | null): string[] {
         ]
       : []),
     "The game itself keeps your guest character in this browser's storage so you can come back to it.",
-    "The game also tells our own server, never a third party, which first steps a visit reached (Play pressed, the world loaded and how long it took, the tutorial's steps) and any error the page hits, with web addresses, emails and tokens taken out. Our server gives the visit a random id, which this browser keeps; nothing personal. Steps are kept 21 days and then only as daily totals, error reports 30 days. It is only so we can fix what stops new players.",
+    "The game also tells our own server, never a third party, which first steps a visit reached (Play pressed, the world loaded and how long it took, the tutorial's steps) and any error the page hits, with web addresses, emails and tokens taken out. Our server gives the visit a random id, which this browser keeps; nothing personal. A visit's steps are kept a month and then only as daily totals (a saved character's first steps stay with it while it exists), error reports 30 days. It is only so we can fix what stops new players.",
     `Do Not Track or Global Privacy Control in your browser turns that off. So does the button below${s ? ", which also stops DataFast counting this browser" : ""}: on this device, from the next page you open.`,
   ];
 }

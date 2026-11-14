@@ -24,8 +24,12 @@ AUTH_DB_PATH=/tmp/fl-e2e/auth.db GAME_DB_PATH=/tmp/fl-e2e/game.db pnpm dev
   `[dev-mail] FIRSTLIGHT code for <email>: <code>` on the server's stdout. Each address gets 3 codes
   an hour, so use a new address per run. `DEV_SIGNIN_CODES=1` plus the per-run
   `DEV_SIGNIN_KEY` (the root `pnpm dev` sets both) also let the dev client's save and sign-in cards
-  fetch and fill the code, on this machine only (D-sec2-1). Started another way, set the same
+  fetch and fill the code (D-sec2-1): open the link Vite prints under its URLs ("Dev sign-in codes:
+  open http://localhost:5173/#fl-dev-key=…") once per run in that browser; the key travels only in
+  the link's fragment, never over the network (D-sec3-6). Started another way, set the same
   `DEV_SIGNIN_KEY` (43+ random characters) for the server and Vite, or read the code from the log.
+  Never put a proxy or tunnel in front of a dev server with dev codes on: anyone holding the key can
+  read anyone's sign-in code; `pnpm dev` is for this machine only.
 - **Admins** (T6): start the server with `ADMIN_CLAIM_TOKEN` set to `openssl rand -base64 32` (shorter
   tokens, under 32 random bytes, switch the claim off; D-admin-2), play once in the browser
   (guest or saved), then open `http://127.0.0.1:5611/admin/claim` there, paste the token into the

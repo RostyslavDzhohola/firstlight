@@ -10,8 +10,12 @@
 // wait in a small pending list (kept in storage across pages), are marked sent only when the answer
 // names them, and a failed or rate-limited post is retried a few times with a backoff; whatever is
 // left goes on the next page. Sent and pending steps belong to one visit id: a new visit starts with
-// nothing sent, and a step an old visit left pending never goes out under another visit's token. Error reports are scrubbed here before sending (shared/net/scrub.ts)
-// and once per kind per page session.
+// nothing sent, and a step an old visit left pending never goes out under another visit's token. A
+// step made while the page holds no live token (it expired, or is being renewed) belongs to no visit
+// yet: it goes to whichever visit the renewal resolves to, the same one or a new one, exactly once
+// (review round three, #4). Error reports are scrubbed here before sending (shared/net/scrub.ts)
+// and once per kind per page session. A server with the funnel switched off answers 204: the page
+// sends nothing more and keeps its steps for a later page (the server may be switched on by then).
 //
 // Off without a server (`?offline`, `?bench`), with Do Not Track or Global Privacy Control, and when
 // the home page's Privacy card opted this browser out (`fl.noAnalytics`). An automated browser
@@ -78,7 +82,7 @@ export class Beacon {
   private off = false;
   /** Sent and pending steps, kept for one visit id (`visit`): a new visit starts with nothing sent. */
   private state: { visit: string | null; sent: Set<string>; pending: Pend[] } | null = null;
-  /** This page's visit id, once a live token says which. */
+  /** This page's visit id while it holds a live token; null while there is none (not yet, or being renewed). */
   private pageVisit: string | null = null;
   private timer = false;
   private flushing: Promise<void> | null = null;
@@ -133,6 +137,8 @@ export class Beacon {
       this.learn(t.token);
       return t.token;
     }
+    // No live token: which visit comes next is the renewal's answer, so new steps wait untagged.
+    this.pageVisit = null;
     return null;
   }
 
@@ -146,7 +152,8 @@ export class Beacon {
         const body = { ...(this.prev ? { prev: this.prev } : {}), auto: this.env.automated };
         const r = await this.env.post(`${this.env.apiUrl}/api/visit`, JSON.stringify(body)).catch(() => null);
         const j = (r?.status === 200 ? r.json : null) as { visit?: unknown; exp?: unknown; off?: unknown } | null;
-        if (j?.off === true) this.off = true; // the server isn't taking more visits today
+        // The server isn't taking more visits today ({off}), or its funnel is switched off (204): not on this page.
+        if (j?.off === true || r?.status === 204) this.off = true;
         if (typeof j?.visit !== "string") return null;
         this.token = { token: j.visit, exp: typeof j.exp === "number" ? j.exp : this.env.now() + 3_600_000 };
         this.prev = j.visit;
@@ -207,12 +214,12 @@ export class Beacon {
   /**
    * This page's visit is `token`'s. Another visit than the stored one starts with nothing sent, and
    * steps an old visit left pending are dropped (only that visit's token could carry them; the server
-   * renews a visit while it can, so they are weeks old). Steps made before the page knew its visit
-   * are this visit's.
+   * renews a visit while it can, so they are weeks old). Steps made while the page had no live token
+   * (before it knew its visit, or while it was being renewed) are this visit's, once each.
    */
   private learn(token: string): void {
     const id = visitIdOf(token);
-    if (this.pageVisit === id) return;
+    if (this.pageVisit === id) return; // nothing untagged since: steps are untagged only while pageVisit is null
     this.pageVisit = id;
     const s = this.st();
     if (s.visit !== id) {
@@ -226,11 +233,6 @@ export class Beacon {
     this.save();
   }
 
-  /** Steps waiting for this page's visit (all of them while it isn't known yet). */
-  private mine(): Pend[] {
-    const v = this.pageVisit;
-    return this.st().pending.filter((p) => !v || !p.v || p.v === v);
-  }
 
   /** Has the server acknowledged `step` for this page's visit? */
   has(step: string): boolean {
@@ -239,13 +241,16 @@ export class Beacon {
     return this.pageVisit !== null && s.visit === this.pageVisit && s.sent.has(step);
   }
 
-  /** Report a first-time step (later calls for the same step are dropped). */
+  /**
+   * Report a first-time step (later calls for the same step are dropped). With a live token it is
+   * that visit's; without one it is tagged with no visit until the renewal answers (learn()).
+   */
   step(step: string, value?: number, detail?: string): void {
     if (!this.env.enabled) return;
-    this.currentToken(); // a live token names this page's visit
+    const v = this.currentToken() ? this.pageVisit : null;
     const s = this.st();
-    const v = this.pageVisit;
-    if ((v && s.visit === v && s.sent.has(step)) || this.mine().some((p) => p.step === step) || s.pending.length >= MAX_PENDING) return;
+    const dup = v ? (s.visit === v && s.sent.has(step)) || s.pending.some((p) => p.step === step && (p.v === v || !p.v)) : s.pending.some((p) => p.step === step && !p.v);
+    if (dup || s.pending.length >= MAX_PENDING) return;
     s.pending.push({ step, ...(value !== undefined && Number.isFinite(value) ? { value: Math.round(value * 10) / 10 } : {}), ...(detail ? { detail } : {}), ...(v ? { v } : {}) });
     this.save();
     this.schedule(FLUSH_MS);
@@ -271,7 +276,7 @@ export class Beacon {
 
   private async deliver(): Promise<void> {
     const token = await this.visit();
-    if (!token) return this.retry();
+    if (!token) return this.off ? undefined : this.retry();
     await this.sendErrors(token);
     const id = visitIdOf(token);
     const st = this.st();
@@ -280,6 +285,10 @@ export class Beacon {
     if (!batch.length) return;
     const steps = batch.map(({ v: _v, ...x }) => x);
     const r = await this.env.post(`${this.env.apiUrl}/api/funnel`, JSON.stringify({ visit: token, steps })).catch(() => null);
+    if (r?.status === 204) {
+      this.off = true; // the server's funnel is switched off: the steps wait for a later page
+      return;
+    }
     if (r?.status === 401) {
       this.dropToken();
       return this.retry();

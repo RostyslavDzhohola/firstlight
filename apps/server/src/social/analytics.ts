@@ -4,7 +4,7 @@
 // are never recorded.
 
 import type { PlayerActor } from "../world/actors.ts";
-import { ACCOUNT_STEPS, accountSubject, queueStep, stepAt, type FunnelKind, type FunnelRow } from "../db/funnel.ts";
+import { ACCOUNT_STEPS, accountSubject, funnelConfig, queueStep, stepAt, type FunnelKind, type FunnelRow } from "../db/funnel.ts";
 import { funnelKind } from "../world/funnel.ts";
 import { currentDb, sessionClient, sessionEnd, sessionStart, sessionUpdate } from "./store.ts";
 
@@ -168,7 +168,7 @@ function funnelReturn(t: Tracker, now: number): void {
 /** Funnel rows never break play: no database, no row; a failure is a warning. */
 function funnelWrite(row: (db: NonNullable<ReturnType<typeof currentDb>>) => FunnelRow | null): void {
   const db = currentDb();
-  if (!db) return;
+  if (!db || !funnelConfig.enabled) return;
   try {
     const r = row(db);
     if (r) queueStep(db, r);
