@@ -64,12 +64,12 @@ loop latency under sustained ingestion. The background-tab journey covers 60 s, 
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
-| 4 | | |
-| 5 | | |
-| 6 | | |
-| 7 | | |
-| 8 | | |
-| 9 | | |
+| 1 | Visits issued per address (10/10 min) and per day (5,000); ≤ 30 rows a visit; daily budgets for visit rows, account rows and error reports; one bounded queue flushed once a second in a transaction (off the request and the room tick); raw rows 21 days then folded into `funnel_day` (migration 12), errors 30 days; 4 kb bodies for every content type, mounted before `express.json` (D-ship-7). Tests: one-address and many-address floods stay under the caps, 413 for five content types on all three routes, writes queued, rollup | `43ea6148` |
+| 2 | Server-issued signed visit tokens with the kind fixed at issue (`auth/visitToken.ts`); steps refused (401) without a live token; the room records the visit's `join` from the token `/api/play` carries; every KPI counts subjects that reached both steps, with a server/page source, the headline gets-in on the server's join (D-ship-6, D-ship-8). Tests: made-up ids and forged tokens refused, the 200 % probe gives 0/1, a later secret header can't reclassify a visit, a real join counts | `43ea6148`, `bd7c4058` |
+| 3 | One shared scrubber (`packages/shared/src/net/scrub.ts`) run by the beacon before sending and by the ingest on arrival: URLs reduced to origin and script file, sensitive path segments, plain and encoded emails, JWT/bearer/key=value/long tokens removed, five frames, rejections reported by type only (D-ship-9). Tests: the review's URL path and query tokens, encoded email and rejected object, through the client and through the server | `43ea6148`, `bd7c4058` |
+| 4 | The mirror room's clue is two PNGs drawn from the server's rule (`tools/eggs/mirror-clue.ts`), loaded as files; the answer is gone from client sources and the bundle; the guard scans every client text file and a fresh `vite build` (`egg-rules.test.ts`, `pnpm check:eggs`) (D-ship-11) | `149f1299` |
+| 5 | `navigator.webdriver`, `?e2e` and `?bench` ask for a test visit; only the real `LOADTEST_SECRET` makes one; the visit's join takes the stricter of its kind and the player's (an agent's or our test account's) | `43ea6148`, `bd7c4058` |
+| 6 | The Privacy link and card always show our own funnel, with or without DataFast; the beacon is off with Do Not Track, Global Privacy Control or `fl.noAnalytics`, and the card says so (D-ship-10) | `441d5f73`, `bd7c4058` |
+| 7 | Steps wait in a bounded pending list (kept across pages) until the server's answer names them; failed, 401, 429 and 5xx posts are retried with a backoff (at most six), leftovers go on the next page; the server answers `{done}` | `bd7c4058` |
+| 8 | The visit token is cached in memory as well as storage: one visit request per page when storage throws | `bd7c4058` |
+| 9 | The room marks `charCreated` when a join makes the character; the account cohort needs that `new` step, so returning characters never count as new (D-ship-8). Test: a character saved before the join is not new, a fresh one is | `43ea6148` |

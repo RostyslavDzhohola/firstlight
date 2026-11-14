@@ -515,6 +515,8 @@ export function rollupFunnel(db: Db, now = Date.now()): number {
 
 /** The folded days as one report (everything before the retained raw rows). */
 export function storedReport(db: Db): FunnelReport {
+  // A game.db opened read-only from before migration 12 (`pnpm metrics --funnel-db`) has no folded days.
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'funnel_day'").get()) return funnelReportEmpty(0);
   const rows = stmt(db, "SELECT metric, num, den, value FROM funnel_day").all() as { metric: string; num: number; den: number; value: number | null }[];
   const out = funnelReportEmpty(0);
   const worlds: [number, number][] = [];
