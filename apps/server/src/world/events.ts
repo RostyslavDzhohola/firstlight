@@ -110,6 +110,14 @@ export interface PadDiscoveredEvent {
   pad: number;
 }
 
+/** A wild site found for the first time this life (content/wildSites.ts; discovery XP paid). */
+export interface SiteDiscoveredEvent {
+  type: "siteDiscovered";
+  playerId: string;
+  site: string;
+  xp: number;
+}
+
 /** A finished egg (the item is granted by the quests system). The NPC lane emits this for E3. */
 export interface SecretFoundEvent {
   type: "secretFound";
@@ -200,7 +208,8 @@ export type GameEvent =
   | AdminActionEvent
   | MissionDoneEvent
   | MedalEvent
-  | SpawnRequestEvent;
+  | SpawnRequestEvent
+  | SiteDiscoveredEvent;
 
 export type GameEventHandler = (e: GameEvent) => void;
 

@@ -19,6 +19,7 @@ import type { BodyId } from "./bodies.ts";
 import { padDirs } from "./pads.ts";
 import type { Terrain } from "./terrain.ts";
 import { siteAnchor, townFrame, type SiteAnchor, type TownPlacement } from "./townFrame.ts";
+import { wildSiteSolids } from "./wildSites.ts";
 
 export { POLE_ANCHOR, siteAnchor, siteCoords, siteDir, type SiteAnchor } from "./townFrame.ts";
 
@@ -420,11 +421,21 @@ export class StructureCollider {
 
 const colliderCache = new WeakMap<Terrain, StructureCollider>();
 
-/** The structure collider of `terrain`'s sites (Portus' town, a planet's outpost and waystones). Cached per terrain. */
+/**
+ * Every structure solid `terrain`'s collider holds: siteSolids (Portus' town, or a planet's outpost and
+ * waystones), then the wild sites' (planet/wildSites.ts), numbered on.
+ */
+export function allStructureSolids(terrain: Terrain): readonly StructureSolid[] {
+  const own = siteSolids(terrain);
+  const wild = wildSiteSolids(terrain, own.length);
+  return wild.length ? [...own, ...wild] : own;
+}
+
+/** The structure collider of `terrain`'s sites (Portus' town, a planet's outpost, waystones and wild sites). Cached per terrain. */
 export function structureCollider(terrain: Terrain): StructureCollider {
   let c = colliderCache.get(terrain);
   if (!c) {
-    c = new StructureCollider(siteSolids(terrain));
+    c = new StructureCollider(allStructureSolids(terrain));
     colliderCache.set(terrain, c);
   }
   return c;

@@ -350,6 +350,8 @@ export interface YouState {
   adminMode?: AdminModeState;
   /** The spellbook: aether, cooldowns and an active ward (content/spells.ts; set by the spell system). */
   spells?: SpellsYou;
+  /** Wild sites this life has found (content/wildSites.ts ids, every body): the map and journal show them. */
+  sites?: string[];
 }
 
 export interface InvItem {
