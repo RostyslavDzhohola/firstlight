@@ -8,7 +8,7 @@ import { BODIES, BODY_IDS, bodyGravity, createTerrain, inWalledZone, isSafe, nat
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
-import { starterMaxHp } from "@firstlight/shared/content/starters";
+import { buildStats, normalizeTree, playerMaxHp } from "@firstlight/shared/content/tree";
 import { STARTERS, starterLook, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
@@ -27,6 +27,7 @@ export const bannedCheck: { current: (userId: string) => boolean } = { current: 
 import { dealDamage, fire, melee, selectedWeapon, stepEffects, stepProjectiles, type CombatHost } from "./combat.ts";
 import { dist3, type V3 } from "./geometry.ts";
 import { emitGameEvent, npcKindOf } from "./events.ts";
+import { clearSlow } from "./npc/effects.ts";
 import { emitPileEvent, onPileEvent, pileStore, type PileData, type PileKind } from "./piles.ts";
 import { SYSTEM_FACTORIES, type RoomSystem } from "./systems.ts";
 import { voiceItemHidden } from "./voice/index.ts";
@@ -88,7 +89,7 @@ export const RULES = {
  * Runtime state a takeover hands from the old actor to the new session's (F12 B2): protection keeps
  * its expiry, and cooldowns, damage/heal-over-time and NPC effects survive a reload.
  */
-const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "healCooldownUntil", "tonicCooldownUntil", "lastAttackAt", "reloadEndsAt", "heat", "overheatUntil", "specialReadyAt", "lastDodgeAt", "lastPhraseAt", "lastDamagedBy", "npcFx", "violations"] as const satisfies readonly (keyof PlayerActor)[];
+const CARRIED_ON_TAKEOVER = ["protectedUntil", "heals", "healAcc", "burn", "healCooldownUntil", "tonicCooldownUntil", "lastAttackAt", "reloadEndsAt", "heat", "overheatUntil", "specialReadyAt", "lastDodgeAt", "lastPhraseAt", "lastDamagedBy", "npcFx", "violations", "lastBreathReadyAt", "dodgeTimes"] as const satisfies readonly (keyof PlayerActor)[];
 
 const vec = z.number().finite();
 const inputSchema = z.object({ seq: z.number().int().nonnegative(), x: vec, y: vec, z: vec, fx: z.number().min(-1).max(1), fy: z.number().min(-1).max(1), fz: z.number().min(-1).max(1), anim: z.number().int().min(0).max(31), t: vec });
@@ -140,7 +141,7 @@ const YOU_LAZY_MS = 400;
  * and respawn write SQLite; ping, questSync and client:info answer with messages). Colyseus's 60/s
  * per client still bounds everything else.
  */
-export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2, cast: 5, spellSync: 2 };
+export const MESSAGE_RATES: Record<string, number> = { ping: 20, travel: 2, respawn: 1, look: 2, logout: 4, questSync: 2, "client:info": 2, skySync: 2, npcSync: 2, cast: 5, spellSync: 2, tree: 5 };
 /** Malformed messages are dropped (no kick for a harmless drift); this many within 10 s disconnects. */
 const BAD_MESSAGE_LIMIT = 20;
 
@@ -507,7 +508,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     p.fz = f[2];
     p.anim = ANIM.IDLE;
     p.level = char.level;
-    p.maxHp = starterMaxHp(char.starter, char.level);
+    p.maxHp = playerMaxHp(char);
     p.hp = char.dead ? 0 : Math.max(1, Math.min(p.maxHp, char.hp || p.maxHp));
     p.name = auth.name;
     p.userId = auth.userId; // random opaque id (not a credential): clients need it for blocks, mutes, parties (D27)
@@ -788,8 +789,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     } else {
       if (a.airborne && !swimmingOk && !flying) {
         const drop = a.peakRadius - (R + ground);
-        const frac = fallDamageFraction(drop, bodyGravity(this.bodyDef));
-        if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
+        const frac = fallDamageFraction(drop, bodyGravity(this.bodyDef), buildStats(a.char.tree).safeFallM);
+        if (frac > 0) dealDamage(this.host, null, a, frac * playerMaxHp(a.char), false);
       }
       a.airborne = false;
       a.peakRadius = len;
@@ -877,7 +878,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       if (now < a.tonicCooldownUntil) return;
       a.tonicCooldownUntil = now + 8000;
       const dur = item.id === "tonic_small" ? 3 : 4;
-      a.heals.push({ perSec: (tier.heal ?? 40) / dur, until: now + dur * 1000, left: tier.heal ?? 40 });
+      // Tonic Craft (build tree): more healing, and it ends a slow and a burn.
+      const build = buildStats(a.char.tree);
+      const heal = (tier.heal ?? 40) * build.tonicHeal;
+      a.heals.push({ perSec: heal / dur, until: now + dur * 1000, left: heal });
+      if (build.tonicCleanse) cleanse(a, now);
       this.consume(a, slot);
     } else if (item.id === "patchkit" || item.id === "bubble") {
       supportOf(this)?.use(a, slot, item, targetId); // channelled heal / shield bubble (support.ts)
@@ -997,7 +1002,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         for (const k of Object.keys(live)) if (!(k in char)) delete live[k];
         Object.assign(a.char, char);
         a.state.level = a.char.level;
-        a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
+        a.state.maxHp = playerMaxHp(a.char);
         a.state.hp = Math.min(a.state.hp, a.state.maxHp);
         this.equip(a, a.char.selected);
       }
@@ -1186,8 +1191,8 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     a.youDirty = true;
     const shown = a.state.level;
     if (a.char.level <= shown) return;
-    a.state.maxHp = starterMaxHp(a.char.starter, a.char.level);
-    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level, a.char.starter);
+    a.state.maxHp = playerMaxHp(a.char);
+    a.state.hp = levelUpHp(a.state.hp, shown, a.char.level, a.char.starter, a.char.tree);
     a.state.level = a.char.level;
     a.client.send("toast", { text: `Level ${a.char.level}!`, kind: "xp" });
     emitGameEvent(this, { type: "levelUp", playerId: a.id, level: a.char.level });
@@ -1299,8 +1304,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
         if (refuse()) return;
         t.char.xp = xpAtLevel(lv);
         t.char.level = lv;
+        t.char.tree = normalizeTree(lv, t.char.tree); // a lower level gives back fewer points
         t.state.level = lv;
-        t.state.maxHp = starterMaxHp(t.char.starter, lv);
+        t.state.maxHp = playerMaxHp(t.char);
         t.state.hp = t.state.maxHp;
         t.youDirty = true;
         break;
@@ -1414,11 +1420,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (heightAboveSupport(a, this.moveWorld) > MOVE.groundedAbove) return;
     // Landed.
     const len = Math.hypot(a.state.x, a.state.y, a.state.z);
-    const frac = fallDamageFraction(a.peakRadius - len, bodyGravity(this.bodyDef));
+    const frac = fallDamageFraction(a.peakRadius - len, bodyGravity(this.bodyDef), buildStats(a.char.tree).safeFallM);
     a.airborne = false;
     a.peakRadius = len;
     groundMotion(a, len, now);
-    if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
+    if (frac > 0) dealDamage(this.host, null, a, frac * playerMaxHp(a.char), false);
   }
 
   /** Distance-based views for NPCs and piles (players are not view-filtered). */
@@ -1473,7 +1479,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     // Inside a reward transaction the character may be levels ahead of the synced state, whose HP
     // rises only after the commit (showLevel). Save the HP it will show, so a crash in between
     // restarts with the level's HP (F12 confirm Codex N-S1). A failed save restores `char` (persist).
-    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level, a.char.starter);
+    a.char.hp = a.dead ? a.state.hp : levelUpHp(a.state.hp, a.state.level, a.char.level, a.char.starter, a.char.tree);
     characterRepo.current.save(a.identity.userId, a.char);
   }
 
@@ -1592,11 +1598,18 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
   }
 }
 
+/** Tonic Craft (build tree): a tonic ends a running chill or slow (the client is told) and a burn. */
+function cleanse(a: PlayerActor, now: number) {
+  a.burn = null;
+  // `set` has the client drop every slow and chill it predicts (world/npcs/moveEffects.ts).
+  if (clearSlow(a, now)) a.client.send("npcFx", { kind: "slow", ms: 0, amount: 0, set: true });
+}
+
 /** HP after levelling from `shown` to `level`: the max-HP gain is added, capped at the new max. */
-function levelUpHp(hp: number, shown: number, level: number, starter: number): number {
+function levelUpHp(hp: number, shown: number, level: number, starter: number, tree?: readonly string[]): number {
   if (level <= shown) return hp;
-  const newMax = starterMaxHp(starter, level);
-  return Math.min(newMax, hp + (newMax - starterMaxHp(starter, shown)));
+  const newMax = playerMaxHp({ starter, level, tree });
+  return Math.min(newMax, hp + (newMax - playerMaxHp({ starter, level: shown, tree })));
 }
 
 function norm(v: readonly number[]): V3 {

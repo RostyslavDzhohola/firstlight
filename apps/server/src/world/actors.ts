@@ -39,6 +39,10 @@ export interface PlayerActor {
   combatUntil: number;
   /** Regeneration held until then (a boss fight or a defend attempt, REGEN.PAUSED_IN; combat.ts holdRegen). */
   noRegenUntil?: number;
+  /** Last Breath (build tree, #81): when it can save this player again (ms epoch; absent = ready). */
+  lastBreathReadyAt?: number;
+  /** Dodge rolls used, newest last (ms epoch): with Second Roll (tree) two can be out at once. */
+  dodgeTimes?: number[];
   protectedUntil: number;
   /** Heals over time; `left` (HP still to come) makes the total exact regardless of tick timing. */
   heals: { perSec: number; until: number; left?: number }[];

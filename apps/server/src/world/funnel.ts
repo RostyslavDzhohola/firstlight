@@ -56,6 +56,11 @@ export function createFunnelSystem(room: BodyRoom): RoomSystem | null {
         if (a) accountStep(a, ACCOUNT_STEPS.mission);
         return;
       }
+      case "tree": {
+        const a = e.node ? room.playerById(e.playerId) : undefined;
+        if (a) accountStep(a, ACCOUNT_STEPS.firstPoint);
+        return;
+      }
     }
   });
   return {

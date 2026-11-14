@@ -25,6 +25,8 @@ export interface CharacterData<Inv = unknown, Missions = unknown> {
   missionState: Missions;
   lifeStartedAt: number;
   protectedUntil: number;
+  /** Build-tree node ids taken (#81; table character_tree). Absent on save = leave the saved list as it is. */
+  tree?: string[];
 }
 
 export interface Character<Inv = unknown, Missions = unknown> extends CharacterData<Inv, Missions> {
@@ -78,8 +80,12 @@ function toCharacter<I, M>(r: CharacterRow): Character<I, M> {
 
 export function loadCharacter<I = unknown, M = unknown>(db: Db, userId: string): Character<I, M> | null {
   const r = stmt(db, "SELECT * FROM character WHERE user_id = ?").get(userId) as CharacterRow | undefined;
-  return r ? toCharacter<I, M>(r) : null;
+  if (!r) return null;
+  const t = stmt(db, "SELECT nodes_json FROM character_tree WHERE user_id = ?").get(userId) as { nodes_json: string } | undefined;
+  return { ...toCharacter<I, M>(r), tree: parseJson<string[]>(t?.nodes_json ?? "[]", []) };
 }
+
+const SAVE_TREE_SQL = "INSERT INTO character_tree (user_id, nodes_json) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET nodes_json = excluded.nodes_json";
 
 const SAVE_SQL = `
   INSERT INTO character (user_id, starter, palette, level, xp, coins, hp, body, copy_hint, pos_x, pos_y, pos_z, heading,
@@ -100,7 +106,12 @@ const SAVE_SQL = `
  * Rooms always reach this after `/api/play`, which creates the account row.
  */
 export function saveCharacter(db: Db, userId: string, c: CharacterData, now = Date.now()): boolean {
-  return (
+  // One transaction for the row and its tree (a savepoint inside a batch: better-sqlite3 nests them).
+  return tx(db, () => saveRow(db, userId, c, now));
+}
+
+function saveRow(db: Db, userId: string, c: CharacterData, now: number): boolean {
+  const saved =
     stmt(db, SAVE_SQL).run(
       userId,
       c.starter,
@@ -121,8 +132,10 @@ export function saveCharacter(db: Db, userId: string, c: CharacterData, now = Da
       c.protectedUntil,
       now,
       userId,
-    ).changes === 1
-  );
+    ).changes === 1;
+  // Only beside a row that was written: a merged-away guest's tree must not come back either.
+  if (saved && c.tree) stmt(db, SAVE_TREE_SQL).run(userId, JSON.stringify(c.tree));
+  return saved;
 }
 
 /** Batched autosave: many characters in one transaction. Returns how many were written. */

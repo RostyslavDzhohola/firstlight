@@ -6,6 +6,7 @@ import type { BodyId } from "../planet/bodies.ts";
 import type { CosmeticSlot } from "../content/items.ts";
 import type { HallLine } from "../content/secrets.ts";
 import type { SpellId, SpellsYou } from "../content/spells.ts";
+import type { TreeYou } from "../content/tree.ts";
 
 export const NET = {
   TICK_MS: 50, // 20 Hz simulation and patches
@@ -177,6 +178,12 @@ export type ClientMessages = {
   speak: SpeakMsg;
   /** The mission the player tracks (#69; null: none chosen). The hunt pointer's `huntTargets` follow it. Session-only, at most 5 quest ops a second. */
   track: { id: string | null };
+  /**
+   * The build tree (content/tree.ts, #81; at most 5 a second): take a node, or clear the tree for
+   * coins in a safe zone. Refusals answer `denied {action: "tree", reason}`: "unknown", "taken",
+   * "locked" (the node above isn't taken), "points", "dead", "nothing", "safe zone", "coins".
+   */
+  tree: { action: "spend"; node: string } | { action: "respec" };
 };
 
 export interface SpeakMsg {
@@ -378,6 +385,8 @@ export interface YouState {
   spells?: SpellsYou;
   /** Wild sites this life has found (content/wildSites.ts ids, every body): the map and journal show them. */
   sites?: string[];
+  /** The build tree (content/tree.ts, #81): nodes taken, points left, what a respec costs. Set by the tree system. */
+  tree?: TreeYou;
 }
 
 export interface InvItem {

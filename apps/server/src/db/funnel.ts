@@ -29,6 +29,8 @@ export const ACCOUNT_STEPS = {
   firstSession: "first_session",
   /** A session on a later UTC day than the first join; value = days after it. */
   back: "back",
+  /** The first build-tree point spent (#81; world/tree.ts). */
+  firstPoint: "first_point",
 } as const;
 
 /** Steps a visit's page reports (client net/beacon.ts). `tutorial:<step id>` is open-ended (below). */

@@ -18,6 +18,7 @@ import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 import { BASE_GRAVITY } from "@firstlight/shared/planet/bodies";
 import { starterMove } from "@firstlight/shared/content/starters";
+import { buildStats } from "@firstlight/shared/content/tree";
 import { adminSwitch, inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
 import { activeMoveFx, movementLimits } from "./npc/effects.ts";
@@ -87,6 +88,8 @@ export interface MoveLimits {
    */
   sprint?: number;
   dodgeCooldownMs?: number;
+  /** Dodge rolls held at once (Second Roll, build tree): each refills one cooldown after it was used. Absent = 1. */
+  dodgeCharges?: number;
   /** Admin Speed ×2 (D-admin-1): multiplies the refill and the bank. Admins with the switch on only. */
   boost?: number;
   /**
@@ -94,6 +97,12 @@ export interface MoveLimits {
    * included, is paid from a flying allowance (ADMIN_MODE.flySpeed). Admins with the switch on only.
    */
   fly?: boolean;
+}
+
+/** May a roll start now? One charge: a cooldown since the last roll. More: fewer than `charges` rolls in the last cooldown. */
+export function dodgeReady(a: { lastDodgeAt: number; dodgeTimes?: number[] }, now: number, dodgeMs: number, charges: number): boolean {
+  if (charges <= 1) return now - a.lastDodgeAt >= dodgeMs;
+  return (a.dodgeTimes ?? [a.lastDodgeAt]).filter((t) => now - t < dodgeMs).length < charges;
 }
 
 /**
@@ -106,9 +115,12 @@ export function moveLimits(a: PlayerActor, now: number): MoveLimits {
   const fx = inSaddle(a, now) ? activeMoveFx(a, now) : null;
   const limits: MoveLimits = fx ? { speed: base.speed, dodge: 0, ride: rideSpeed(true, fx.slow, fx.noSprint) } : base;
   // Per-starter pace and roll (issue #9): the refill and the bank scale with the starter's sprint.
+  // The build tree (#81): Long Stride's pace, Second Roll's second charge. The client predicts the same.
   const sm = starterMove(a.char.starter);
-  limits.sprint = sm.sprint;
+  const build = buildStats(a.char.tree);
+  limits.sprint = sm.sprint * build.pace;
   limits.dodgeCooldownMs = sm.dodgeCooldown * 1000;
+  if (build.dodgeCharges > 1) limits.dodgeCharges = build.dodgeCharges;
   // Admin mode: only for admin identities with the switch on (adminSwitch); everyone else as before.
   if (adminSwitch(a, "speed")) limits.boost = ADMIN_MODE.speedMult;
   if (adminSwitch(a, "fly")) limits.fly = true;
@@ -194,6 +206,7 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // The roll is the same 4.5 m in 0.3 s for everyone, so a slower refill leaves it more to cover:
   // about 0.5 m per m/s of sprint under the base over the roll and its slow-down (D-balance-4).
   const dodgeBurst = MOVE.dodgeBurst + Math.max(0, MOVE.maxSpeed - sprint) * MOVE.slowRollBurstPerMps;
+  const charges = limits.dodgeCharges ?? 1;
   const speed = (riding ? limits.ride! : fly ? ADMIN_MODE.flySpeed : (inWater ? MOVE.swimSpeed : sprint) * limits.speed) * boost * MOVE.speedSlack;
   const cap = (riding ? HORSE.budgetCap : fly ? (MOVE.budgetCap * ADMIN_MODE.flySpeed) / MOVE.maxSpeed : inWater ? MOVE.swimBudgetCap : (MOVE.budgetCap * sprint) / MOVE.maxSpeed) * boost;
   const refilled = a.moveBudget + speed * elapsed;
@@ -201,11 +214,13 @@ export function validateMove(a: PlayerActor, m: { x: number; y: number; z: numbe
   // The dodge reserve refills over one dodge cooldown, whatever the bank does: an honest player
   // sprinting and dodging at every cooldown averages ~10.9 m/s (a 15 m/s roll plus its slow-down),
   // more than the sprint allowance, so a reserve fed only by bank overflow ran dry (T9 review).
-  a.dodgeReserve = Math.min(dodgeBurst, a.dodgeReserve + (elapsed * 1000 * dodgeBurst) / dodgeMs);
+  // With more than one charge the reserve holds a roll per charge and refills them side by side.
+  a.dodgeReserve = Math.min(dodgeBurst * charges, a.dodgeReserve + (elapsed * 1000 * dodgeBurst * charges) / dodgeMs);
   if (now >= a.moveBonusUntil) a.moveBonus = 0;
   // Dodge rolls only on foot on land (the client can't roll in the water or from the saddle).
-  if (m.anim === ANIM.DODGE && !riding && !swimming && !a.swimming && limits.dodge > 0 && now - a.lastDodgeAt >= dodgeMs) {
+  if (m.anim === ANIM.DODGE && !riding && !swimming && !a.swimming && limits.dodge > 0 && dodgeReady(a, now, dodgeMs, charges)) {
     a.lastDodgeAt = now;
+    a.dodgeTimes = [...(a.dodgeTimes ?? []).filter((t) => now - t < dodgeMs), now].slice(-charges);
     const burst = Math.min(a.dodgeReserve, dodgeBurst * limits.dodge);
     a.dodgeReserve -= burst;
     a.moveBonus += burst;
