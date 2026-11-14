@@ -2212,3 +2212,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   on the raw export) removes them; the shipped file was stripped in its JSON only, its compressed data
   copied byte for byte, and the 1,716 tracks the game plays compare bit-identical. Why: the first
   "bytes before the world" climb (#85); no picture or motion changes.
+- **D-perf-2 (2026-11-14):** the vegetation GLB's two atlases are embedded as lossless WebP
+  (`EXT_texture_webp`, required), not PNG: 2.03 MB → 0.88 MB, the file 2.35 → 1.20 MB, and it loads
+  on every arrival. `tools/blender/vegetation/glb_webp.py` (run by the vegetation build) encodes with
+  `cwebp -lossless -exact` (the colour under transparent texels kept, so cutout edges and mipmaps
+  filter as before), decodes each image back and fails unless every RGBA byte equals the PNG's; the
+  meshopt data is copied byte for byte. Every supported browser decodes WebP. Why: the "bytes before
+  the world" climb (#85) with the same picture.

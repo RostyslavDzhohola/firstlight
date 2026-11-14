@@ -309,7 +309,7 @@ Shipped outputs, 2026-10-12:
 
 | File | Bytes | SHA-256 | Contents |
 |---|---:|---|---|
-| `vegetation.glb` | 2,353,020 | `87cc1e48fe162a07443f46c193ee8c322dd379a1eb585acfa26bddaded2e3bb4` | 26 models × 2 LODs, two embedded PNG atlases; 14,489 near and 491 far triangles across all templates |
+| `vegetation.glb` | 1,200,556 | `adc23b609ea2bf0f082d1c0a916eec41ce499ea80bb02e09d532987ac20f1537` | 26 models × 2 LODs, two embedded atlases (lossless WebP since 2026-11-14, the same pixels as the PNGs: D-perf-2); 14,489 near and 491 far triangles across all templates |
 | `manifest.json` | 3,821 | `cf608802bb22feaeac244b0e1fc9b7622eb1fb481be9dc5c0919c08e5bbb63b4` | per-model source/LOD triangle counts, heights and far-LOD method |
 
 Total download: 2,356,841 bytes, under the 4 MB target. The client downloads only the GLB; the

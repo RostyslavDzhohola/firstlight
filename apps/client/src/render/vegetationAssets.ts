@@ -1,4 +1,5 @@
-// One meshopt GLB and one embedded PNG atlas, loaded before the quality probe and shader warm-up.
+// One meshopt GLB with its two embedded atlases (lossless WebP: D-perf-2), loaded before the quality
+// probe and shader warm-up.
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";

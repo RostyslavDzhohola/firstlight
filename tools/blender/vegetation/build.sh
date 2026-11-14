@@ -30,6 +30,9 @@ PY2
 pnpm exec node "$GLTF_CLI" optimize "$WORK/vegetation.glb" "$OUT/vegetation.glb" \
   --compress meshopt --simplify false --flatten false --join false --instance false --palette false \
   --texture-compress false --prune-attributes false --weld false
+# The two atlases as lossless WebP, every pixel checked against the PNG (D-perf-2).
+mv "$OUT/vegetation.glb" "$WORK/vegetation.png.glb"
+python3 -I "$HERE/glb_webp.py" "$WORK/vegetation.png.glb" "$OUT/vegetation.glb"
 cp "$WORK/manifest.json" "$OUT/manifest.json"
 python3 -I - "$OUT" <<'PY'
 from pathlib import Path

@@ -45,12 +45,16 @@ describe("shipped vegetation", () => {
     }
   });
 
-  it("stays under 4 MB, uses two embedded cutout PNG atlases and meshopt compression", () => {
-    expect(vegetationBytes.length).toBeLessThanOrEqual(4_000_000);
+  it("stays under 1.5 MB, uses two embedded lossless WebP cutout atlases and meshopt compression", () => {
+    expect(vegetationBytes.length).toBeLessThanOrEqual(1_500_000);
     expect(vegetationDocument.extensionsRequired).toContain("EXT_meshopt_compression");
+    expect(vegetationDocument.extensionsRequired).toContain("EXT_texture_webp");
     expect(vegetationDocument.images).toHaveLength(2);
-    expect(vegetationDocument.images[0].mimeType).toBe("image/png");
-    expect(vegetationDocument.images[0].uri).toBeUndefined();
+    for (const image of vegetationDocument.images) {
+      expect(image.mimeType).toBe("image/webp");
+      expect(image.uri).toBeUndefined();
+    }
+    for (const t of vegetationDocument.textures) expect(t.extensions.EXT_texture_webp.source).toBeTypeOf("number");
     expect(vegetationDocument.materials).toHaveLength(2);
     expect(vegetationDocument.materials[0].alphaMode).toBe("MASK");
   });
