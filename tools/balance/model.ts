@@ -17,7 +17,7 @@ import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
 import { siteDiscoveryXp, WILD_SITES, type WildSiteDef } from "../../packages/shared/src/content/wildSites.ts";
 import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
 import { FROSTBLOOM, SPELL_BY_ID, spellDamage, wardShell, WISHFALL } from "../../packages/shared/src/content/spells.ts";
-import { BRANCHES, buildStats, NEUTRAL_BUILD, playerMaxHp, reloadMs, spendRefusal, TREE, weaponHeat, type BranchId, type BuildStats } from "../../packages/shared/src/content/tree.ts";
+import { BLOCK_CAP, BRANCHES, buildStats, NEUTRAL_BUILD, playerMaxHp, reloadMs, spendRefusal, TREE, weaponHeat, type BranchId, type BuildStats } from "../../packages/shared/src/content/tree.ts";
 
 // ------------------------------------------------------------------------------------ weapons
 
@@ -1056,18 +1056,123 @@ export interface BuildRow {
   fastestTtk: number;
   fastestFamily: string;
   fastestHits: number;
-  /** Duel edge over the plain build: (best class damage × effective HP with rolls) ÷ the plain's. */
+  /** PvP edge over the plain build: best class damage × how much longer it lasts under a plain attacker (median family), every defensive node counted. */
   edge: number;
+  /** The weapon the edge was best with ("any" = no guard counted). */
+  edgeWeapon: string;
+  /** The same against the creatures of this level (packs as their tokens allow, LAND_RATE). */
+  pveEdge: number;
+  pveWeapon: string;
 }
 
 /** Effective HP multiplier from rolls with `charges` held (the upper bound: every charge spent as soon as it is back). */
 export const rollFactor = (cooldown: number, charges: number) => dodgeFactor(cooldown / Math.max(1, charges));
 
+/**
+ * Share of incoming hits a fighter holding a blocking weapon takes on its guard (RMB, in front: combat.ts
+ * dealDamage), like ROLL_USE for rolls. Blocking stops attacking, so a fighter guards about half the time.
+ */
+export const GUARD_USE = 0.5;
+/** A tonic is drunk when HP falls to this share (then heals over its time: BodyRoom.use). */
+export const TONIC_AT = 0.5;
+/** Last Breath turns the killing blow into 1 HP: on average it absorbs this share of one hit more (the blow minus what was left). */
+export const LAST_BREATH_SHARE = 0.5;
+
+/** How a defender takes hits: every defensive node of the build tree, as the server applies it. */
+export interface Defense {
+  hp: number;
+  /** Multiplier on each direct hit: rolls (i-frames) and the guard. */
+  taken: number;
+  /** Last Breath (combat.ts dealDamage; once a fight at its 90 s cooldown). */
+  lastBreath: boolean;
+  /** HP one tonic heals over `tonicS` seconds (Tonic Craft: × tonicHeal), and whether it ends a burn (cleanse). */
+  tonic: number;
+  tonicS: number;
+  cleanse: boolean;
+}
+
+/** The large tonic (the shop's best; no level gate): what both sides drink in the model's fights. */
+const TONIC = (() => {
+  const t = WEAPONS.find((w) => w.id === "tonic_large")!.tiers[0]!;
+  return { heal: t.heal ?? 120, s: t.duration ?? 4 };
+})();
+
+/** A defender with this build, holding a weapon with this block fraction (0: no guard) and this roll cooldown. */
+export function defense(build: BuildStats, hp: number, dodgeCooldown: number, block: number): Defense {
+  const guard = block > 0 ? 1 - GUARD_USE * Math.min(BLOCK_CAP, block + build.block) : 1;
+  return {
+    hp, taken: guard / rollFactor(dodgeCooldown, build.dodgeCharges), lastBreath: build.lastBreathS > 0,
+    tonic: TONIC.heal * build.tonicHeal, tonicS: TONIC.s, cleanse: build.tonicCleanse,
+  };
+}
+
+/** What a stream of hits looks like against the plain defender: its time to kill from the first hit, the mean raw hit, the burn it carries. */
+export interface Stream {
+  hits: readonly Hit[];
+  ttk: number;
+  meanHit: number;
+  burn: number;
+}
+
+export function stream(hits: readonly Hit[], plainHp: number): Stream | null {
+  const k = timeToKill(hits, plainHp);
+  if (!k || !hits.length) return null;
+  return { hits, ttk: k.t - hits[0]!.t, meanHit: plainHp / Math.max(1, k.hits), burn: Math.max(0, ...hits.map((h) => h.burn ?? 0)) };
+}
+
+/**
+ * Effective HP under a stream (raw damage it must deal): HP, plus the share of one tonic that heals
+ * before the plain defender would be dead (drunk at TONIC_AT), plus Last Breath's absorbed blow, plus
+ * the burn a cleansing tonic ends (half a burn), all over the share each hit lands (rolls, guard).
+ * Expected values: each node counts continuously, not in whole hits.
+ */
+export function effectiveHp(s: Stream, d: Defense): number {
+  const tonicShare = Math.min(1, (s.ttk * (1 - TONIC_AT)) / d.tonicS);
+  const breath = d.lastBreath ? LAST_BREATH_SHARE * s.meanHit * d.taken : 0;
+  const cleansed = d.cleanse ? 0.5 * BURN_S * s.burn : 0;
+  return (d.hp + d.tonic * tonicShare + breath + cleansed) / d.taken;
+}
+
+/** Families with a guard (a melee weapon with a block fraction). */
+export const GUARD_FAMILIES: readonly Family[] = COMBAT_FAMILIES.filter((f) => WEAPONS.find((w) => w.id === f)!.tiers.some((t) => (t.block ?? 0) > 0));
+
+/** The ways a build can fight for its edge: any weapon without a guard (its best class damage), or a guard weapon (melee damage, the tier's block). */
+function stances(b: BuildDef, st: BuildStats, level: number): { weapon: string; offense: number; block: number }[] {
+  const fams = buildFamilies(b);
+  const out = [{ weapon: "any", offense: Math.max(...fams.map((f) => classDamage(st, WEAPONS.find((w) => w.id === f)!.cls))), block: 0 }];
+  for (const f of GUARD_FAMILIES) {
+    if (!fams.includes(f)) continue;
+    const tier = WEAPONS.find((w) => w.id === f)!.tiers[gatedTier(level)]!;
+    if ((tier.block ?? 0) > 0) out.push({ weapon: `${f} T${gatedTier(level) + 1}`, offense: st.meleeDamage, block: tier.block! });
+  }
+  return out;
+}
+
+const classDamage = (st: BuildStats, cls: string) => (cls === "melee" ? st.meleeDamage : cls === "ranged" ? st.rangedDamage : cls === "magic" ? st.spellPower : 1);
+
+/** Median over the streams of (the build's effective HP ÷ the plain one's). */
+function lastsLonger(streams: readonly Stream[], built: Defense, plain: Defense): number {
+  return streams.length ? median(streams.map((s) => effectiveHp(s, built) / effectiveHp(s, plain))) : 1;
+}
+
+/** Creatures a player of `level` meets on level (a level range of theirs holds it). */
+const creaturesAt = (level: number) => FIGHT_DEFS.filter((d) => creatureLevels(d).some(([lo, hi]) => lo <= level && level <= hi));
+
 export function buildRows(): BuildRow[] {
   const rows: BuildRow[] = [];
   const unit7 = 3; // the steady reference starter (base HP, base pace)
+  const cd = starterMove(unit7).dodgeCooldown;
   for (const level of BUILD_LEVELS) {
     const frail = frailHp(level);
+    const plainHp = playerMaxHp({ starter: unit7, level });
+    // A plain attacker's hits with every family it could hold (server cadence, the "full" policy: heavies and specials).
+    const pvp = COMBAT_FAMILIES.filter((f) => f !== "fists").flatMap((f) => stream(hitTimeline(WEAPONS.find((w) => w.id === f)!, gatedTier(level), level, "full", 120, { cadence: "server" }), plainHp) ?? []);
+    // The creatures of the level, as many as their attack tokens put on one player, hits landing × LAND_RATE, the AI clamps on plain max HP.
+    const pve = creaturesAt(level).flatMap((def) => {
+      const n = def.temper === "hostile" ? packAttackers(def, def.pack[1]) : 1;
+      const merged = Array.from({ length: n }, (_, k) => creatureTimeline(def, level, 300, k * 0.4, LAND_RATE)).flat().sort((x, y) => x.t - y.t);
+      return stream(clampHits(merged, def.tier, plainHp), plainHp) ?? [];
+    });
     for (const b of BUILDS) {
       const nodes = b.nodes(level);
       const st: BuildStats = buildStats(nodes);
@@ -1078,13 +1183,19 @@ export function buildRows(): BuildRow[] {
         const k = timeToKill(hits, frail);
         if (k && k.t - hits[0]!.t < best.t) best = { t: k.t - hits[0]!.t, family: fam, hits: k.hits };
       }
-      const cd = starterMove(unit7).dodgeCooldown;
-      const offense = Math.max(st.meleeDamage, st.rangedDamage, st.spellPower);
-      const defense = (st.hp * rollFactor(cd, st.dodgeCharges)) / rollFactor(cd, 1);
+      const hp = playerMaxHp({ starter: unit7, level, tree: nodes });
+      let edge = { v: 0, w: "" }, pveEdge = { v: 0, w: "" };
+      for (const s of stances(b, st, level)) {
+        const built = defense(st, hp, cd, s.block), plain = defense(NEUTRAL_BUILD, plainHp, cd, s.block);
+        const e = s.offense * lastsLonger(pvp, built, plain);
+        const v = s.offense * lastsLonger(pve, built, plain);
+        if (e > edge.v) edge = { v: e, w: s.weapon };
+        if (v > pveEdge.v) pveEdge = { v, w: s.weapon };
+      }
       rows.push({
         build: b.name, level, nodes, points: nodes.reduce((n, id) => n + TREE.find((t) => t.id === id)!.cost, 0),
-        hp: playerMaxHp({ starter: unit7, level, tree: nodes }), plainHp: playerMaxHp({ starter: unit7, level }),
-        fastestTtk: best.t, fastestFamily: best.family, fastestHits: best.hits, edge: offense * defense,
+        hp, plainHp, fastestTtk: best.t, fastestFamily: best.family, fastestHits: best.hits,
+        edge: edge.v, edgeWeapon: edge.w, pveEdge: pveEdge.v, pveWeapon: pveEdge.w,
       });
     }
   }

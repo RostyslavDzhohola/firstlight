@@ -89,8 +89,8 @@ if (args.has("--json")) {
   for (const [i, s] of STARTERS.entries()) console.log(`  ${s.name.padEnd(12)} × ${f(starterSpellPower(i))}: base HP [${novaHeadshotLevels(starterSpellPower(i)).join(", ") || "none"}] · most fragile starter [${novaHeadshotLevels(starterSpellPower(i), frailHp).join(", ") || "none"}]`);
   console.log("\nRole leaders:", Object.entries(roleLeaders()).map(([k, v]) => `${k}: ${v.join(", ")}`).join(" · "));
   table("Build tree (#81, content §1.6): plain, focused (each branch first) and spread builds on a base starter",
-    ["Build", "Level", "Points", "Max HP (plain)", "Fastest kill of the most fragile plain starter", "Duel edge", "Nodes"],
-    buildRows().map((r) => [r.build, r.level, r.points, `${r.hp} (${r.plainHp})`, `${f(r.fastestTtk)} s · ${r.fastestFamily} · ${r.fastestHits} hits`, f(r.edge), r.nodes.join(" ") || "none"]));
+    ["Build", "Level", "Points", "Max HP (plain)", "Fastest kill of the most fragile plain starter", "PvP edge", "PvE edge", "Nodes"],
+    buildRows().map((r) => [r.build, r.level, r.points, `${r.hp} (${r.plainHp})`, `${f(r.fastestTtk)} s · ${r.fastestFamily} · ${r.fastestHits} hits`, `${f(r.edge)} ${r.edgeWeapon}`, `${f(r.pveEdge)} ${r.pveWeapon}`, r.nodes.join(" ") || "none"]));
   console.log(`\n## Checks: ${all.length - failed.length}/${all.length} in band`);
 }
 if (!args.has("--json")) {

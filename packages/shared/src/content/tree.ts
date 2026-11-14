@@ -97,21 +97,21 @@ export interface TreeNode {
 
 export const TREE: readonly TreeNode[] = [
   // Body
-  { id: "body_hardy", branch: "body", row: 1, cost: 1, name: "Hardy", blurb: "More health.", apply: (s) => void (s.hp *= 1.12) },
+  { id: "body_hardy", branch: "body", row: 1, cost: 1, name: "Hardy", blurb: "More health.", apply: (s) => void (s.hp *= 1.06) },
   { id: "body_second_roll", branch: "body", row: 2, cost: 2, name: "Second Roll", blurb: "Hold two dodge rolls at once.", apply: (s) => void (s.dodgeCharges = 2) },
-  { id: "body_tonic_craft", branch: "body", row: 3, cost: 3, name: "Tonic Craft", blurb: "Tonics heal more and end a slow and a burn.", apply: (s) => void ((s.tonicHeal *= 1.4), (s.tonicCleanse = true)) },
+  { id: "body_tonic_craft", branch: "body", row: 3, cost: 3, name: "Tonic Craft", blurb: "Tonics heal more and end a slow and a burn.", apply: (s) => void ((s.tonicHeal *= 1.2), (s.tonicCleanse = true)) },
   { id: "body_last_breath", branch: "body", row: 4, cost: 3, name: "Last Breath", blurb: "A killing blow leaves you on 1 HP instead, once in a while.", apply: (s) => void (s.lastBreathS = 90) },
   // Blade
-  { id: "blade_edge", branch: "blade", row: 1, cost: 1, name: "Keen Edge", blurb: "Melee hits harder.", apply: (s) => void (s.meleeDamage *= 1.1) },
+  { id: "blade_edge", branch: "blade", row: 1, cost: 1, name: "Keen Edge", blurb: "Melee hits harder.", apply: (s) => void (s.meleeDamage *= 1.08) },
   { id: "blade_cleave", branch: "blade", row: 2, cost: 2, name: "Cleave", blurb: "Each swing hits one more foe, in a wider arc.", apply: (s) => void ((s.meleeTargets += 1), (s.meleeArc += 30)) },
-  { id: "blade_guard", branch: "blade", row: 3, cost: 3, name: "Iron Guard", blurb: "Blocking stops more of each hit.", apply: (s) => void (s.block += 0.15) },
+  { id: "blade_guard", branch: "blade", row: 3, cost: 3, name: "Iron Guard", blurb: "Blocking stops more of each hit.", apply: (s) => void (s.block += 0.05) },
   { id: "blade_riposte", branch: "blade", row: 4, cost: 3, name: "Riposte", blurb: "Heavy attacks come back sooner.", apply: (s) => void (s.heavyCooldown *= 0.65) },
   // Bow and gun
-  { id: "aim_steady", branch: "aim", row: 1, cost: 1, name: "Steady Hands", blurb: "Bows, guns and throws hit harder.", apply: (s) => void (s.rangedDamage *= 1.1) },
+  { id: "aim_steady", branch: "aim", row: 1, cost: 1, name: "Steady Hands", blurb: "Bows, guns and throws hit harder.", apply: (s) => void (s.rangedDamage *= 1.08) },
   { id: "aim_quick_hands", branch: "aim", row: 2, cost: 2, name: "Quick Hands", blurb: "Faster reloads and a faster bow draw.", apply: (s) => void ((s.reload *= 0.7), (s.draw *= 0.75)) },
   { id: "aim_far_sight", branch: "aim", row: 3, cost: 3, name: "Far Sight", blurb: "Gun damage holds up over longer range.", apply: (s) => void (s.falloffReach *= 1.4) },
   // Magic
-  { id: "magic_attuned", branch: "magic", row: 1, cost: 1, name: "Attuned", blurb: "Spells hit harder and the ward holds more.", apply: (s) => void (s.spellPower *= 1.1) },
+  { id: "magic_attuned", branch: "magic", row: 1, cost: 1, name: "Attuned", blurb: "Spells hit harder and the ward holds more.", apply: (s) => void (s.spellPower *= 1.08) },
   { id: "magic_quickened", branch: "magic", row: 2, cost: 2, name: "Quickened", blurb: "Spell cooldowns are shorter.", apply: (s) => void (s.spellCooldown *= 0.75) },
   { id: "magic_deep_well", branch: "magic", row: 3, cost: 3, name: "Deep Well", blurb: "Aether refills faster.", apply: (s) => void (s.aetherRegen *= 1.4) },
   { id: "magic_cool_head", branch: "magic", row: 4, cost: 3, name: "Cool Head", blurb: "Staves and quills fire longer before they overheat.", apply: (s) => void (s.heat *= 1.5) },

@@ -45,7 +45,7 @@ describe("build tree (#81)", () => {
     expect(buildStats(["body_hardy", "body_second_roll"]).dodgeCharges).toBe(2);
     expect(buildStats(["travel_stride", "travel_far_step"]).skipstepM).toBe(15);
     expect(playerMaxHp({ starter: 1, level: 10 })).toBe(Math.round(maxHp(10) * starterStats(1).hp));
-    expect(playerMaxHp({ starter: 1, level: 10, tree: ["body_hardy"] })).toBe(Math.round(maxHp(10) * starterStats(1).hp * 1.12));
+    expect(playerMaxHp({ starter: 1, level: 10, tree: ["body_hardy"] })).toBe(Math.round(maxHp(10) * starterStats(1).hp * 1.06));
   });
 
   it("holds one roll or two: each charge comes back a cooldown after it was used", () => {

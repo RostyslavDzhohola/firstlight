@@ -169,23 +169,23 @@ Every level past the first gives **one point** (19 at level 20). Points go into 
 mix; inside a branch the nodes are taken top-down (a node needs the one above it) and cost **1, 2, 3, 3**
 points by row, so the whole tree (39 points) is about twice what a level-20 character has: two branches to
 the bottom, or the top of everything. Points are lost with the level when you die (a rebirth has none).
-The server decides every spend and respec and saves the tree with the character (migration 12, table
+The server decides every spend and respec and saves the tree with the character (migration 13, table
 `character_tree`). Panel: **U**, or Esc → Build on any device.
 
 | Branch | Row | Node | Cost | Effect |
 |---|---|---|---|---|
-| Body | 1 | Hardy | 1 | Max HP ×1.12 (on the starter's level curve) |
+| Body | 1 | Hardy | 1 | Max HP ×1.06 (on the starter's level curve) |
 | Body | 2 | Second Roll | 2 | Hold **two** dodge rolls; each comes back one dodge cooldown after it was used (the movement budget holds a roll per charge); two rolls start at least 400 ms apart (`ROLL_GAP_MS`), so a roll's own packets spend one charge |
-| Body | 3 | Tonic Craft | 3 | Tonics heal ×1.4 and **end a running slow/chill and a burn** |
+| Body | 3 | Tonic Craft | 3 | Tonics heal ×1.2 and **end a running slow/chill and a burn** |
 | Body | 4 | Last Breath | 3 | A blow from someone that would kill leaves 1 HP instead, once per 90 s (falls are not saved). Regeneration is untouched: no Body node heals inside a fight (§1.1) |
-| Blade | 1 | Keen Edge | 1 | Melee damage ×1.1 |
+| Blade | 1 | Keen Edge | 1 | Melee damage ×1.08 |
 | Blade | 2 | Cleave | 2 | Each swing hits **one more** target, arc +30° |
-| Blade | 3 | Iron Guard | 3 | Block +15 points (a Sunbrand blocks 85% instead of 70%), capped at 90% |
+| Blade | 3 | Iron Guard | 3 | Block +5 points (a T1 Sunbrand blocks 75% instead of 70%, T2 80% instead of 75%), capped at 90% |
 | Blade | 4 | Riposte | 3 | Heavy-attack cooldowns ×0.65 (the axe's chop and the hammer's slam: 6 s → 3.9 s) |
-| Bow and gun | 1 | Steady Hands | 1 | Ranged-class damage ×1.1 (guns, bows, crossbow, kunai, launcher; not magic weapons) |
+| Bow and gun | 1 | Steady Hands | 1 | Ranged-class damage ×1.08 (guns, bows, crossbow, kunai, launcher; not magic weapons) |
 | Bow and gun | 2 | Quick Hands | 2 | Reloads ×0.7, bow draw ×0.75 |
 | Bow and gun | 3 | Far Sight | 3 | Gun falloff starts ×1.4 farther and the hitscan reach stretches with it |
-| Magic | 1 | Attuned | 1 | Spell power ×1.1 (Frostbloom, Wishfall, the ward's shell), on top of the starter's |
+| Magic | 1 | Attuned | 1 | Spell power ×1.08 (Frostbloom, Wishfall, the ward's shell), on top of the starter's |
 | Magic | 2 | Quickened | 2 | Spell cooldowns ×0.75 |
 | Magic | 3 | Deep Well | 3 | Aether refill ×1.4 (6 → 8.4 a second) |
 | Magic | 4 | Cool Head | 3 | Magic weapons fire ×1.5 shots before overheating (rounded) |
@@ -197,8 +197,14 @@ The server decides every spend and respec and saves the tree with the character 
 every point comes back at once. **Balance** (`pnpm balance`, "Build tree"): a plain build, a build focused on
 each branch first and a spread build, at levels 5, 10 and 20, each hold the D-balance-4 hard floor (no
 kill of the most fragile plain starter in under 0.75 s or in one hit, server cadence, heavies, specials and
-headshots) and a duel edge over plain (best class damage × HP with rolls) of 1.00–1.45; Attuned keeps the
-spell one-shot and opening-pair checks.
+headshots) and a fight edge over plain of 1.00–1.45, in PvP (a plain attacker with each weapon family) and
+PvE (the level's creatures, packs as their attack tokens allow): best class damage × effective HP, with every
+defensive node counted (max HP, roll charges, the guard with each blocking weapon's tier, Last Breath as half
+a hit absorbed, the share of a large tonic that lands before the plain character would fall, a cleanse ending
+half a burn). Through a guard, the block nodes let at least half of what a plain guard lets through. Attuned
+keeps the spell one-shot and opening-pair checks. Hardy, Tonic Craft, Iron Guard, Keen Edge, Steady Hands and
+Attuned were cut (from ×1.12, ×1.4, +15 points and ×1.1) when the model first counted the defensive nodes
+(build tree review 4): the full Body branch with a guard weapon reached a 1.68 edge at level 20.
 
 ---
 

@@ -2,14 +2,14 @@
 // docs/content.md sections, DECISIONS (D), research report [04], or a run decision. A failed check is a
 // number that left its band; `pnpm balance` exits non-zero on any.
 
-import { STARTERS } from "../../packages/shared/src/content/weapons.ts";
+import { STARTERS, WEAPONS } from "../../packages/shared/src/content/weapons.ts";
 import { maxHp, REGEN } from "../../packages/shared/src/content/progression.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
-  encounterGaps, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, buildRows, type Family,
+  encounterGaps, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, buildRows, GUARD_FAMILIES, type Family,
 } from "./model.ts";
-import { buildStats } from "../../packages/shared/src/content/tree.ts";
+import { BLOCK_CAP, buildStats, TREE } from "../../packages/shared/src/content/tree.ts";
 import { WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
 export interface Check {
@@ -57,8 +57,13 @@ export const SPELL_POWER_BAND: [number, number] = [0.85, 1.15];
 /** §0's telegraph floor, held for spells too: a hit of this share of base HP or more warns for at least 1.2 s. */
 export const TELEGRAPH_SHARE = 0.4;
 export const TELEGRAPH_S = 1.2;
-/** #81: a build's duel edge over a plain character (best class damage × effective HP with rolls). */
+/**
+ * #81: a build's edge over a plain character in a fight, PvP and PvE: best class damage × how much longer
+ * it lasts under the same hits, with every defensive node counted (HP, rolls, guard, Last Breath, tonics).
+ */
 export const BUILD_EDGE: [number, number] = [1, 1.45];
+/** #81: through a guard, a build's nodes let at least this share of what a plain guard lets through (a guard is never a wall). */
+export const GUARD_KEEP = 0.5;
 
 export function checks(): Check[] {
   const out: Check[] = [];
@@ -175,12 +180,7 @@ export function checks(): Check[] {
   const worst = Math.min(...duelResults().map((r) => Math.min(r.ratio, 1 / r.ratio)));
   add({ id: "starter.duels", what: "Most lopsided starter duel (loser's speed ÷ winner's)", value: fmt(worst), band: "≥ 0.6", ok: worst >= 0.6, source: "D-balance-4 (no hopeless matchup)" });
 
-  // --- the build tree (#81, content §1.6): plain, focused (each branch first) and spread builds at levels 5, 10 and 20
-  for (const r of buildRows()) {
-    const id = `build.${r.build.replace(/\s+/g, "-").toLowerCase()}.L${r.level}`;
-    add({ id: `${id}.floor`, what: `${r.build} build at level ${r.level}: fastest kill of the most fragile plain starter (${r.fastestFamily}, ${r.fastestHits} hits, server cadence)`, value: fmt(r.fastestTtk), band: `≥ ${STARTER_TTK_FLOOR} s and ≥ 2 hits`, ok: r.fastestTtk >= STARTER_TTK_FLOOR - 1e-9 && r.fastestHits >= 2, source: "D-balance-4 hard floor, held for every build" });
-    add({ id: `${id}.edge`, what: `${r.build} build at level ${r.level}: duel edge over plain (best damage × HP with rolls)`, value: fmt(r.edge), band: `${BUILD_EDGE[0]}–${BUILD_EDGE[1]}`, ok: inBand(r.edge, ...BUILD_EDGE), source: "#81 (a choice, not a lock-in: in band like a starter's light layer)" });
-  }
+  out.push(...buildChecks());
   // Attuned on the strongest caster: still no spell one-shot, and the opening pair still doesn't kill.
   const attuned = buildStats(["magic_attuned"]).spellPower;
   add({ id: "build.spell.oneshot", what: "Largest spell hit with Attuned ÷ the most fragile starter's HP", value: fmt(peaks.hitOfFrail * attuned), band: `≤ ${BIGGEST_HIT}`, ok: peaks.hitOfFrail * attuned <= BIGGEST_HIT + 1e-9, source: "content §2.7 (no one-shots), #81" });
@@ -194,4 +194,27 @@ function classOf(f: Family): string {
 
 function planetOf(npcId: string): string {
   return npcId === "bramblehorn" ? "arcadia" : npcId === "fenstalker" ? "hollowmere" : "meridian";
+}
+
+/** The build tree's checks (#81): every build's floor and its PvP and PvE edges, and each guard weapon tier's share through the guard. */
+export function buildChecks(): Check[] {
+  const out: Check[] = [];
+  const add = (c: Check) => out.push(c);
+  // --- the build tree (#81, content §1.6): plain, focused (each branch first) and spread builds at levels 5, 10 and 20
+  for (const r of buildRows()) {
+    const id = `build.${r.build.replace(/\s+/g, "-").toLowerCase()}.L${r.level}`;
+    add({ id: `${id}.floor`, what: `${r.build} build at level ${r.level}: fastest kill of the most fragile plain starter (${r.fastestFamily}, ${r.fastestHits} hits, server cadence)`, value: fmt(r.fastestTtk), band: `≥ ${STARTER_TTK_FLOOR} s and ≥ 2 hits`, ok: r.fastestTtk >= STARTER_TTK_FLOOR - 1e-9 && r.fastestHits >= 2, source: "D-balance-4 hard floor, held for every build" });
+    add({ id: `${id}.edge`, what: `${r.build} build at level ${r.level}: PvP edge over plain (best damage × lasting under a plain attacker, ${r.edgeWeapon}; HP, rolls, guard, Last Breath, tonics)`, value: fmt(r.edge), band: `${BUILD_EDGE[0]}–${BUILD_EDGE[1]}`, ok: inBand(r.edge, ...BUILD_EDGE), source: "#81 (a choice, not a lock-in: in band like a starter's light layer)" });
+    add({ id: `${id}.pve`, what: `${r.build} build at level ${r.level}: PvE edge over plain (best damage × lasting under the level's creatures, ${r.pveWeapon}; HP, rolls, guard, Last Breath, tonics)`, value: fmt(r.pveEdge), band: `${BUILD_EDGE[0]}–${BUILD_EDGE[1]}`, ok: inBand(r.pveEdge, ...BUILD_EDGE), source: "#81 (build tree review 4)" });
+  }
+  // Every guard weapon tier: what gets through a guard with the tree's block nodes ÷ what gets through a plain guard.
+  const guardBuild = buildStats(TREE.map((n) => n.id));
+  for (const fam of GUARD_FAMILIES) {
+    WEAPONS.find((w) => w.id === fam)!.tiers.forEach((t, i) => {
+      if (!t.block) return;
+      const keep = (1 - Math.min(BLOCK_CAP, t.block + guardBuild.block)) / (1 - t.block);
+      add({ id: `build.guard.${fam}.t${i + 1}`, what: `${fam} T${i + 1}: share through the guard with every block node ÷ plain (block ${fmt(t.block)} → ${fmt(Math.min(BLOCK_CAP, t.block + guardBuild.block))})`, value: fmt(keep), band: `≥ ${GUARD_KEEP}`, ok: keep >= GUARD_KEEP - 1e-9, source: "#81 (build tree review 4: T2 Sunbrand 75% → 90%)" });
+    });
+  }
+  return out;
 }
