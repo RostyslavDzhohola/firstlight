@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LINE_BY_ID } from "@firstlight/shared/content/residentLines";
-import { brainFromEnv, modelBrain, modelPrompt, parseAnswer, placesFor, scriptedBrain, tokenReserve, type TalkContext } from "./resident-talk.ts";
+import { brainFromEnv, Floor, modelBrain, modelPrompt, parseAnswer, placesFor, scriptedBrain, tokenReserve, type TalkContext } from "./resident-talk.ts";
 
 /** Just the parts of an observation the brains read. */
 function obs(over: Record<string, unknown> = {}): TalkContext["obs"] {
@@ -172,5 +172,18 @@ describe("the model brain", () => {
     expect(brainFromEnv({}).kind).toBe("scripted");
     expect(brainFromEnv({ FL_RESIDENT_BRAIN: "model" }).kind).toBe("scripted"); // no endpoint named
     expect(brainFromEnv({ FL_RESIDENT_BRAIN: "model", FL_RESIDENT_URL: base, FL_RESIDENT_MODEL: "m" }).kind).toBe("model");
+  });
+});
+
+// Same class as review 2026-11-13 #1: the floor kept a hold for every person a resident ever spoke to.
+describe("the floor", () => {
+  it("gives the nearest resident the floor, and forgets holds that ran out", () => {
+    const f = new Floor();
+    expect(f.take("p1", "A", 1000, 0)).toBe(true);
+    expect(f.take("p1", "B", 1000, 10)).toBe(false);
+    expect(f.take("p1", "B", 1000, 1001)).toBe(true);
+    for (let i = 0; i < 1000; i++) f.take(`walker${i}`, "A", 1000, 2000 + i);
+    f.take("late", "A", 1000, 10_000);
+    expect(f.size).toBeLessThanOrEqual(66);
   });
 });

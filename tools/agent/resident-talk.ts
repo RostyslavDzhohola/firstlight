@@ -306,10 +306,17 @@ export class Floor {
   private held = new Map<string, { by: string; until: number }>();
   /** May `resident` speak to `person` now? Takes the floor for `ms` when it may. */
   take(person: string, resident: string, ms: number, now = Date.now()): boolean {
+    // Holds that ran out are dropped: a long run meets many people, and each one only matters for seconds.
+    if (this.held.size > 64) for (const [k, v] of this.held) if (v.until <= now) this.held.delete(k);
     const h = this.held.get(person);
     if (h && h.until > now && h.by !== resident) return false;
     this.held.set(person, { by: resident, until: now + ms });
     return true;
+  }
+
+  /** People the floor is held for (tests). */
+  get size(): number {
+    return this.held.size;
   }
 }
 
@@ -385,6 +392,8 @@ export function startTalk(o: TalkOptions): () => void {
   const watch = setInterval(() => {
     if (busy || o.agent.status !== "playing") return;
     const now = Date.now();
+    // Who was greeted only matters for `greetAgain`: forget older ones, or a long run keeps everyone it met.
+    if (greeted.size > 64) for (const [id, at] of greeted) if (now - at >= greetAgain) greeted.delete(id);
     for (const p of o.agent.observe({ peek: true }).players) {
       if (p.agent || p.dead || p.dist > greetWithin) continue;
       if (now - (greeted.get(p.id) ?? -Infinity) < greetAgain) continue;
