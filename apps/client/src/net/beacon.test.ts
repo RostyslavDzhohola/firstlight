@@ -104,6 +104,73 @@ describe("funnel beacon (#85)", () => {
     expect(b.has("play")).toBe(true);
   });
 
+  // Review round two, finding 9: the sent-step key was browser-wide, so a new visit's Play was
+  // suppressed as already sent, and a step left pending by an old visit went out under a new one.
+  it("sent and pending steps belong to one visit: a new visit sends its own, a renewal keeps them, an old visit's never move", async () => {
+    let clock = 1_000_000;
+    let issued = 0;
+    let renewable = true;
+    let funnelDown = false;
+    const tok = (id: string, n: number) => `v1.${id}.p.${n}.${n}.mac`;
+    const t = env({ now: () => clock }, (url, body) => {
+      if (url.endsWith("/api/visit")) {
+        // A renewal keeps the visit's id; past the renewal window the server starts a new visit.
+        const prevId = typeof body.prev === "string" ? body.prev.split(".")[1] : null;
+        const id = prevId && renewable ? prevId : `visit${String.fromCharCode(65 + issued++)}`;
+        return { status: 200, json: { visit: tok(id, clock), exp: clock + 1000 } };
+      }
+      if (url.endsWith("/api/funnel")) return funnelDown ? null : { status: 200, json: { done: body.steps.map((x: { step: string }) => x.step) } };
+      return { status: 204, json: null };
+    });
+    const funnelPosts = () => t.to("/api/funnel").map((p) => ({ visit: p.body.visit.split(".")[1], steps: p.body.steps.map((x: { step: string }) => x.step) }));
+
+    const a = new Beacon(t.e);
+    a.start();
+    a.step("play");
+    await t.drain();
+    expect(funnelPosts()).toEqual([{ visit: "visitA", steps: ["play"] }]);
+
+    // The token expires and is renewed: the same visit, so Play stays sent.
+    clock += 5000;
+    const renewed = new Beacon(t.e);
+    renewed.start();
+    renewed.step("play");
+    await t.drain();
+    expect(t.to("/api/visit").at(-1)!.body.prev).toContain("visitA");
+    expect(funnelPosts()).toHaveLength(1);
+    expect(renewed.has("play")).toBe(true);
+
+    // A step this visit couldn't deliver before the page closed...
+    funnelDown = true;
+    renewed.step("world", 9);
+    await t.drain();
+    expect(renewed.has("world")).toBe(false);
+
+    // ...then the visit can't be renewed any more: the next page is a new visit. Its Play is sent
+    // (the old visit's sent list isn't its), and the old visit's pending World never moves to it.
+    funnelDown = false;
+    renewable = false;
+    clock += 5000;
+    const fresh = new Beacon(t.e);
+    expect(fresh.has("play")).toBe(false);
+    fresh.start();
+    fresh.step("play");
+    await t.drain();
+    const last = funnelPosts().at(-1)!;
+    expect(last).toEqual({ visit: "visitB", steps: ["play"] });
+    expect(funnelPosts().filter((p) => p.visit === "visitB").flatMap((p) => p.steps)).toEqual(["play"]);
+    expect(fresh.has("play")).toBe(true);
+
+    // A step made before the page knows its visit belongs to the visit the page gets.
+    renewable = false;
+    clock += 5000;
+    const early = new Beacon(t.e);
+    early.step("pick");
+    early.start();
+    await t.drain();
+    expect(funnelPosts().at(-1)).toEqual({ visit: "visitC", steps: ["pick"] });
+  });
+
   it("storage that throws: one visit per page, kept in memory (review #8)", async () => {
     const t = env({ store: { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); }, removeItem: () => { throw new Error("denied"); } } });
     const b = new Beacon(t.e);
