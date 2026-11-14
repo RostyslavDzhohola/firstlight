@@ -337,6 +337,10 @@ def build(recipe_name, ual1, out_dir, tex=1024, fast=False, keep_blend=None, onl
     bl.reset()
     rig = R.import_rig(ual1)
     rec = importlib.import_module(f"recipes.{recipe_name}")
+    extra = getattr(rec, "EXTRA_BONES", None)
+    if extra:
+        import extra_bones
+        log("extra bones:", ", ".join(extra_bones.add(rig, extra)))
     parts = rec.parts()
     if only:
         parts = [p for p in parts if p.name in only]

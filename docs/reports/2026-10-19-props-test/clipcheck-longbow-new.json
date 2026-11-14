@@ -1,0 +1,87 @@
+{
+ "char": "ninja",
+ "prop": "longbow",
+ "model": "new",
+ "tol_m": 0.02,
+ "model_scale": 0.96,
+ "clips": {
+  "idle": {
+   "frames": 76,
+   "flags": []
+  },
+  "walk": {
+   "frames": 41,
+   "flags": []
+  },
+  "run": {
+   "frames": 29,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.091,
+     "frame": 22
+    }
+   ]
+  },
+  "sprint": {
+   "frames": 21,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.09,
+     "frame": 16
+    }
+   ]
+  },
+  "jump": {
+   "frames": 41,
+   "flags": []
+  },
+  "fall": {
+   "frames": 76,
+   "flags": []
+  },
+  "land": {
+   "frames": 39,
+   "flags": []
+  },
+  "roll": {
+   "frames": 45,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.091,
+     "frame": 10
+    },
+    {
+     "body": "calf_r",
+     "depth_m": 0.048,
+     "frame": 24
+    },
+    {
+     "body": "thigh_r",
+     "depth_m": 0.045,
+     "frame": 24
+    },
+    {
+     "body": "upper_chest",
+     "depth_m": 0.037,
+     "frame": 10
+    }
+   ]
+  },
+  "hit": {
+   "frames": 11,
+   "flags": []
+  },
+  "aim": {
+   "frames": 6,
+   "flags": []
+  },
+  "shoot": {
+   "frames": 20,
+   "flags": []
+  }
+ },
+ "flags_total": 6
+}

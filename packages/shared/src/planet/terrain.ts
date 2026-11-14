@@ -4,6 +4,7 @@
 // float or sink on either side.
 
 import { createNoise3, fbm, type Noise3 } from "../noise.ts";
+import { hash01 } from "../rng.ts";
 import { BODIES, quadsPerFace, type BodyDef, type BodyId } from "./bodies.ts";
 import { FACES, faceOf, faceUV, gridDir, type Face } from "./cubesphere.ts";
 import { anchorDir, padDirs, PAD_FLAT_INNER, PAD_FLAT_OUTER, type Dir } from "./pads.ts";
@@ -54,6 +55,16 @@ export function createTerrain(bodyOrId: BodyDef | BodyId): Terrain {
   const lakes: ResolvedFeature[] = body.lakes.map((l) => ({ dir: anchorDir(body, l.at), radius: l.radius, amount: l.depth }));
   const peaks: ResolvedFeature[] = body.peaks.map((k) => ({ dir: anchorDir(body, k.at), radius: k.radius, amount: k.height }));
   const pads = body.terrain.kind === "hub" ? [] : padDirs(body);
+  // Craters (Lumen): hashed directions and sizes, depth a share of the radius; a raised rim round each.
+  const craters: ResolvedFeature[] = [];
+  if (p.craters) {
+    const c = p.craters;
+    for (let i = 0; i < c.count; i++) {
+      const u = 2 * hash01(body.seed, i, 1) - 1, a = 2 * Math.PI * hash01(body.seed, i, 2), s = Math.sqrt(1 - u * u);
+      const r = c.minRadius + (c.maxRadius - c.minRadius) * hash01(body.seed, i, 3) ** 2;
+      craters.push({ dir: [s * Math.cos(a), u, s * Math.sin(a)], radius: r, amount: r * c.depth });
+    }
+  }
 
   const distM = (d: Dir, x: number, y: number, z: number) => {
     const dx = d[0] - x;
@@ -88,6 +99,14 @@ export function createTerrain(bodyOrId: BodyDef | BodyId): Terrain {
         const t = 1 - d / k.radius;
         const ridge = 0.75 + 0.25 * (1 - Math.abs(nRidge(px / 22, py / 22, pz / 22)));
         h += k.amount * t * t * (3 - 2 * t) * ridge;
+      }
+    }
+    for (const c of craters) {
+      const d = distM(c.dir, x, y, z);
+      if (d < c.radius * 1.8) {
+        const q = d / c.radius;
+        const rim = Math.exp(-((q - 1) * (q - 1)) / 0.06) * c.amount * 0.35;
+        h += (q < 1 ? -c.amount * (1 - q * q) : 0) + rim;
       }
     }
     for (const l of lakes) {

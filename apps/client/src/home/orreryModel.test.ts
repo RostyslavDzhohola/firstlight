@@ -7,7 +7,7 @@ import { PIXEL_BUDGET, wantsOrrery } from "./orrery.ts";
 const W = 1440, H = 900;
 const online = (n: Partial<Record<string, [number, string[]]>> = {}): HomeOnline => {
   const b = (id: string) => ({ players: n[id]?.[0] ?? 0, names: n[id]?.[1] ?? [] });
-  return { total: Object.values(n).reduce((s, v) => s + (v?.[0] ?? 0), 0), bodies: { portus: b("portus"), arcadia: b("arcadia"), hollowmere: b("hollowmere"), meridian: b("meridian") } };
+  return { total: Object.values(n).reduce((s, v) => s + (v?.[0] ?? 0), 0), bodies: { portus: b("portus"), arcadia: b("arcadia"), hollowmere: b("hollowmere"), meridian: b("meridian"), lumen: b("lumen") } };
 };
 const me = (body: string | null, guest = true): MeInfo => ({ name: "Wanderer-4410", displayName: null, guest, titleMedal: null, character: body ? { level: 3, xp: 0, coins: 0, starter: 0, palette: 0, body } : null, medals: [], pads: [] });
 

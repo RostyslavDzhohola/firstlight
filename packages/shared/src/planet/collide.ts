@@ -18,7 +18,10 @@ export interface XYZ {
 export const PLAYER_BODY = {
   radius: 0.38,
   height: 1.8,
-  /** Feet within this of a prop's top (and over it) stand on it instead of being shoved off. */
+  /**
+   * Feet within this below a prop's top, with the body over it (overlapping its footprint), stand on
+   * it instead of being shoved off: walking into a riser this high or lower steps up onto it.
+   */
   step: 0.35,
 } as const;
 
@@ -50,8 +53,9 @@ export function resetContact(c: PropContact): PropContact {
 /**
  * One prop vs the player cylinder (`radius`, `height`) with its feet at `p`, solid by solid for a
  * compound collider (main shape, then its extra parts).
- * - Feet within `step` below a solid's top (or just above it) with the centre over its footprint:
- *   that top is a floor; its distance from the planet centre goes into `out.floor` (the max is kept).
+ * - Feet within `step` below a solid's top (or just above it) with the body overlapping its
+ *   footprint: that top is a floor (a stair's riser is stepped up, not pushed against); its distance
+ *   from the planet centre goes into `out.floor` (the max is kept).
  * - Otherwise, overlapping a solid's side: `p` moves out sideways by the shortest way; the push
  *   direction goes into `out`.
  * Returns true if `p` moved.
@@ -125,8 +129,10 @@ function pushOutOfSolid(b: SolidFrame, shape: 0 | 1, hx: number, hz: number, y0:
     }
     depth = hx + radius - rl;
   }
-  if (ly >= y1 - step && outside <= radius * 0.5) {
-    // Standing on (or stepping onto) the top.
+  if (ly >= y1 - step) {
+    // Standing on (or stepping onto) the top. The whole body's overlap counts, not only the centre
+    // over the footprint: the side push starts at an overlap, so a stricter margin here left every
+    // riser (a watchtower's stair: review 2026-11-13 world sites, finding 1) a wall.
     const top = topRadius(b, p, ly, y1);
     if (top > out.floor) out.floor = top;
     return false;
@@ -143,9 +149,9 @@ function pushOutOfSolid(b: SolidFrame, shape: 0 | 1, hx: number, hz: number, y0:
 }
 
 /**
- * The highest top of a prop's solids that feet at `p` stand over: centre over the footprint (within
- * half the body radius, as the client lands) and the feet no deeper than `step` below it. Distance
- * from the planet centre, or 0.
+ * The highest top of a prop's solids that feet at `p` stand over: the body overlapping the footprint
+ * (as the client lands and steps up) and the feet no deeper than `step` below it. Distance from the
+ * planet centre, or 0.
  */
 function supportOf(b: SolidFrame, p: XYZ, radius: number, step: number): number {
   let best = 0;
@@ -153,7 +159,7 @@ function supportOf(b: SolidFrame, p: XYZ, radius: number, step: number): number 
     const q = k < 0 ? null : b.parts![k]!;
     const shape = q ? q.shape : b.shape, hx = q ? q.hx : b.hx, hz = q ? q.hz : b.hz, y1 = q ? q.y1 : b.h;
     const { x: lx, y: ly, z: lz } = toLocal(b, p);
-    if (ly < y1 - step || outsideFootprint(shape, hx, hz, lx, lz) > radius * 0.5) continue;
+    if (ly < y1 - step || outsideFootprint(shape, hx, hz, lx, lz) >= radius) continue;
     best = Math.max(best, topRadius(b, p, ly, y1));
   }
   return best;
@@ -237,8 +243,8 @@ const _p: XYZ = { x: 0, y: 0, z: 0 };
 
 /**
  * For the server's movement validator (height and grounded checks): the highest intact prop top
- * that a player with feet at (x, y, z) stands over — centre over the top's footprint (within half
- * the body radius, the client's landing rule), feet no deeper than `step` below it, any height
+ * that a player with feet at (x, y, z) stands over — the body overlapping the top's footprint (the
+ * client's landing and step-up rule), feet no deeper than `step` below it, any height
  * above it — as a distance from the planet centre; 0 if none. Measure jumps from
  * max(R + terrain height, support): that is where the client stands and lands.
  *

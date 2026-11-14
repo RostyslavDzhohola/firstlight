@@ -1,12 +1,13 @@
 // Onboarding HUD (verdict: Entry A's layout, kit markup in src/ui/README.md "Onboarding"): the
-// compact current-step card, slim rail and expandable checklist, plus a world callout. Plain DOM
-// (D25); per-frame calls touch the DOM only when a value changes.
+// compact current-step card, slim rail and expandable checklist. Where a step (or the end card) points
+// somewhere, the way is an arrow and distance inside the card itself, with the same target on the
+// compass (#68: one place, not a second box). Plain DOM (D25); per-frame calls touch the DOM only
+// when a value changes.
 
 import "./styles/kit.css";
 import "./onboarding.css";
 import { STEPS, type OnboardingSteps, type StepDef } from "../game/onboardingSteps.ts";
 import { button, el, icon } from "./dom.ts";
-import { placeCallout, type Rect } from "./calloutPlace.ts";
 import { CONFIRM_MS, ConfirmClick } from "./saveOffer.ts";
 
 /** Under the Skip button before the dummies pay: what skipping costs, the save lock included (#32). */
@@ -19,6 +20,13 @@ function keys(parent: HTMLElement, list: readonly string[], cls = "fl-keys"): HT
     else el("span", `fl-key${k.length > 2 ? " fl-key--wide" : ""}`, wrap, k);
   }
   return wrap;
+}
+
+/** The way to something, for the card's arrow row: what, its bearing from the camera's heading (degrees, clockwise), metres. */
+export interface CardWay {
+  label: string;
+  deg: number;
+  metres: number;
 }
 
 /** "Hold **Shift** while…" → text with <b> runs. */
@@ -40,28 +48,16 @@ export class OnboardingHud {
   private barFill: HTMLElement | null = null;
   private barText: HTMLElement | null = null;
   private readonly widget: HTMLElement;
-  private readonly callout: HTMLElement;
-  private readonly calloutBox: HTMLElement;
-  /** Cached layout for callout placement (re-measured when the panel or the label text changes). */
-  private avoid: Rect | null = null;
-  private boxSize: { w: number; h: number } | null = null;
-  private readonly onResize = () => {
-    this.avoid = null;
-    this.boxSize = null;
-    this.revealCurrent();
-  };
-  /** Any later change in the panel's size (a card growing, fonts arriving) re-measures and re-reveals. */
-  private readonly panelObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
-    this.avoid = null;
-    this.revealCurrent();
-  });
-  private readonly calloutText: HTMLElement;
-  private readonly calloutSub: HTMLElement;
+  /** The card's way row (arrow, label, metres), rebuilt with the card. */
+  private way: { root: HTMLElement; arrow: HTMLElement; label: HTMLElement; metres: HTMLElement } | null = null;
+  private readonly onResize = () => this.revealCurrent();
+  /** Any later change in the panel's size (a card growing, fonts arriving) re-reveals the current row. */
+  private readonly panelObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => this.revealCurrent());
   private readonly skipNote: HTMLElement;
   private readonly repoUrl: string | null;
   private readonly checklist: HTMLDetailsElement;
   private readonly onExpanded?: (expanded: boolean) => void;
-  private last = { state: "", step: "", bar: "", callout: "", calloutText: "", paid: false };
+  private last = { state: "", step: "", bar: "", way: "", paid: false };
 
   /** `repoUrl`: Star/Fork links on the last card (only once the repo is public). */
   constructor(parent: HTMLElement, onSkip: () => void, repoUrl: string | null = null, preference?: { expanded: boolean; onExpanded: (expanded: boolean) => void }) {
@@ -86,7 +82,6 @@ export class OnboardingHud {
     this.panelObserver?.observe(this.checklist);
     this.checklist.addEventListener("toggle", () => {
       this.onExpanded?.(this.checklist.open);
-      this.avoid = null;
       this.revealCurrent();
     });
     for (const s of STEPS) {
@@ -122,16 +117,6 @@ export class OnboardingHud {
 
     this.card = el("section", "fl-onb__step fl-holo fl-corners", widget);
     this.card.setAttribute("aria-live", "polite");
-
-    this.callout = el("div", "fl-callout", this.root);
-    this.callout.hidden = true;
-    el("div", "fl-callout__line", this.callout);
-    el("div", "fl-callout__dot", this.callout);
-    el("div", "fl-callout__arrow", this.callout);
-    const box = el("div", "fl-callout__box fl-holo", this.callout);
-    this.calloutBox = box;
-    this.calloutText = el("span", "", box);
-    this.calloutSub = el("small", "", box);
   }
 
   /** Checklist, rail and card from the step machine (cheap to call every frame). `paid`: the server has paid the dummies. */
@@ -155,7 +140,6 @@ export class OnboardingHud {
         this.rows[i]!.className = `fl-onb__st${moved ? " is-moved" : done ? " is-done" : s === cur ? " is-now" : ""}${s.optional ? " is-opt" : ""}`;
         this.segs[i]!.className = done ? "is-done" : s === cur ? "is-now" : "";
       });
-      this.avoid = null;
       reveal = true;
       this.railText.replaceChildren("Step ");
       el("b", "", this.railText, String(cur ? STEPS.indexOf(cur) + 1 : STEPS.length));
@@ -165,7 +149,6 @@ export class OnboardingHud {
     if (stepKey !== this.last.step) {
       this.last.step = stepKey;
       this.last.bar = "";
-      this.avoid = null;
       reveal = true;
       if (cur) this.buildCard(cur);
     }
@@ -206,6 +189,8 @@ export class OnboardingHud {
     c.setAttribute("aria-live", "polite");
     this.card.replaceWith(c);
     this.card = c;
+    this.way = null;
+    this.last.way = "";
     el("span", "fl-onb__step-k", c, `First minute · ${STEPS.indexOf(s) + 1} / ${STEPS.length}`);
     el("h2", "", c, s.heading);
     keys(c, s.cardKeys, "fl-onb__keys");
@@ -218,7 +203,6 @@ export class OnboardingHud {
       this.barFill.style.setProperty("--fill", "0");
       this.barText = el("span", "num", hold);
     }
-    if (s.id === "portal" && this.repoUrl) this.repoLinks(c, this.repoUrl);
   }
 
   private repoLinks(parent: HTMLElement, repoUrl: string) {
@@ -237,57 +221,65 @@ export class OnboardingHud {
     }
   }
 
-  /** A world callout for a point projected with three's `Vector3.project()`, or hidden (null).
-   *  On screen it stands on the point; off screen, behind the camera or under the tutorial panel
-   *  it's pinned beside them with an arrow towards the point. */
-  setCallout(ndc: { x: number; y: number; z: number } | null, title = "", sub = "") {
-    const text = `${title}\u0001${sub}`;
-    if (text !== this.last.calloutText) {
-      this.last.calloutText = text;
-      this.calloutText.textContent = title;
-      this.calloutSub.textContent = sub;
-      this.boxSize = null;
-    }
-    if (ndc === null) {
-      this.last.callout = "";
-      this.callout.hidden = true;
+  /**
+   * The way to where this card (or the end card) wants you: an arrow turned by the bearing (up =
+   * straight ahead), the place's name and its distance, inside the card; null hides it. The same
+   * target is on the compass, so turning until the arrow points up centres it there too.
+   */
+  setWay(way: CardWay | null) {
+    if (!way) {
+      if (this.way) {
+        this.way.root.remove();
+        this.way = null;
+        this.last.way = "";
+      }
       return;
     }
-    this.callout.hidden = false;
-    // Measured once per label, panel or window change, not every frame (a zero size isn't kept).
-    if (!this.boxSize) {
-      const w = this.calloutBox.offsetWidth;
-      const h = this.calloutBox.offsetHeight;
-      if (w > 0 && h > 0) this.boxSize = { w, h };
+    if (!this.way) {
+      const root = el("div", "fl-onb__way", this.card);
+      root.dataset.e2e = "onboarding-way";
+      const arrow = el("i", "fl-onb__arrow", root);
+      const label = el("b", "", root);
+      const metres = el("span", "num", root);
+      this.way = { root, arrow, label, metres };
     }
-    if (!this.avoid && !this.widget.hidden) {
-      const r = this.widget.getBoundingClientRect();
-      this.avoid = r.width > 0 ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null;
-    }
-    const p = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, this.avoid);
-    const key = `${Math.round(p.x)},${Math.round(p.y)},${p.edge ? Math.round(p.angle * 20) : "-"},${p.flip ? 1 : 0}`;
-    if (key === this.last.callout) return;
-    this.last.callout = key;
-    this.callout.style.setProperty("--x", `${Math.round(p.x)}px`);
-    this.callout.style.setProperty("--y", `${Math.round(p.y)}px`);
-    this.callout.style.setProperty("--a", `${p.angle.toFixed(3)}rad`);
-    this.callout.classList.toggle("is-edge", p.edge);
-    this.callout.classList.toggle("is-flip", p.flip);
+    // Rounded so the DOM changes a few times a second at most: 5° steps, whole metres (5 m beyond 50).
+    const deg = Math.round(way.deg / 5) * 5;
+    const m = way.metres > 50 ? Math.round(way.metres / 5) * 5 : Math.round(way.metres);
+    const key = `${way.label}|${deg}|${m}`;
+    if (key === this.last.way) return;
+    this.last.way = key;
+    this.way.arrow.style.setProperty("--a", `${deg}deg`);
+    this.way.label.textContent = way.label;
+    this.way.metres.textContent = m <= 3 ? "here" : `${m} m`;
   }
 
-  /** The end card: XP, the medal, and the Star/Fork links once the repo is public. `portalTaken`:
-   *  the player walked into a portal (else the last tip moved on by itself and the card says where to go). */
-  showDone(xp: number, portalTaken = true) {
+  /** The end card: XP, the medal, where to go next (its way row follows with `setWay`), and the
+   *  Star/Fork links once the repo is public. The tutorial ends here in the plaza (#68). */
+  showDone(xp: number) {
     this.list.hidden = true;
-    this.callout.hidden = true;
     this.root.querySelector(".fl-onb__rail")?.remove();
     const c = this.card;
     c.replaceChildren();
+    this.way = null;
+    this.last.way = "";
     const k = el("span", "fl-onb__step-k", c, "Tutorial complete · ");
     el("b", "", k, `+${xp} XP`);
     el("h2", "", c, "You're ready");
-    rich(el("p", "", c), `The **Spark** medal is yours: wear its title from the journal (**J**). Your inventory is on **I**. ${portalTaken ? "The portals around the plaza lead to the three planets." : "When you're ready, walk into the **Arcadia** portal on the plaza (levels 1–7)."}`);
+    rich(el("p", "", c), "The **Spark** medal is yours: wear its title from the journal (**J**). **Next:** walk into the **Arcadia** portal (levels 1–7). The arrow below and the compass point the way.");
     if (this.repoUrl) this.repoLinks(c, this.repoUrl);
+  }
+
+  /**
+   * The end card stays up across the walk through the portal; once the player has arrived on a
+   * planet its "Next" names that planet's guide instead of the portal behind them (play-through
+   * 2026-11-14: it still said "walk into the Arcadia portal … here" on Arcadia).
+   */
+  arrived(planet: string, guide: string) {
+    const next = this.card.querySelector("p");
+    if (next) next.replaceChildren();
+    if (next) rich(next, `The **Spark** medal is yours: wear its title from the journal (**J**). **Next:** you're on **${planet}**: talk to **${guide}** by the pad for your first missions (the compass marks the way).`);
+    this.setWay(null);
   }
 
   dispose() {

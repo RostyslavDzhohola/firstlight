@@ -53,9 +53,11 @@ export const SKY_PROFILES: Record<BodyId, SkyProfile> = {
   hollowmere: { phase: 0.62, minElev: nightMinElev(0.45), maxElev: 0.45, noonAz: 2.2, slotMs: 6 * 60_000, weather: [["drizzle", 0.4], ["fog", 0.3], ["clear", 0.2], ["storm", 0.1]] },
   // Hard white sun; dust storms instead of rain.
   meridian: { phase: 0.83, minElev: nightMinElev(1.35), maxElev: 1.35, noonAz: 1.4, slotMs: 8 * 60_000, weather: [["clear", 0.62], ["dust", 0.38]] },
+  // Lumen has no air: always clear, a hard sun and a black sky.
+  lumen: { phase: 0.47, minElev: nightMinElev(0.95), maxElev: 0.95, noonAz: 2.6, slotMs: 10 * 60_000, weather: [["clear", 1]] },
 };
 
-const BODY_SEED: Record<BodyId, number> = { portus: 0x51a7, arcadia: 0xa2c4, hollowmere: 0x40e3, meridian: 0x3e21 };
+const BODY_SEED: Record<BodyId, number> = { portus: 0x51a7, arcadia: 0xa2c4, hollowmere: 0x40e3, meridian: 0x3e21, lumen: 0x1c3e };
 
 const frac = (x: number) => x - Math.floor(x);
 

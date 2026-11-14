@@ -121,7 +121,7 @@ function onboardingFrame(toggle: () => void) {
     active: true,
     ended: false,
     paid: false,
-    hud: { toggleChecklist: toggle, render() {}, setCallout() {}, showDone() {} },
+    hud: { toggleChecklist: toggle, render() {}, setWay() {}, showDone() {} },
     progress: { steps: new mods.OnboardingSteps(), save() {} },
     lastPos: new THREE.Vector3(),
     hasLast: false,

@@ -179,4 +179,18 @@ export const WORLD_LOOKS: Record<BodyId, WorldLook> = {
     aerial: 0xd08a9a, aerialAmount: 0.58,
     stars: { warm: 0xffe0c0, cool: 0xc0e8ff, density: 0.65, gain: 1.1 },
   },
+  // Lumen (#6): no air, no grass, no clouds. Grey regolith, dark dust in the craters, hard stars.
+  lumen: {
+    meadow: {
+      flowerShare: 0, flowerBase: 0, heads: [0xd8dce4, 0xd8dce4, 0xd8dce4, 0xd8dce4], eye: 0x9fb8ff,
+      glow: [0, 0, 0, 0], stem: [1, 1, 1, 1], size: [0.5, 0.5, 0.5, 0.5],
+      lushRoot: 0x5a5852, lushTip: 0x8a8880, dryRoot: 0x5a5852, dryTip: 0x9a9890, pull: 0.5, dryBias: 1, height: 0.3, blade: 0.4, sheen: 0, under: 0, shore: 0,
+    },
+    clouds: { cover: 0, height: 520, scale: 1500, stretch: [1, 0.22, 0.7], lit: 0xffffff, shade: 0xcccccc, opacity: 0, speed: 0 },
+    ground: { rock: 0x7c7a76, dirt: 0x5e5c58, sand: 0xb8b4ac, snow: 0xd8d6d0, snowLine: 999, moss: 0, mossColor: 0x000000, cracks: 0.6, lichen: 0xc8ccd8, lichenAmt: 0.15 },
+    water: { shore: 0xb8b4ac, absorb: 0.9, mist: 0, mistColor: 0xffffff, glitter: 0, foam: 0 },
+    air: { shafts: 0, mist: 0, mistDawn: 0, mistColor: 0xffffff, mistTop: 6, fireflies: 0, fireflyA: 0xffffff, fireflyB: 0xffffff, fireflySize: 0.05, fireflyRise: 0, fireflyBlink: 1 },
+    aerial: 0x20263a, aerialAmount: 0.15,
+    stars: { warm: 0xffe8d0, cool: 0xd0e4ff, density: 1, gain: 1.5 },
+  },
 };

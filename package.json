@@ -13,7 +13,9 @@
     "e2e:prod": "E2E_TARGET=prod pnpm --filter @firstlight/client e2e",
     "e2e:gate": "pnpm --filter @firstlight/client exec node e2e/gate.mjs",
     "e2e:live": "pnpm --filter @firstlight/client e2e:live",
-    "balance": "node tools/balance/report.ts"
+    "balance": "node tools/balance/report.ts",
+    "metrics": "node tools/metrics/collect.ts",
+    "check:eggs": "node tools/eggs/bundle-guard.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",

@@ -1,7 +1,7 @@
 // Onboarding (SPEC §6.12, content.md §1.1): about 60 s in Portus, skippable, once per account. Move,
-// look, jump, sprint, dodge, then knock down three training dummies by the arrival point. The server
-// counts the hits (Portus town is a safe zone, so training swings are their own `train` message) and pays
-// 3 × 10 XP + 20 on completion = 50 XP (level 2) and the Spark medal. Skipping pays nothing more.
+// look, jump, sprint, dodge, then one left click (#68: any swing; a training dummy by the arrival point
+// falls if it's in reach). Portus town is a safe zone, so training swings are their own `train` message;
+// the first one completes the tutorial and pays 50 XP in all (level 2) and the Spark medal. Skipping pays nothing more.
 // Shared so the client draws the dummies exactly where the server tests the hits.
 
 import type { BodyId } from "../planet/bodies.ts";
@@ -13,14 +13,14 @@ export const ONBOARDING = {
   BODY: "portus" as BodyId,
   DUMMY_XP: 10,
   DONE_XP: 20,
-  /** Hits that knock a dummy down (any weapon). */
-  HITS_PER_DUMMY: 3,
+  /** Hits that knock a dummy down (any weapon; one since #68). */
+  HITS_PER_DUMMY: 1,
   /** Dummy hit capsule (metres). */
   DUMMY_RADIUS: 0.5,
   DUMMY_HEIGHT: 1.9,
   /** Account stat: onboarding finished (done or skipped). It never comes back, not even after a rebirth. */
   STAT: "onboarding",
-  /** Training swings are only sent within this many metres of the dummies. */
+  /** Within this many metres of a dummy the tutorial's card names it as the thing to swing at. */
   NEAR_M: 40,
 } as const;
 

@@ -1,10 +1,16 @@
-// The HUD missions panel (top right, under the minimap): the open missions, one row each. A click on
-// its header collapses it to that line and back; Settings → "Missions" hides it (#3). Both live in
-// uiSettings, so they survive reloads. The mission pointer and the journal (J) don't depend on it.
+// The HUD missions panel (top right, under the minimap): the open missions, one row each (#69). The
+// tracked one shows its objective; the rest are one-line titles, and a click on one tracks it
+// (game/missionTrack.ts). The header carries a visible collapse control with its key (L, or a click):
+// collapsed, the panel is one line. Settings → "Missions" hides it (#3). Both live in uiSettings, so
+// they survive reloads. The mission pointer and the journal (J) don't depend on it.
 
 import { el } from "./dom.ts";
 import type { MissionLine } from "./hud.ts";
 import { uiSettings } from "./uiSettings.ts";
+import { missionTrack } from "../game/missionTrack.ts";
+
+/** The key that collapses and expands the panel (game/keys.ts BINDINGS, read in QuestClient). */
+export const MISSIONS_KEY = { code: "KeyL", cap: "L" } as const;
 
 /** The "+N more (J)" line: how many open missions aren't listed, and what a click on it does (open the journal). */
 export interface MissionsMore {
@@ -54,20 +60,38 @@ export class MissionsPanel {
     const h = el("header", "", this.root);
     const b = el("button", "hit-area", h);
     b.type = "button";
+    b.dataset.e2e = "missions-toggle";
     b.setAttribute("aria-expanded", String(!missionsCollapsed));
-    b.title = missionsCollapsed ? "Show missions" : "Collapse missions";
+    b.title = `${missionsCollapsed ? "Show missions" : "Collapse missions"} (${MISSIONS_KEY.cap})`;
     b.onclick = () => uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
     el("span", "fl-label", b, "Missions");
-    el("span", "", b, this.header);
+    // Collapsed: a running trial (it is against the clock), else the tracked mission, stays on the one line.
+    const trial = this.lines.find((l) => l.trial);
+    const tracked = this.lines.find((l) => l.state === "tracked");
+    const line = trial ? `Trial: ${trial.title} · ${trial.progress}` : tracked ? `${tracked.title} · ${tracked.progress}` : this.header;
+    el("span", "fl-missions__h", b, missionsCollapsed ? line : this.header);
+    const ctl = el("span", "fl-missions__ctl", b);
+    el("span", "fl-key", ctl, MISSIONS_KEY.cap);
+    el("i", `fl-missions__chev${missionsCollapsed ? " is-closed" : ""}`, ctl);
     if (focused) b.focus();
     if (missionsCollapsed) return;
     for (const m of this.lines) {
-      const row = el("div", `fl-mission${m.state && m.state !== "open" ? ` is-${m.state}` : ""}`, this.root);
+      const open = m.state === "open";
+      const row = el(open ? "button" : "div", `fl-mission${m.state && m.state !== "open" ? ` is-${m.state}` : ""}${m.trial ? " is-trial" : ""}`, this.root);
+      if (m.colour) row.style.setProperty("--mc", m.colour);
+      row.dataset.e2e = `mission-row-${m.id}`;
+      if (open && row instanceof HTMLButtonElement) {
+        row.type = "button";
+        row.title = "Track this mission";
+        row.onclick = () => missionTrack.choose(m.id);
+      }
       el("i", "fl-mission__st", row);
       const d = el("div", "", row);
+      if (m.trial) el("span", "fl-mission__k", d, "Trial running");
       el("b", "", d, m.title);
-      el("span", "", d, m.detail);
-      el("span", "fl-mission__r num", row, m.progress);
+      // Only the tracked mission and a running trial say what to do (#69); the others are one line.
+      if (m.state === "tracked" || m.trial) el("span", "", d, m.detail);
+      el("span", "fl-mission__r num", row, m.state === "tracked" ? `▸ ${m.progress}` : m.progress);
     }
     if (this.more && this.more.count > 0) {
       const more = el("button", "fl-missions__more hit-area", this.root);

@@ -19,6 +19,7 @@ import { dataFastVisits } from "./ops/datafast.ts";
 import { mountHome } from "./ops/home.ts";
 import { endAllSessions } from "./social/index.ts";
 import { banExplainer } from "./social/refusal.ts";
+import { setVisitKey } from "./auth/visitToken.ts";
 
 // Refuse to boot an insecure production config (review): dev guests would allow impersonation, and a
 // missing origin secret makes forwarded IPs spoofable.
@@ -46,6 +47,9 @@ bannedCheck.current = (userId) => isBanned(gameDb(), userId);
 // Admin rights are asked of the account table again while playing (D-admin-2): revoking one sticks.
 adminCheck.current = (userId) => isAdmin(gameDb(), userId);
 
+// Funnel visit tokens survive a restart: signed with a key derived from the auth secret (D-ship-6).
+setVisitKey(env.authSecret);
+
 const game = await createGame({
   port: env.port,
   verify: accounts.verify,
@@ -58,6 +62,8 @@ const game = await createGame({
   allowedOrigins: env.clientOrigins,
   gracefulShutdown: true,
   production: env.production,
+  // Gateway seats sign in as guests through Better Auth over loopback, like a browser would (D-agents-gw-1).
+  gateway: { signIn: "guest", authOrigin: env.clientOrigins[0], originSecret: env.originSecret || undefined },
   mountBeforeJson: accounts.mountBeforeJson,
   explainRefusal: banExplainer(accounts),
   revalidate: accounts.revalidate,

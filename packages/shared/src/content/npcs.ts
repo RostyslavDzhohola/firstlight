@@ -12,7 +12,7 @@ import type { BodyId, FeatureAnchor } from "../planet/bodies.ts";
 import { enemyDamageMult, enemyHpMult, killCoins, maxHp, type EnemyTier } from "./progression.ts";
 
 export type PlanetId = Exclude<BodyId, "portus">;
-export type NpcFamily = "brightbit" | "hollow" | "oversight" | "woolback" | "wolf" | "beast" | "boss" | "egg";
+export type NpcFamily = "brightbit" | "hollow" | "oversight" | "woolback" | "wolf" | "beast" | "boss" | "egg" | "lunar";
 export type Locomotion = "ground" | "hover" | "swim" | "wade";
 /** hostile: attacks on sight · neutral: fights back when hit · critter: flees when hit · passive: never attacks. */
 export type Temper = "hostile" | "neutral" | "critter" | "passive";
@@ -536,6 +536,35 @@ export const NPC_DEFS: readonly NpcDef[] = [
     ],
     drops: coinsOnly,
   },
+  // ---------------------------------------------------------------- Lumen: the Dustborn (#6; Arcadia's moon, levels 6–9)
+  // Built for a quarter of the pull: they leap far and hang in the air like the players do.
+  {
+    id: "glimmerhop", name: "Glimmerhop", planet: "lumen", family: "lunar", tier: "regular", temper: "hostile",
+    levels: [6, 9], hp: 40, speed: 2.4, runSpeed: 4.5, locomotion: "ground", radius: 0.5, height: 1.1, ...PERCEPTION,
+    pack: [2, 4], respawn: "pack", model: "glimmerhop",
+    attacks: [
+      atk({ id: "moonleap", name: "Moon Leap", shape: "leap", weight: "light", damage: 15, telegraph: 0.8, radius: 2, range: 9, minRange: 4, cooldown: 4.5, recovery: 0.7 }),
+      atk({ id: "nip", name: "Nip", shape: "arc", weight: "light", damage: 8, telegraph: 0.5, radius: 2.1, angle: 90, range: 1.9, cooldown: 1.3 }),
+    ],
+    drops: [tonic(1 / 10)],
+  },
+  {
+    id: "dustmoth", name: "Dustmoth", planet: "lumen", family: "lunar", tier: "regular", temper: "hostile",
+    levels: [6, 9], hp: 26, speed: 2.6, runSpeed: 4, locomotion: "hover", hover: 2.4, radius: 0.5, height: 0.9, ...PERCEPTION,
+    preferRange: [9, 14], pack: [2, 3], respawn: "pack", model: "dustmoth",
+    attacks: [atk({ id: "dust_spit", name: "Dust Spit", shape: "bolt", weight: "light", damage: 9, telegraph: 0.6, speed: 14, radius: 0.5, range: 18, cooldown: 2.2, effect: { kind: "chill", seconds: 1.5, amount: 0.15 } })],
+    drops: [grenade(1 / 25)],
+  },
+  {
+    id: "cratermaw", name: "Cratermaw", planet: "lumen", family: "lunar", tier: "elite", temper: "hostile",
+    levels: [8, 9], hp: 190, speed: 1.5, runSpeed: 2.4, locomotion: "ground", radius: 1.0, height: 2.4, ...PERCEPTION,
+    pack: [1, 1], steadfast: true, respawn: "camp", model: "cratermaw",
+    attacks: [
+      atk({ id: "moonquake", name: "Moonquake", shape: "ring", weight: "heavy", damage: 24, telegraph: 1.2, radius: 4.5, knockback: 4, range: 3.8, cooldown: 6, recovery: 1.0 }),
+      atk({ id: "maw", name: "Maw", shape: "arc", weight: "light", damage: 13, telegraph: 0.6, radius: 2.6, angle: 80, range: 2.3, cooldown: 2.2 }),
+    ],
+    drops: [weaponDrop(1 / 4)],
+  },
 ];
 
 export const NPC_INDEX: ReadonlyMap<string, number> = new Map(NPC_DEFS.map((d, i) => [d.id, i]));
@@ -578,14 +607,16 @@ export function weaponTierFor(level: number, roll: number): 1 | 2 | 3 {
   return roll < 0.4 ? 2 : 3;
 }
 
-/** The 16 weapon families that drop (everything but fists, radio, tonics, the whistle and hidden
- *  specials). Appended: the Ember Kunai drops like every other starter weapon. */
-export const DROP_WEAPONS = ["sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "grenade", "patchkit", "bubble", "kunai"] as const;
+/** The 19 weapon families that drop (everything but fists, radio, tonics, the whistle and hidden
+ *  specials). Appended: the Ember Kunai drops like every other starter weapon, then the three sculpted
+ *  families of 2026-11-13. */
+export const DROP_WEAPONS = ["sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "grenade", "patchkit", "bubble", "kunai", "boarspear", "crossbow", "lantern"] as const;
 
 export const PLANET_TONIC: Record<PlanetId, { id: string; chance: number }> = {
   arcadia: { id: "tonic_small", chance: 1 / 10 },
   hollowmere: { id: "tonic_large", chance: 1 / 12 },
   meridian: { id: "tonic_large", chance: 1 / 12 },
+  lumen: { id: "tonic_small", chance: 1 / 9 },
 };
 
 /** Planet cosmetic from any enemy on that planet, with pity after 3× the expected kills in one life. */
@@ -593,6 +624,7 @@ export const PLANET_COSMETIC: Record<PlanetId, { id: string; chance: number }> =
   arcadia: { id: "winged_cap", chance: 1 / 150 },
   hollowmere: { id: "crowbeak_mask", chance: 1 / 100 },
   meridian: { id: "hard_hat", chance: 1 / 75 },
+  lumen: { id: "winged_cap", chance: 1 / 150 },
 };
 
 /** Additional planet rolls use independent per-life pity counters. */
@@ -600,6 +632,7 @@ export const EXTRA_PLANET_COSMETICS: Record<PlanetId, readonly { id: string; cha
   arcadia: [{ id: "petalwake_mask", chance: 1 / 180 }],
   hollowmere: [{ id: "fenweave_cape", chance: 1 / 160 }],
   meridian: [],
+  lumen: [],
 };
 
 // ------------------------------------------------------------------------------------------ camps and chests
@@ -609,6 +642,8 @@ export interface CampChest {
   weapons: number;
   tonics: number;
   cosmetic?: { id: string; chance: number };
+  /** A rare find on top of the rest (a wild site's signature weapon), its tier by the site's level. */
+  rare?: { id: string; chance: number };
 }
 
 // ------------------------------------------------------------------------------------------ bosses
@@ -876,6 +911,14 @@ export const NPC_AREAS: readonly NpcArea[] = [
       { members: [{ kind: "compliance_officer", count: [1, 1] }, { kind: "associate", count: [2, 2] }], weight: 1 },
     ],
   },
+  // ---------------------------------------------------------------- Lumen (#6)
+  {
+    id: "the_hush", name: "the Hush", planet: "lumen", at: { mid: [3, 7] }, radius: 60, levels: [7, 9], density: 0.8,
+    groups: [
+      { members: [{ kind: "glimmerhop", count: [3, 5] }], weight: 2 },
+      { members: [{ kind: "dustmoth", count: [2, 3] }, { kind: "glimmerhop", count: [1, 2] }], weight: 1 },
+    ],
+  },
 ];
 
 /** Groups outside named areas; level from the distance to the main pad across the planet's range. */
@@ -912,6 +955,16 @@ export const PLANET_WILDS: Record<PlanetId, { density: number; groups: SpawnGrou
       { members: [{ kind: "auditor", count: [2, 2] }], weight: 1 },
       { members: [{ kind: "woolback", count: [4, 8] }], weight: 2, ground: "meadow" },
       { members: [{ kind: "dusk_wolf", count: [3, 5] }], weight: 1, ground: "ridge" },
+    ],
+  },
+  // A small body: the arrival pack gives the first fight; the wilds stay sparse (a play-test at
+  // level 8 was swarmed by overlapping packs at 0.45).
+  lumen: {
+    density: 0.22,
+    groups: [
+      { members: [{ kind: "glimmerhop", count: [2, 4] }], weight: 3 },
+      { members: [{ kind: "dustmoth", count: [2, 2] }], weight: 2 },
+      { members: [{ kind: "glimmerhop", count: [2, 2] }, { kind: "dustmoth", count: [1, 1] }], weight: 2 },
     ],
   },
 };
@@ -964,6 +1017,9 @@ export const ARRIVAL_GROUPS: Record<PlanetId, readonly { id: string; metres: num
   meridian: [
     { id: "waystation_herd", metres: 34, bearing: 10, members: [{ kind: "woolback", count: 4, level: 12 }] },
     { id: "waystation_associates", metres: 62, bearing: -30, members: [{ kind: "associate", count: 3, level: 12 }] },
+  ],
+  lumen: [
+    { id: "lumen_hoppers", metres: 55, bearing: -15, members: [{ kind: "glimmerhop", count: 3, level: 6 }] },
   ],
 };
 

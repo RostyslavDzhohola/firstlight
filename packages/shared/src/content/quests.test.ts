@@ -2,7 +2,7 @@
 // cosmetics agree with each other and with docs/content.md.
 
 import { describe, expect, it } from "vitest";
-import { BODIES, PLANET_IDS } from "../planet/bodies.ts";
+import { BODIES, BODY_IDS, PLANET_IDS } from "../planet/bodies.ts";
 import { padDirs } from "../planet/pads.ts";
 import { createTerrain } from "../planet/terrain.ts";
 import { COSMETIC_BY_ID, COSMETICS, isCosmetic, isEggItem, SHOP, SKIN_BY_ID, TROPHIES, itemName, sellValue, shopEntry, unitSellValue } from "./items.ts";
@@ -13,6 +13,7 @@ import { arcMetres, BOSS_LAIRS, MAIN_PAD, PLACE_BY_ID, PLACES, padName, placeDir
 import { EGGS, PLAQUES } from "./secrets.ts";
 import { NPC_AREAS, NPC_DEFS, PLANET_WILDS } from "./npcs.ts";
 import { WEAPON_BY_ID } from "./weapons.ts";
+import { wildSitesOn } from "./wildSites.ts";
 import { inReach, objectPos, WORLD_OBJECT_BY_ID, WORLD_OBJECTS } from "./world.ts";
 
 const unique = (xs: string[]) => new Set(xs).size === xs.length;
@@ -21,7 +22,7 @@ const itemExists = (id: string) => WEAPON_BY_ID.has(id) || COSMETIC_BY_ID.has(id
 describe("missions (content.md §5)", () => {
   it("keeps the 9 original guide missions first (ids by index), one hunt, find and reach per planet", () => {
     expect(MISSIONS.slice(0, 9).map((m) => m.id)).toEqual([...ERRAND_MISSIONS]);
-    expect(MISSIONS.map((m) => m.id)).toEqual([...ERRAND_MISSIONS, "A4", "H4", "T1", "T2", "T3"]);
+    expect(MISSIONS.map((m) => m.id)).toEqual([...ERRAND_MISSIONS, "A4", "H4", "T1", "T2", "T3", "L1"]);
     expect(unique(MISSIONS.map((m) => m.id))).toBe(true);
     for (const body of PLANET_IDS) {
       const ms = MISSIONS.slice(0, 9).filter((m) => m.body === body);
@@ -30,7 +31,7 @@ describe("missions (content.md §5)", () => {
     }
   });
 
-  it("pays positive rewards: 10,280 XP and 1,630 coins for the nine, 14,940 XP and 2,395 coins with the 2026-11-12 five", () => {
+  it("pays positive rewards: 10,280 XP and 1,630 coins for the nine, 14,940 XP and 2,395 coins with the 2026-11-12 five, 15,590 XP and 2,505 coins with Lumen's", () => {
     for (const m of MISSIONS) {
       expect(m.reward.xp, m.id).toBeGreaterThan(0);
       expect(m.reward.coins, m.id).toBeGreaterThan(0);
@@ -39,8 +40,10 @@ describe("missions (content.md §5)", () => {
     const nine = MISSIONS.slice(0, 9);
     expect(nine.reduce((s, m) => s + m.reward.xp, 0)).toBe(10280);
     expect(nine.reduce((s, m) => s + m.reward.coins, 0)).toBe(1630);
-    expect(MISSIONS.reduce((s, m) => s + m.reward.xp, 0)).toBe(14940);
-    expect(MISSIONS.reduce((s, m) => s + m.reward.coins, 0)).toBe(2395);
+    expect(MISSIONS.slice(0, 14).reduce((s, m) => s + m.reward.xp, 0)).toBe(14940);
+    expect(MISSIONS.slice(0, 14).reduce((s, m) => s + m.reward.coins, 0)).toBe(2395);
+    expect(MISSIONS.reduce((s, m) => s + m.reward.xp, 0)).toBe(15590);
+    expect(MISSIONS.reduce((s, m) => s + m.reward.coins, 0)).toBe(2505);
   });
 
   it("gives the Three Gleams from Sela Marchbank in Portus: one trial per planet, each a different new type", () => {
@@ -73,8 +76,16 @@ describe("missions (content.md §5)", () => {
       if (!m.hunt) continue;
       const areas = NPC_AREAS.filter((a) => a.planet === m.body && (!m.hunt!.place || a.id === m.hunt!.place));
       expect(areas.length, `${m.id}: an NPC spawn area for ${m.hunt.place ?? m.body}`).toBeGreaterThan(0);
-      const spawnable = new Set([...areas.flatMap(kinds), ...(m.hunt.place ? [] : PLANET_WILDS[m.body].groups.flatMap((g) => g.members.map((x) => x.kind)))]);
+      // A hunt with no place counts kills anywhere on the body: its wilds and its wild sites' guardians and packs too.
+      const sites = m.hunt.place ? [] : wildSitesOn(m.body).flatMap((s) => [s.guardian.kind, ...s.pack.map((p) => p.kind)]);
+      const spawnable = new Set([...areas.flatMap(kinds), ...sites, ...(m.hunt.place ? [] : PLANET_WILDS[m.body].groups.flatMap((g) => g.members.map((x) => x.kind)))]);
       for (const t of m.hunt.targets) expect(spawnable.has(t.npcKind), `${m.id}: ${t.npcKind} spawns in ${m.hunt.place ?? m.body}`).toBe(true);
+      // A hunt that leads to a wild site: the site is on the mission's body and one of its targets lives there.
+      if (m.hunt.site) {
+        const site = wildSitesOn(m.body).find((s) => s.id === m.hunt!.site);
+        expect(site, `${m.id}: site ${m.hunt.site} on ${m.body}`).toBeDefined();
+        expect(m.hunt.targets.some((t) => t.npcKind === site!.guardian.kind || site!.pack.some((p) => p.kind === t.npcKind))).toBe(true);
+      }
     }
   });
 
@@ -158,7 +169,7 @@ describe("places and world objects", () => {
 
   it("places objects on their own body at finite positions, with guides on every main pad", () => {
     expect(unique(WORLD_OBJECTS.map((o) => o.id))).toBe(true);
-    const terrains = new Map(PLANET_IDS.map((b) => [b, createTerrain(b)] as const));
+    const terrains = new Map(BODY_IDS.filter((b) => b !== "portus").map((b) => [b, createTerrain(b)] as const));
     for (const o of WORLD_OBJECTS) {
       expect(PLACE_BY_ID.get(o.place)?.body, o.id).toBe(o.body);
       if (o.body === "portus") continue;
@@ -167,7 +178,7 @@ describe("places and world objects", () => {
       expect(p.every(Number.isFinite), o.id).toBe(true);
       expect(inReach(p, p, Math.max(0.1, o.range))).toBe(true);
     }
-    for (const body of PLANET_IDS) {
+    for (const body of [...PLANET_IDS, "lumen"] as const) {
       const guide = WORLD_OBJECT_BY_ID.get(GUIDES[body].id)!;
       expect(guide.body).toBe(body);
       expect(arcMetres(placeDir(MAIN_PAD[body]), placeDir(guide.place), BODIES[body].radius)).toBeLessThan(12);

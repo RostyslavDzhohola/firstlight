@@ -19,6 +19,7 @@ import type { Terrain } from "./terrain.ts";
 import { siteAnchor, siteCoords, townCoords, type SiteAnchor } from "./townFrame.ts";
 import { townPropClear } from "./townGround.ts";
 import { OUTPOST_GROUND_HALF, outpostPropClear } from "./outpostGround.ts";
+import { wildSiteClearings } from "./wildSites.ts";
 
 const townAt: [number, number] = [0, 0];
 const outpostAt: [number, number] = [0, 0];
@@ -34,8 +35,10 @@ const outpostAt: [number, number] = [0, 0];
  * v5: the planets' pad-0 outposts (D42): their apron, paths, structures and trees kept clear
  * (outpostGround.ts).
  * v6: round 2: the outposts' walls, gates, gate paths and new buildings kept clear too (D-b2-1).
+ * v7: the wild sites (planet/wildSites.ts) keep a clearing round their footprints (D-world-2); Lumen's
+ * props and breakables, and the clearing round Arcadia's second portal (D-sky-3).
  */
-export const PROPS_VERSION = 6;
+export const PROPS_VERSION = 7;
 
 /** Jitter range inside a candidate cell (fraction of the cell), and the face-edge margin. */
 export const PROP_JITTER_MIN = 0.15;
@@ -157,6 +160,11 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
     { kind: "rock", every: 3, chance: 0.08, minFlat: 0.76, minH: 0.2, maxH: 999, scale: [0.6, 1.5] },
     { kind: "boulder", every: 5, chance: 0.09, minFlat: 0.78, minH: 0.5, maxH: 999, scale: [0.7, 1.5] },
   ],
+  // Lumen: bare regolith, rocks and boulders only (heights are above its far-down water level).
+  lumen: [
+    { kind: "rock", every: 3, chance: 0.1, minFlat: 0.76, minH: 50, maxH: 999, scale: [0.6, 1.5] },
+    { kind: "boulder", every: 6, chance: 0.1, minFlat: 0.78, minH: 50, maxH: 999, scale: [0.7, 1.6] },
+  ],
 };
 
 export interface PropInstance {
@@ -270,6 +278,7 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
     ...(arena ? [{ dir: arena.up, radius: arena.radius + 6 }] : []),
     ...objectsOn(body.id).filter((o) => o.clearing !== false).map((o) => ({ dir: objectDir(o), radius: Math.max(2, o.range) + 4 })),
     ...portalSpots(body, terrain).map((o) => ({ dir: o.dir, radius: 6 })),
+    ...wildSiteClearings(terrain),
   ];
   const faceSeed = hash4(body.seed, face, 0x5eed);
   // The pad-0 outpost (D42): its frame, to test props near pad 0 against its ground mask.

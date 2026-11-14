@@ -302,6 +302,7 @@ describe("every starter's weapon on every body: refused in a safe zone, fired ou
     arcadia: () => outGate("arcadia"),
     hollowmere: () => outGate("hollowmere"),
     meridian: () => outGate("meridian"),
+    lumen: () => { throw new Error("Lumen has no walled outpost"); },
   };
   for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
     it(`${body}: Hexwick, Brother Ash, Kappa and Unit 7`, async () => {

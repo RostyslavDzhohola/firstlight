@@ -10,10 +10,13 @@
 // (where guest sessions are kept; default ~/.firstlight/agents), FL_AGENT_SESSION=none (don't keep one).
 
 import { createInterface } from "node:readline";
-import { callTool, PLAYBOOK, Session, TOOLS } from "./tools.ts";
+import { PLAYBOOK, Session, type ToolDef } from "./tools.ts";
 
 export const MCP_PROTOCOL = "2025-06-18";
-const SUPPORTED = new Set(["2024-11-05", "2025-03-26", "2025-06-18"]);
+/** Versions with the `initialize` handshake ("legacy" since 2026-07-28) this server speaks. */
+export const LEGACY_VERSIONS: readonly string[] = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+const SUPPORTED = new Set(LEGACY_VERSIONS);
+export const SERVER_INFO = { name: "firstlight-agent", title: "FIRSTLIGHT (play the game)", version: "1.1.0" };
 
 interface Rpc {
   jsonrpc?: string;
@@ -22,8 +25,20 @@ interface Rpc {
   params?: Record<string, unknown>;
 }
 
-/** Answer one JSON-RPC message (null for notifications). Exported for the tests. */
-export async function handleRpc(session: Session, msg: Rpc): Promise<Record<string, unknown> | null> {
+/** Tools as MCP lists them. */
+export function toolList(tools: readonly ToolDef[]): Record<string, unknown>[] {
+  return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+}
+
+/** A tool's result as an MCP CallToolResult: the summary reads better as text than inside JSON. */
+export function toolContent(r: Record<string, unknown>): { content: { type: "text"; text: string }[]; isError: boolean } {
+  const { summary, look, ...rest } = r as { summary?: string; look?: string } & Record<string, unknown>;
+  const text = [summary ?? look, Object.keys(rest).length > 1 || rest.ok !== true ? JSON.stringify(rest) : null].filter(Boolean).join("\n");
+  return { content: [{ type: "text", text: text || JSON.stringify(rest) }], isError: r.ok === false };
+}
+
+/** Answer one JSON-RPC message (null for notifications). `signal` cancels a tool call. Exported for the tests. */
+export async function handleRpc(session: Session, msg: Rpc, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
   const id = msg.id;
   const reply = (result: unknown) => (id === undefined ? null : { jsonrpc: "2.0", id, result });
   const fail = (code: number, message: string) => (id === undefined ? null : { jsonrpc: "2.0", id, error: { code, message } });
@@ -34,21 +49,17 @@ export async function handleRpc(session: Session, msg: Rpc): Promise<Record<stri
       return reply({
         protocolVersion: SUPPORTED.has(asked) ? asked : MCP_PROTOCOL,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "firstlight-agent", title: "FIRSTLIGHT (play the game)", version: "1.0.0" },
+        serverInfo: SERVER_INFO,
         instructions: PLAYBOOK,
       });
     }
     case "ping":
       return reply({});
     case "tools/list":
-      return reply({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+      return reply({ tools: toolList([...session.tools.values()]) });
     case "tools/call": {
       const name = String(msg.params?.name ?? "");
-      const r = await callTool(session, name, msg.params?.arguments);
-      // The summary reads better as text than inside JSON.
-      const { summary, look, ...rest } = r as { summary?: string; look?: string } & Record<string, unknown>;
-      const text = [summary ?? look, Object.keys(rest).length > 1 || rest.ok !== true ? JSON.stringify(rest) : null].filter(Boolean).join("\n");
-      return reply({ content: [{ type: "text", text: text || JSON.stringify(rest) }], isError: r.ok === false });
+      return reply(toolContent(await session.call(name, msg.params?.arguments, { signal })));
     }
     case "resources/list":
       return reply({ resources: [] });
@@ -58,6 +69,78 @@ export async function handleRpc(session: Session, msg: Rpc): Promise<Record<stri
       if (msg.method.startsWith("notifications/")) return null;
       return fail(-32601, `unknown method ${msg.method}`);
   }
+}
+
+/** A JSON-RPC id as a map key (1 and "1" are different requests). */
+export const rpcKey = (id: unknown): string | null => (typeof id === "string" || typeof id === "number" ? `${typeof id}:${id}` : null);
+
+/**
+ * Requests still being answered, by id, so `notifications/cancelled` can stop one (MCP 2025-11-25,
+ * basic/utilities/cancellation: the receiver SHOULD stop processing the request, free its resources
+ * and not send a response; unknown or finished ids are ignored). The HTTP endpoint keeps one per session.
+ */
+export class InFlight {
+  private readonly byId = new Map<string, Set<AbortController>>();
+
+  /** Track a request; `done` untracks it. Returns its signal, whether it was cancelled, and its own abort. */
+  open(id: unknown): { signal: AbortSignal; cancelled: () => boolean; abort: () => void; done: () => void } {
+    const ac = new AbortController();
+    const key = rpcKey(id);
+    if (key) {
+      const set = this.byId.get(key) ?? new Set();
+      set.add(ac);
+      this.byId.set(key, set);
+    }
+    return {
+      signal: ac.signal,
+      cancelled: () => ac.signal.aborted,
+      abort: () => ac.abort(),
+      done: () => {
+        if (!key) return;
+        const set = this.byId.get(key);
+        set?.delete(ac);
+        if (set && !set.size) this.byId.delete(key);
+      },
+    };
+  }
+
+  /** A `notifications/cancelled`: abort the request it names, if it is still running. */
+  cancel(params: unknown): boolean {
+    const key = rpcKey((params as { requestId?: unknown } | null | undefined)?.requestId);
+    const set = key ? this.byId.get(key) : undefined;
+    if (!set) return false;
+    for (const ac of set) ac.abort();
+    return true;
+  }
+
+  get size(): number {
+    return this.byId.size;
+  }
+}
+
+/**
+ * The stdio server's dispatcher: answers a message, honours `notifications/cancelled` for tool calls
+ * in progress, and drops the reply of a request that was cancelled. Exported for the tests.
+ */
+export function rpcServer(session: Session): { handle(msg: Rpc): Promise<Record<string, unknown> | null>; inFlight: InFlight } {
+  const inFlight = new InFlight();
+  return {
+    inFlight,
+    async handle(msg) {
+      if (msg.method === "notifications/cancelled") {
+        inFlight.cancel(msg.params);
+        return null;
+      }
+      if (msg.method !== "tools/call" || msg.id === undefined) return handleRpc(session, msg);
+      const t = inFlight.open(msg.id);
+      try {
+        const r = await handleRpc(session, msg, t.signal);
+        return t.cancelled() ? null : r;
+      } finally {
+        t.done();
+      }
+    },
+  };
 }
 
 /**
@@ -81,10 +164,10 @@ async function main() {
   // reports its reconnects with console.log) goes to stderr.
   console.log = console.info = console.debug = (...args: unknown[]) => console.error(...args);
   const session = new Session((line) => process.stderr.write(`[firstlight] ${line}\n`));
+  const server = rpcServer(session);
   const out = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  // One call at a time, in order: a character does one thing at a time.
-  let chain: Promise<void> = Promise.resolve();
+  // Tool calls run one at a time, in order (Session.call); the rest answer at once.
   rl.on("line", (line) => {
     if (!line.trim()) return;
     const parsed = parseRpc(line);
@@ -93,14 +176,9 @@ async function main() {
       return;
     }
     const msg = parsed.msg;
-    // firstlight_stop must be able to interrupt a walk or a fight in progress.
-    const urgent = msg.method === "tools/call" && msg.params?.name === "firstlight_stop";
-    const run = async () => {
-      const r = await handleRpc(session, msg).catch((e: unknown) => ({ jsonrpc: "2.0", id: msg.id ?? null, error: { code: -32603, message: (e as Error).message } }));
-      if (r) out(r);
-    };
-    if (urgent || msg.method !== "tools/call") void run();
-    else chain = chain.then(run);
+    void server.handle(msg)
+      .catch((e: unknown) => ({ jsonrpc: "2.0", id: msg.id ?? null, error: { code: -32603, message: (e as Error).message } }))
+      .then((r) => r && out(r));
   });
   const bye = async () => {
     await session.agent?.close().catch(() => {});

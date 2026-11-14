@@ -37,6 +37,8 @@ export interface PlayerActor {
   overheatUntil: number;
   blocking: boolean;
   combatUntil: number;
+  /** Regeneration held until then (a boss fight or a defend attempt, REGEN.PAUSED_IN; combat.ts holdRegen). */
+  noRegenUntil?: number;
   protectedUntil: number;
   /** Heals over time; `left` (HP still to come) makes the total exact regardless of tick timing. */
   heals: { perSec: number; until: number; left?: number }[];
@@ -77,6 +79,8 @@ export interface PlayerActor {
   airStartAt: number;
   airStartLen: number;
   airLiftV: number;
+  /** The pull the envelope falls under (m/s²): the body's (Lumen's is low, #6). */
+  airG: number;
   /** Server-side charge tracking (bow draw, heavy melee, hand seals). */
   chargeStartedAt: number;
   /** The held item (by identity) the current charge was started with; equipping or moving items
@@ -95,6 +99,8 @@ export interface PlayerActor {
   npcFx?: NpcMoveFx;
   /** In an admin sandbox (sandbox.ts, D-admin-3): a copy of the character in a private room; never saved. */
   sandbox?: Sandbox;
+  /** This join made the character (no saved one): the funnel's new-character cohort (world/funnel.ts). */
+  charCreated?: boolean;
   /** Moving into a sandbox (adminMode.ts): leaving out of a fight before then is a handoff, not a linger. */
   toSandboxUntil?: number;
   /**

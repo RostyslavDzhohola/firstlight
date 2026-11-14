@@ -12,7 +12,8 @@ import type { Game } from "../../game/Game.ts";
 import { MOVE, MOVE_BASE } from "../../game/PlayerController.ts";
 import type { ClientSystem } from "../../game/systems.ts";
 import { ArenaView } from "./arena.ts";
-import { HealthBars } from "./bars.ts";
+import { barGrow, HealthBars } from "./bars.ts";
+import { NpcTags } from "./tags.ts";
 import { bossStore, type BossHud } from "./bossStore.ts";
 import { LightParticles } from "./fx.ts";
 import { buildModels, type ModelDef, type PartDef } from "./models.ts";
@@ -140,6 +141,8 @@ export class NpcRenderer implements ClientSystem {
   private readonly particles = new LightParticles();
   private readonly telegraphs: Telegraphs;
   private readonly bars = new HealthBars();
+  /** Level and name over each fought creature's bar (#73). */
+  private readonly tags = typeof document === "undefined" ? null : new NpcTags();
   private readonly arena: ArenaView | null;
   private readonly models: PreparedModel[];
   private readonly views = new Map<string, View>();
@@ -319,6 +322,8 @@ export class NpcRenderer implements ClientSystem {
     const myId = this.game.net.room?.sessionId ?? "";
     this.batch.begin();
     this.bars.begin();
+    this.tags?.begin();
+    const myLevel = this.game.hud.you?.level ?? 1;
     let boss: View | null = null;
     // Portus: inside the town walls (away from the gates, below the wall tops) the creeps outside
     // can't be seen, so none are drawn and the NPC batches stay hidden (townCull.ts).
@@ -360,6 +365,7 @@ export class NpcRenderer implements ClientSystem {
           _v.copy(v.pos).addScaledVector(v.up, v.pm.height * this.scaleOf(v, now) + (v.def.hover ? 0 : 0.35) + 0.25);
           const w = Math.min(2.6, Math.max(0.8, v.def.radius * 1.8));
           this.bars.push(_v, ref.hp / Math.max(1, ref.maxHp), cam, w, v.def.temper === "hostile" || (v.flags & NF.AGGRO) !== 0);
+          this.tags?.push(id, _v2.copy(_v).addScaledVector(v.up, 0.18 * barGrow(_v.distanceTo(cam.position))), cam, v.dist, v.def.name, ref.level || 1, myLevel);
         }
       }
       // Ranged lock-on line (amber).
@@ -375,6 +381,7 @@ export class NpcRenderer implements ClientSystem {
     this.arena?.draw(this.batch, me, now);
     this.batch.end();
     this.bars.end();
+    this.tags?.end();
     this.telegraphs.update(now);
     this.particles.update(dt);
     this.applyPulls(dt, now);
@@ -641,6 +648,7 @@ export class NpcRenderer implements ClientSystem {
     this.particles.dispose();
     this.telegraphs.dispose();
     this.bars.dispose();
+    this.tags?.dispose();
     this.root.removeFromParent();
     this.views.clear();
     bossStore.set(null);

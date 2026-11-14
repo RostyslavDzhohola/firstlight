@@ -5,26 +5,117 @@ AI agents play in the same worlds as people, by the same server rules: an agent 
 and reward. There is no browser and no GPU involved: the agent reads the world as text or JSON and
 acts through high-level commands (walk there, fight that, take the missions).
 
-Three ways in, all on top of one library:
+Two ways in, on top of one library:
 
 | You have | Use | Start |
 | --- | --- | --- |
-| A model with MCP tools (Claude Code, Codex, any MCP client) | the MCP server | `node tools/agent/mcp.ts` |
-| A model with only a shell | the HTTP bridge and its CLI | `node tools/agent/serve.ts`, then `node tools/agent/fl-agent.mjs …` |
-| Your own script | the library | `import { FirstlightAgent } from "@firstlight/agent-kit"` |
+| A model with MCP tools (Claude Code, Codex, any MCP client) | the game's **remote MCP endpoint** | `claude mcp add --transport http firstlight <api>/mcp` |
+| A model with only `curl` or a fetch tool | the game's **HTTP API** | `curl -X POST <api>/api/agent/join` |
+| Your own machine running the player | the local kit: stdio MCP server, HTTP bridge, library | `node tools/agent/mcp.ts` (see [Running the player yourself](#running-the-player-yourself)) |
 
-Everything needs Node 24 and a checkout of this repo with `pnpm install` done. The `.ts` files run
-directly (`node file.ts`), nothing is built.
+The first two need nothing installed: the game server plays the character for you (its **gateway**).
+`<api>` is the game's API origin: `https://api.firstlight.one4all.dev` for the public game,
+`http://localhost:2567` for `pnpm dev`.
 
 Agents are **labelled**: the join request says "I am an agent", the server marks the character, and
 every player sees an `AI` chip on its nameplate and in the Tab player list. See
 [Labelling and limits](#labelling-and-limits).
 
-## Quick start (local)
+## One URL: the gateway
+
+**Agents off?** A server only takes agents while its `AGENTS_ENABLED` is on (off in production until
+the owner sets it). `GET <api>/api/agent` answers `"enabled": false` then, and a join answers
+`agents off`.
+
+### Claude Code
+
+```sh
+claude mcp add --transport http firstlight https://api.firstlight.one4all.dev/mcp
+```
+
+### Codex
+
+```sh
+codex mcp add firstlight --url https://api.firstlight.one4all.dev/mcp
+```
+
+or in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.firstlight]
+url = "https://api.firstlight.one4all.dev/mcp"
+```
+
+Then tell the model: "Join FIRSTLIGHT and reach level 3." The first call is `firstlight_join`; it
+returns a **seat**, the handle of your character on the server. Pass it as `seat` to every other
+tool. (A client that keeps an MCP session, the 2025 protocol revisions, carries the seat in its
+session, and the model can leave `seat` out.)
+
+### curl
+
+```sh
+SEAT=$(curl -s -X POST https://api.firstlight.one4all.dev/api/agent/join -d '{"name":"Scout_7"}' | sed -E 's/.*"seat":"([^"]+)".*/\1/')
+curl -s https://api.firstlight.one4all.dev/api/agent/observe -H "Authorization: Bearer $SEAT"
+curl -s -X POST https://api.firstlight.one4all.dev/api/agent/act -H "Authorization: Bearer $SEAT" -d '{"tool":"move","target":"portal:arcadia"}'
+```
+
+| Request | Answer |
+| --- | --- |
+| `GET /api/agent` | Whether agents are on, seats in use, the playbook, and every tool with its JSON schema |
+| `POST /api/agent/join` `{name?, starter?, body?}` | `seat`, your first look around, the playbook |
+| `GET /api/agent/observe[?detail=full]` | The observation |
+| `POST /api/agent/act` `{"tool": "<name>", ...arguments}` | The tool's result (`move`, `attack`, `missions`… the [tools](#tools-mcp-and-http) by short name) |
+| `POST /api/agent/leave` `{logout?}` | Your character leaves; the seat closes |
+
+Bodies are JSON (the content type doesn't matter, so plain `curl -d` works), at most 16 KB. Results are
+the same JSON as the tools'; a refusal has `reason` and `hint`. Status codes: `401` no such seat,
+`403` agents off / agent limit / a web page on another site, `429` slow down or queue full (a seat holds
+at most 4 calls at once, the running one included; wait for one to answer), `503` every gateway seat taken.
+
+### MCP endpoint details
+
+`POST <api>/mcp` speaks MCP's Streamable HTTP transport, hand-written in
+`apps/server/src/agents/mcpHttp.ts`, in both eras the 2026-07-28 revision describes:
+
+- **2026-07-28 (stateless).** Every request carries `_meta["io.modelcontextprotocol/protocolVersion"]`
+  and the `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` headers, which must match the body
+  (`400`, `-32020`). `server/discover` lists the versions. The seat is a tool argument.
+- **2025-03-26 to 2025-11-25.** `initialize` returns an `Mcp-Session-Id`; the session carries the seat;
+  `DELETE /mcp` ends both.
+
+Answers are single JSON objects (no SSE streams); `GET /mcp` is `405`. A client that hangs up on a call
+cancels that call: one still waiting its turn never runs, the one in progress stops (the character stops
+walking or fighting). A 2025-era client can also send `notifications/cancelled` with the request's id in
+the same session; the POST of the cancelled request still gets an answer (HTTP needs one), which the
+spec has the client ignore.
+
+### Seats and limits
+
+A seat is a character the server plays for you with the same kit as the local player
+([The library](#the-library)), joined through the ordinary `/api/play` path: it wears the `AI` chip
+and plays by every server rule. Each seat is a new guest character.
+
+| Server setting | Meaning | Default |
+| --- | --- | --- |
+| `AGENTS_ENABLED` | The switch for every agent, the gateway's too | on outside production, **off in production** |
+| `AGENTS_PER_IP` | Agents at once from one address, gateway seats included (IPv6: one /64) | 4 |
+| `AGENTS_PER_ROOM` | Agents in one copy of a world | 8 |
+| `AGENT_GATEWAY_SEATS` | Gateway seats at once, everyone together (`0` turns the gateway off) | 16 |
+| `AGENT_GATEWAY_IDLE_S` | A seat with no call for this long closes (its character logs out) | 600 |
+
+Also: 40 calls per 10 s per seat, 120 per address, 6 joins a minute per address. The seat handle is
+the only key to the character: keep it to yourself.
+
+## Running the player yourself
+
+The local kit needs Node 24 and a checkout of this repo with `pnpm install` done. The `.ts` files run
+directly (`node file.ts`), nothing is built.
+
+### Quick start (local)
 
 Start the game (`pnpm dev`: server on :2567, client on :5173), then pick one.
 
-### MCP: Claude Code
+#### MCP: Claude Code
 
 ```sh
 claude mcp add firstlight -e FL_URL=http://localhost:2567 -e FL_AGENT_NAME=Scout_7 -- node "$PWD/tools/agent/mcp.ts"
@@ -44,7 +135,7 @@ or in `.mcp.json` at the repo root:
 }
 ```
 
-### MCP: Codex
+#### MCP: Codex
 
 In `~/.codex/config.toml` (use the absolute path of your checkout):
 
@@ -58,7 +149,7 @@ env = { FL_URL = "http://localhost:2567", FL_AGENT_NAME = "Scout_7" }
 Then tell the model: "Join FIRSTLIGHT and reach level 3." The server's `instructions` (the playbook
 below) tell it how the game works; the first call is `firstlight_join`.
 
-### Shell: the HTTP bridge
+#### Shell: the HTTP bridge
 
 ```sh
 FL_URL=http://localhost:2567 node tools/agent/serve.ts &   # the bridge, on 127.0.0.1:7361
@@ -73,7 +164,7 @@ node tools/agent/fl-agent.mjs attack n12 --seconds 20
 node tools/agent/fl-agent.mjs quit
 ```
 
-### No model at all: the example hunter
+#### No model at all: the example hunter
 
 ```sh
 node tools/agent/examples/hunter.ts --url http://localhost:2567 --seconds 300
@@ -88,11 +179,11 @@ and ends with `RESULT {…}` (kills, XP, mission progress, `casts`, and `correct
 server refused, which should be 0). It is also the kit's end-to-end test
 (`apps/server/test/agent-tools.test.ts`). `--collect none` skips Kite Season.
 
-### A world with residents
+#### A world with residents
 
 `tools/agent/residents.ts` starts several scripted characters at once: see [Residents](#residents).
 
-### Settings (environment)
+#### Settings (environment)
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
@@ -148,7 +239,10 @@ owner turns them on, and the join answers `agents off`.
 The MCP tool `firstlight_<name>` is `POST /<name>` on the bridge and `fl-agent.mjs <name>` on the
 command line; arguments are the same JSON. Unknown or out-of-range arguments are refused before
 anything reaches the game. Results are JSON with `ok`; a refusal has `reason` (short, stable) and
-usually `hint` (what to do instead). One action runs at a time; `stop` interrupts it.
+usually `hint` (what to do instead). One action runs at a time and the others wait their turn, a few at
+most (8 locally, 4 per gateway seat): past that a call is refused with `queue full` (`429` over HTTP).
+`stop` jumps the queue and interrupts the action in progress. Over stdio, `notifications/cancelled`
+cancels the request it names, and the bridge cancels a call whose caller hangs up.
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
@@ -168,6 +262,9 @@ usually `hint` (what to do instead). One action runs at a time; `stop` interrupt
 | `respawn` | `starter?` | After death: a new life in Portus. |
 | `cast` | `spell` (`skipstep`, `frostbloom`, `wishfall`, `glasswing`); one of `target`, `bearing` (+ `distance`), `pos`; `pvp?` | Cast a spell (see [Spells](#spells)). |
 | `leave` | `logout?` | Leave the game. |
+
+On the gateway, `join` takes only `name`, `starter` and `body` (the server picks where it signs in),
+and every other tool also takes `seat`.
 
 Move targets: an id from the observation (a creature, a player, a loot pile, a ring or beacon), or
 `guide`, `curator` (Sela Marchbank), `vault`, `shop`, `portal:<body>`, `pad:<n>`, `pad` (nearest),
@@ -379,6 +476,7 @@ node tools/agent/residents.ts --url http://localhost:2567 --count 8 --bodies por
 | `--roles` | Cycle these roles instead of the cast's own | the cast's |
 | `--seconds` | Stop after this long | until Ctrl-C |
 | `--cpu` | The process's CPU budget, as a share of one core: over it, everyone rests longer between steps | 0.5 |
+| `--max-humans` | Play only while at most this many people are online (see [The budget switch](#the-budget-switch)) | always |
 | `--dev` | Dev guest tokens (a server started with `ALLOW_DEV_GUESTS=1`) | off |
 
 The cast, in order: Brindle_Oake (hunter), Tamsin_Hollis (wanderer), Marlo_Thistle (trader),
@@ -387,7 +485,7 @@ Juniper_Fenn (hunt-chaser), then Garnet_Moss, Hesper_Dunn, Sable_Finch, Corbin_R
 | Role | What it does |
 | --- | --- |
 | hunter | Lives on a planet. Takes the guide's hunts, farms hostile creatures of its own level within 190 m of the main pad (peaceful wildlife is left alone), picks up its own loot, drinks and retreats when hurt. |
-| wanderer | Walks between pads, portals and named landmarks, stops to look, and greets people who come within 12 m with the phrase wheel (once every few minutes each). |
+| wanderer | Walks between pads, portals and named landmarks, stops to look, and turns to people who come within 12 m (the talk layer greets them in words: see [Talking to residents](#talking-to-residents-82)). |
 | trader | Idles at the shop and, in Portus, the plaza scoreboard: browses, buys a tonic when it has the coins, steps off the till so people can use it. |
 | hunt-chaser | Takes a trial of the Three Gleams from Sela Marchbank, travels to it, attempts it, comes back; opens the vault if it ever wins all three. |
 
@@ -399,6 +497,62 @@ nearest safe zone and leaves there, so no body is left in the wild to be killed 
 cut off from safety uses the logout countdown where it stands). A second Ctrl-C quits at once.
 The run ends with `RESULT {…}`: each resident's kills, deaths, yields, greetings, metres walked and
 `corrections`, and the CPU the process used.
+
+### Talking to residents (#82)
+
+Walk up to a resident and it greets you by name and says who it is and what it is doing; use the
+phrase wheel (G) near it and it answers in character: **Help!** gets the way to where your level
+should go (the portal that fits you in Portus, the guide or the way home on a planet, in metres and
+a compass direction) and then a tip for your level; **Thanks**, **GG**, **Truce?**, **Follow me** and
+**Boss here** get a word back. The nearest resident answers; the others stay quiet. The four first
+residents have voices of their own (Brindle the Hopbit-grudge hunter, Tamsin the cartographer, Marlo
+the salesman of things he doesn't own, Juniper who is always racing); the rest speak with their role's.
+
+There is no text chat in FIRSTLIGHT, so residents don't type either: they say **authored lines** by
+id (`packages/shared/src/content/residentLines.ts`), and the server fills the slots (your name, a
+place from a fixed list, metres, a compass word) and shows the bubble. Any agent may `speak` a line
+with the kit (`agent.speak("tamsin.greet.1", { to })`); people keep the phrase wheel.
+
+**The brain** chooses the lines. It is an interface (`tools/agent/resident-talk.ts`) with two
+implementations:
+
+| Brain | How it picks | Cost |
+| --- | --- | --- |
+| scripted (default) | From the world state: the person's level, where they stand, what they said | none |
+| model (`FL_RESIDENT_BRAIN=model`) | Any OpenAI-compatible (`<url>/chat/completions`) or Anthropic (`<url>/v1/messages`) endpoint, asked only when someone talks, with a short observation and the candidate lines; it answers with line ids | see below |
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `FL_RESIDENT_BRAIN` | `model` to use one | scripted |
+| `FL_RESIDENT_API` | `openai` (any compatible server) or `anthropic` | `openai` |
+| `FL_RESIDENT_URL`, `FL_RESIDENT_MODEL`, `FL_RESIDENT_KEY` | The endpoint's base URL, the model, the key | none |
+| `FL_RESIDENT_CALLS_PER_HOUR`, `FL_RESIDENT_TOKENS_PER_HOUR` | The hard budget per rolling hour | 120, 100000 |
+| `FL_RESIDENT_GAP_S` | At most one call this often | 6 |
+
+When the budget is spent, a call fails or times out (8 s), or the answer isn't one of the offered
+ids, the scripted brain answers instead: a resident never goes quiet and never says free text.
+
+**What a real hour costs** (token arithmetic, nothing was called): a prompt is about 250 tokens in
+(measured on the built prompts: 160 to 255) and about 30 out. At the default cap of 120 calls an hour
+that is about 31,000 tokens in and 3,600 out: **about $0.007 an hour** for a small model priced like
+`gpt-4o-mini` ($0.15 in, $0.60 out per million tokens) and **about $0.05 an hour** for one priced like
+Claude Haiku 4.5 ($1 in, $5 out). The hardest the cadence allows (one call every 6 s, 600 an hour)
+is five times that: $0.03 and $0.25. Prices are list prices as known on 2026-11-13; check the
+provider's page before turning it on.
+
+### The budget switch
+
+`--max-humans N`: residents play only while at most N people are online (the server's
+`/api/online` count, which leaves agents out), checked every 30 s. Nobody joins before the first
+count. Over it, or while the count can't be had (unknown is not permission; asked again every 5 s),
+each ends its step, walks to the nearest safe zone and leaves; when a count is N or fewer again they
+come back. The
+house rules stand either way: a resident never attacks a player and never takes a kill or loot from
+a person (`apps/server/test/residents.test.ts`).
+
+```sh
+node tools/agent/residents.ts --count 4 --max-humans 6
+```
 
 Each resident keeps its guest session in `~/.firstlight/agents/residents/` (one file per server and
 name), so the same characters come back on the next run and keep their levels.

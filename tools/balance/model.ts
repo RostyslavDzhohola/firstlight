@@ -6,20 +6,22 @@
 // - creatures: apps/server/src/world/npc (attack pick = first ready attack in def order, cooldown from
 //   the start, busy for telegraph + recovery) and the AI clamps in NpcSystem.hitPlayer (single hit ≤ 35%
 //   of the target's max HP, bosses 60%, any sequence ≤ 80% within 1.5 s);
-// - progression and coins: content/progression.ts, missions.ts, the spawn areas in npcs.ts.
+// - progression and coins: content/progression.ts, missions.ts, the spawn areas in npcs.ts, the wild
+//   sites in wildSites.ts (discovery XP, the guardian and its pack, the chest; review 2026-11-13).
 // Simplifications are named where they happen. Times are seconds.
 
 import { WEAPONS, STARTERS, type WeaponDef, type TierStats } from "../../packages/shared/src/content/weapons.ts";
-import { damageMult, killCoins, killXp, LEVEL_CAP, maxHp, ONBOARDING_XP, xpToNext } from "../../packages/shared/src/content/progression.ts";
+import { damageMult, killCoins, killXp, LEVEL_CAP, maxHp, ONBOARDING_XP, REGEN, xpToNext } from "../../packages/shared/src/content/progression.ts";
 import { AI_CAPS, aiHitCap, attackDamage, BOSS_DEFS, NPC_AREAS, NPC_DEFS, npcCoins, npcDef, npcMaxHp, npcShieldHp, type AttackDef, type NpcDef } from "../../packages/shared/src/content/npcs.ts";
 import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
+import { siteDiscoveryXp, WILD_SITES, type WildSiteDef } from "../../packages/shared/src/content/wildSites.ts";
 import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
 import { FROSTBLOOM, SPELL_BY_ID, spellDamage, wardShell, WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
 // ------------------------------------------------------------------------------------ weapons
 
 /** Families that deal damage in a fight (support items, the radio, tonics and the whistle don't). */
-export const COMBAT_FAMILIES = ["fists", "sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "kunai"] as const;
+export const COMBAT_FAMILIES = ["fists", "sunbrand", "riverstaff", "axe", "hammer", "hexquill", "emberglass", "stormcoil", "carbine", "scatterpipe", "longbow", "stillshot", "comet", "kunai", "boarspear", "crossbow", "lantern"] as const;
 export type Family = (typeof COMBAT_FAMILIES)[number];
 
 /** The tier a level may equip (content §1.5 gates: T2 at 6, T3 at 12), as an index. */
@@ -225,8 +227,8 @@ export function weaponTable(): WeaponRow[] {
 
 export const PVP_LEVELS = [1, 6, 12, 20] as const;
 
-/** Families §2.5 counts as burst (headshot, direct rocket, point-blank pellets): a lower floor. */
-export const BURST_FAMILIES: readonly Family[] = ["scatterpipe", "stillshot", "comet"];
+/** Families §2.5 counts as burst (headshot, direct rocket, point-blank pellets, a heavy bolt): a lower floor. */
+export const BURST_FAMILIES: readonly Family[] = ["scatterpipe", "stillshot", "comet", "crossbow"];
 
 export interface PvpCell {
   family: Family;
@@ -674,6 +676,138 @@ export function creatureRows(): CreatureRow[] {
   return rows;
 }
 
+// ------------------------------------------------------------------------------------ regeneration (#77)
+
+export interface RegenSafety {
+  /** Longest pause between one creature's attacks on a player it fights (any fight creature, any of its levels), s. */
+  creatureGapS: number;
+  creatureGapId: string;
+  /** The slowest starter weapon's time between attacks, s. */
+  starterSwingS: number;
+  /** Seconds regeneration needs from 0 to full health. */
+  fullS: number;
+  /** HP regenerated in the time of the quickest on-level regular's kill of an idle player, ÷ max HP. */
+  regenInFightShare: number;
+}
+
+/**
+ * Regeneration can't out-heal a fight (#77): it waits REGEN.DELAY_S without damage taken or dealt,
+ * so a fight where the creature attacks, or the player swings, more often than that never sees it.
+ */
+export function regenSafety(): RegenSafety {
+  let creatureGapS = 0;
+  let creatureGapId = "";
+  for (const def of FIGHT_DEFS) {
+    if (def.temper !== "hostile") continue; // neutral beasts only fight back: the player's swings hold the tag
+    for (const [lo, hi] of creatureLevels(def)) {
+      for (const E of lo === hi ? [lo] : [lo, hi]) {
+        const ev = creatureTimeline(def, E, 120);
+        for (let i = 1; i < ev.length; i++) {
+          const gap = ev[i]!.t - ev[i - 1]!.t;
+          if (gap > creatureGapS) {
+            creatureGapS = gap;
+            creatureGapId = `${def.id} L${E}`;
+          }
+        }
+      }
+    }
+  }
+  const starterSwingS = Math.max(...STARTERS.map((s) => WEAPON_BY_ID_LOCAL.get(s.weapon)!.tiers[0]!.rate));
+  const fullS = 1 / REGEN.PER_SEC;
+  // Even if it did run, the share of HP it could add in the time a regular kills an idle player.
+  const quick = Math.min(...creatureRows().filter((r) => r.tier === "regular").map((r) => r.killsPlayerS));
+  return { creatureGapS, creatureGapId, starterSwingS, fullS, regenInFightShare: REGEN.PER_SEC * quick };
+}
+
+const WEAPON_BY_ID_LOCAL = new Map(WEAPONS.map((w) => [w.id as string, w]));
+/** One encounter's longest pause between hits a player can take, for regeneration's delay (#77). */
+export interface EncounterGap {
+  /** "boss" or "defend" (REGEN.PAUSED_IN's names), or "race" / "collect" (no encounter of their own). */
+  kind: "boss" | "defend" | "race" | "collect";
+  id: string;
+  /** Longest pause (s); 0 when the encounter throws nothing at the player. */
+  gapS: number;
+  /** Where it happens, for the report. */
+  where: string;
+}
+
+/** The boss attack loop's slowest spacing between attacks (BossController: 1.2–2.4 s), s. */
+const BOSS_ATTACK_SPACING_S = 2.4;
+
+/**
+ * The longest a boss goes without an attack at a player who stays in reach of at least one attack
+ * (any distance, any phase), by its rotation (cooldowns, phases, ranges, the slowest spacing), its
+ * timed mechanics (`every`), and its plate window (it holds its attacks the whole window). Cover and
+ * dodges only lengthen it, so it is a floor: a boss whose floor reaches the delay needs the rule.
+ */
+export function bossGap(bossId: string): { gapS: number; where: string } {
+  const def = npcDef(bossId);
+  const boss = BOSS_DEFS.find((b) => b.id === bossId)!;
+  let worst = 0;
+  let where = "";
+  const note = (g: number, w: string) => {
+    if (g > worst) {
+      worst = g;
+      where = w;
+    }
+  };
+  for (const phase of [1, 2, 3]) {
+    const regular = def.attacks.filter((a) => !a.timed && a.damage > 0 && (!a.phases || a.phases.includes(phase)));
+    const timed = def.attacks.filter((a) => a.timed && a.damage > 0 && (a.every?.[phase - 1] ?? 0) > 0);
+    const reachMax = Math.max(...regular.map((a) => a.range));
+    for (let d = 0; d <= reachMax; d += 0.5) {
+      const inReach = regular.filter((a) => d <= a.range && d >= (a.minRange ?? 0));
+      if (!inReach.length) continue;
+      // Simulate the rotation for 120 s: the boss attacks whenever one in reach is off cooldown and
+      // its spacing has passed; timed mechanics land on their own clock (range 999).
+      const hits: number[] = [];
+      const cd = inReach.map(() => 0);
+      let t = 0;
+      for (let guard = 0; guard < 2000 && t < 120; guard++) {
+        const ready = cd.findIndex((c) => c <= t + 1e-9);
+        if (ready < 0) {
+          t = Math.min(...cd);
+          continue;
+        }
+        hits.push(t);
+        cd[ready] = t + inReach[ready]!.cooldown;
+        t += BOSS_ATTACK_SPACING_S;
+      }
+      for (const a of timed) for (let k = a.every![phase - 1]!; k < 120; k += a.every![phase - 1]!) hits.push(k);
+      hits.sort((x, y) => x - y);
+      for (let i = 1; i < hits.length; i++) note(hits[i]! - hits[i - 1]!, `phase ${phase}, ${d} m`);
+    }
+  }
+  // A plate window: the boss kneels for the whole window and attacks again after its spacing.
+  if (boss.plates) note(boss.plates.window + BOSS_ATTACK_SPACING_S, `plate window (${boss.plates.window} s)`);
+  return { gapS: worst, where };
+}
+
+/**
+ * Every boss and every trial (and other defend missions) as regeneration sees them: the boss gaps
+ * above; a defend attempt's longest gap between waves (or from the last wave to the end of the hold),
+ * counted as if each wave died the moment it arrived; race and collect trials raise no encounter.
+ */
+export function encounterGaps(): EncounterGap[] {
+  const out: EncounterGap[] = BOSS_DEFS.map((b) => ({ kind: "boss" as const, id: b.id, ...bossGap(b.id) }));
+  for (const m of MISSIONS) {
+    if (m.defend) {
+      const at = [...m.defend.waves.map((w) => w.atS), m.defend.holdS].sort((x, y) => x - y);
+      let gapS = 0;
+      let where = "";
+      for (let i = 1; i < at.length; i++)
+        if (at[i]! - at[i - 1]! > gapS) {
+          gapS = at[i]! - at[i - 1]!;
+          where = `${at[i - 1]} s → ${at[i]} s`;
+        }
+      out.push({ kind: "defend", id: m.id, gapS, where });
+    } else if (m.trial && m.race) out.push({ kind: "race", id: m.id, gapS: 0, where: "no waves" });
+    else if (m.trial && m.collect) out.push({ kind: "collect", id: m.id, gapS: 0, where: "no waves" });
+  }
+  return out;
+}
+
+
 // ------------------------------------------------------------------------------------ bosses
 
 export interface BossRow {
@@ -716,6 +850,40 @@ export const MISSION_LEVEL: Record<string, number> = { A1: 3, A2: 4, A3: 5, H1: 
 /** Camps cleared once on the way (chest coins at the camp's top level). */
 export const CAMP_LEVEL: Record<string, number> = { blockyard_camp: 7, ossuary_camp: 13, checkpoint_seven: 17 };
 
+/**
+ * A wild site on the route (content §3.7), done once at the band's lower level, the first level it is
+ * open to: the discovery XP (once per life), one clear of the guardian and its pack (each kill at the
+ * member's own level: XP and the dealer's coins) and the chest's coins (weapons and tonics are not
+ * counted, like the camps'). The members are killed one after another with no search between them
+ * (they stand together); SITE_TRIP_S covers the walk out, the climb and opening the chest.
+ */
+export const SITE_TRIP_S = 90;
+
+export const siteVisitLevel = (site: Pick<WildSiteDef, "levels">) => site.levels[0];
+
+export interface SiteVisit {
+  id: string;
+  level: number;
+  discoveryXp: number;
+  fightXp: number;
+  coins: number;
+  minutes: number;
+}
+
+export function siteVisit(site: WildSiteDef, L = siteVisitLevel(site)): SiteVisit {
+  const members = [{ kind: site.guardian.kind, level: site.guardian.level, count: 1 }, ...site.pack];
+  let xp = 0, coins = site.chest.coins, time = SITE_TRIP_S;
+  for (const m of members) {
+    const def = npcDef(m.kind);
+    xp += m.count * killXp(def.tier, m.level, L);
+    coins += m.count * npcCoins(def, m.level);
+    time += m.count * playerKillsCreature(def, m.level, L).median;
+  }
+  return { id: site.id, level: L, discoveryXp: siteDiscoveryXp(site), fightXp: xp, coins, minutes: time / 60 };
+}
+
+export const siteVisits = (): SiteVisit[] => WILD_SITES.map((s) => siteVisit(s));
+
 export interface LevelRow {
   level: number;
   area: string;
@@ -750,15 +918,21 @@ export function areaRate(areaId: string, L: number): { xpPerMin: number; coinsPe
   return { xpPerMin: (xp / total) / (time / total / 60), coinsPerMin: (coins / total) / (time / total / 60) };
 }
 
-/** The intended route: at each level, the best-paying named area whose range holds the level. */
+/**
+ * The intended route: at each level, the missions and wild sites usually done there, then the
+ * best-paying named area whose range holds the level for the rest.
+ */
 export function progression(): LevelRow[] {
   const rows: LevelRow[] = [];
   let reached = 0;
   let coins = 0;
+  const sites = siteVisits();
   for (let L = 1; L < LEVEL_CAP; L++) {
     const need = L === 1 ? xpToNext(1) - ONBOARDING_XP : xpToNext(L);
-    const missionXp = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.xp, 0);
-    const missionCoins = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.coins, 0);
+    const here = sites.filter((v) => v.level === L);
+    const missionXp = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.xp, 0) + here.reduce((s, v) => s + v.discoveryXp + v.fightXp, 0);
+    const missionCoins = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.coins, 0) + here.reduce((s, v) => s + v.coins, 0);
+    const siteMinutes = here.reduce((s, v) => s + v.minutes, 0);
     const chest = NPC_AREAS.filter((a) => CAMP_LEVEL[a.id] === L).reduce((s, a) => s + (a.camp?.chest?.coins ?? 0), 0);
     const candidates = NPC_AREAS.filter((a) => a.groups.length + (a.camp ? 1 : 0) > 0 && a.levels[0] <= L && L <= a.levels[1]);
     let best = { area: "-", xpPerMin: 0, coinsPerMin: 0 };
@@ -767,7 +941,7 @@ export function progression(): LevelRow[] {
       if (r.xpPerMin > best.xpPerMin) best = { area: a.id, ...r };
     }
     const grind = Math.max(0, need - missionXp);
-    const minutes = (L === 1 ? 1 : 0) + grind / best.xpPerMin; // L1: the ~60 s tutorial pays 50 XP
+    const minutes = (L === 1 ? 1 : 0) + siteMinutes + grind / best.xpPerMin; // L1: the ~60 s tutorial pays 50 XP
     rows.push({ level: L, area: best.area, xpPerMin: best.xpPerMin, coinsPerMin: best.coinsPerMin, minutes, reachedAt: reached, coinsAtStart: coins });
     coins += best.coinsPerMin * (grind / best.xpPerMin) + missionCoins + chest;
     reached += minutes;

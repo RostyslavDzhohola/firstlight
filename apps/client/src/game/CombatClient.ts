@@ -213,6 +213,17 @@ export class CombatClient {
       const slot = partyState().members.findIndex((x) => x.sessionId === m.by) + 1;
       this.hud.bubble(s.x, s.y, PHRASES[m.id] ?? "", { name: speaker?.name, slot: slot > 0 && slot <= 4 ? (slot as 1 | 2 | 3 | 4) : undefined });
     });
+    // A resident's line (#82): a bubble over it for everyone near, held long enough to read, and a
+    // subtitle as well when it answers you.
+    room.onMessage("speech", (m: { by: string; text: string; to?: string }) => {
+      if (isBlocked(m.by)) return;
+      const speaker = (room.state as any).players?.get(m.by);
+      if (!speaker) return;
+      const ms = Math.min(9000, 2500 + m.text.length * 45);
+      const s = this.toScreen(new THREE.Vector3(speaker.x, speaker.y, speaker.z), 2.3);
+      if (s) this.hud.bubble(s.x, s.y, m.text, { name: speaker.name, ms });
+      if (m.to === me) this.hud.subtitle(String(speaker.name).replace(/_/g, " "), m.text, ms);
+    });
     room.onMessage("death", (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
       if (m.victim !== me) return;
       if (!this.death.dead) {
@@ -437,6 +448,7 @@ export class CombatClient {
       if (this.heavyDueAt && now >= this.heavyDueAt) {
         this.heavyDueAt = 0;
         if (heavyCapable) {
+          g.net.flushInput(now); // the server swings along the facing it has: this frame's
           room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
           g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
           this.lastFire = now;
@@ -445,7 +457,7 @@ export class CombatClient {
       }
     } else {
       this.heavyDueAt = 0; // switched off the melee weapon: a released heavy is dropped
-      const wantScope = rmb && (def.id === "stillshot" || def.id === "longbow" || def.delivery === "hitscan" || def.delivery === "pellets");
+      const wantScope = rmb && (def.id === "stillshot" || def.id === "longbow" || def.id === "crossbow" || def.delivery === "hitscan" || def.delivery === "pellets");
       if (wantScope !== this.scoped) {
         this.scoped = wantScope;
         room.send("scope", { on: wantScope });
@@ -492,6 +504,7 @@ export class CombatClient {
     // own avatar: swing / shot / cast / throw picked from the held item, without the round trip
     if (def.delivery !== "none") g.self?.trigger("attack");
     if (def.delivery === "melee") {
+      g.net.flushInput(now); // the server swings along the facing it has: this frame's (review finding 1)
       room.send("melee", { slot, t: Date.now(), heavy: false });
       g.audio.play(g.audio.swingSound(WEAPONS.indexOf(def)));
       const up = g.player.up();

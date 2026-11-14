@@ -3,15 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "DEV_SIGNIN_CODES=1 tsx watch src/main.ts",
     "start": "node src/main.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "devDependencies": {
     "@colyseus/sdk": "0.18.5",
-    "@firstlight/agent-kit": "workspace:*",
-    "@firstlight/agent-tools": "workspace:*",
     "@types/better-sqlite3": "9.6.0",
     "@types/express": "5.0.6",
     "esbuild": "0.28.2",
@@ -22,6 +20,8 @@
     "@colyseus/schema": "5.0.36",
     "@colyseus/tools": "0.18.9",
     "@colyseus/ws-transport": "0.18.4",
+    "@firstlight/agent-kit": "workspace:*",
+    "@firstlight/agent-tools": "workspace:*",
     "@firstlight/shared": "workspace:*",
     "better-auth": "1.7.7",
     "better-sqlite3": "13.0.3",

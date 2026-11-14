@@ -1,8 +1,9 @@
 // Onboarding steps (SPEC §6.12): what the tutorial asks for and when each step counts as done.
 // Pure (unit-tested): the onboarding client feeds it one sample per frame from the local player and
-// the server's dummy count. Only the dummies (counted by the server) pay XP; every other step is
-// taught here and pays nothing. After the dummies come weapons, pick-up, map, phrase wheel, the
-// optional voice tip (only in builds with voice chat) and the final pointer to a portal (about 60–90 s in all).
+// the server's answer to the attack lesson. Only that one swing (judged by the server) pays XP; every
+// other step is taught here and pays nothing. After it come weapons, pick-up, map, phrase wheel and the
+// optional voice tip (only in builds with voice chat), about 60 s in all. The tutorial ends in the plaza
+// (#68): the walk through a portal is no longer a step, the end card and the compass point the way.
 
 import { ANIM } from "@firstlight/shared/net/schema";
 import { features } from "../config.ts";
@@ -36,18 +37,21 @@ export const ALL_STEPS: readonly StepDef[] = [
   { id: "jump", label: "Jump", keys: ["Space"], heading: "Jump", cardKeys: ["Space"], text: "Press **Space** to jump. Falls of more than 8 m hurt.", goal: 1, unit: "", bar: false },
   { id: "sprint", label: "Sprint", keys: ["Shift"], heading: "Run faster", cardKeys: ["Shift", "+", "W"], text: "Hold **Shift** while you move forward. You can't attack while you sprint.", goal: 2, unit: "s", bar: true },
   { id: "dodge", label: "Dodge", keys: ["C"], heading: "Dodge-roll", cardKeys: ["C"], text: "Press **C** to roll out of the way. It's ready again a second later.", goal: 1, unit: "", bar: false },
-  { id: "attack", label: "Attack the dummies", keys: ["LMB"], heading: "Knock them down", cardKeys: ["LMB"], text: "Walk up to a training dummy and **left-click** to attack. Three hits knock one down: **10 XP** each.", goal: 3, unit: "", bar: true },
+  { id: "attack", label: "Attack", keys: ["LMB"], heading: "Attack", cardKeys: ["LMB"], text: "**Left-click** to swing your weapon. A training dummy in reach falls over; anywhere else, the swing counts too.", goal: 1, unit: "", bar: false },
   { id: "switch", label: "Switch weapons", keys: ["1–4"], heading: "Switch weapons", cardKeys: ["1", "2", "3", "4"], text: "**1**–**4** pick a hotbar slot; an empty slot means fists. Press **2**, then **1** to take your weapon back.", goal: 2, unit: "", bar: false },
   { id: "pickup", label: "Loot piles · E", keys: ["E"], heading: "Loot piles · E", cardKeys: ["E"], text: "Tip: when someone dies, everything they carried drops as a glowing pile. Stand on one and press **E** to take it all. Press **E** to go on.", goal: 1, unit: "", bar: false },
   { id: "map", label: "Open the map", keys: ["M"], heading: "Open the map", cardKeys: ["M"], text: "Press **M** for the map: the planets, the pads and where you stand. **M** or **Esc** closes it.", goal: 1, unit: "", bar: false },
   { id: "wheel", label: "Phrase wheel", keys: ["G"], heading: "Say something", cardKeys: ["G"], text: "Hold **G**, point at a phrase and let go. Everyone near you sees it over your head.", goal: 1, unit: "", bar: false },
-  { id: "voice", label: "Voice (optional)", keys: ["V"], heading: "Voice chat", cardKeys: ["V"], text: "Optional: turn voice on in **Esc → Voice & radio** (16+, never recorded), then hold **V** to talk to people near you. This tip moves on by itself.", goal: 1, unit: "", bar: false, optional: true, autoAfter: 8 },
+  { id: "voice", label: "Voice (optional)", keys: ["K"], heading: "Voice chat", cardKeys: ["K"], text: "Optional: turn voice on in **Esc → Voice & radio** (16+, never recorded), then hold **K** to talk to people near you. This tip moves on by itself.", goal: 1, unit: "", bar: false, optional: true, autoAfter: 8 },
   { id: "portal", label: "Walk through a portal", keys: [], heading: "Off you go", cardKeys: [], text: "The three rings around the plaza lead to the planets. Start on **Arcadia** (levels 1–7): walk into its portal.", goal: 1, unit: "", bar: false, autoAfter: 45 },
 ];
 
+/** Ids kept for saved progress but no longer taught: the portal walk (#68, the tutorial ends in the plaza). */
+const RETIRED: ReadonlySet<StepId> = new Set(["portal"]);
+
 /** The steps a build teaches: the voice tip only when voice chat is on (hidden in this build, D-controls-1). */
 export function activeSteps(voice: boolean = features.voice): readonly StepDef[] {
-  return voice ? ALL_STEPS : ALL_STEPS.filter((s) => s.id !== "voice");
+  return ALL_STEPS.filter((s) => !RETIRED.has(s.id) && (voice || s.id !== "voice"));
 }
 
 /** This build's steps, in order (the HUD counts "3 / 11" from these). */
@@ -64,8 +68,8 @@ export interface Sample {
   lookRad: number;
   /** PlayerController.anim */
   anim: number;
-  /** Dummies knocked down (from the server). */
-  dummiesDown: number;
+  /** The server took the attack lesson's swing (the tutorial's payout came back). */
+  trained: boolean;
   /** Key codes pressed this frame while playing (Digit1–4, KeyE, KeyM, KeyV…). */
   pressed: ReadonlySet<string>;
   /** The map panel is open (M under the pause menu or another panel doesn't open it: #35). */
@@ -104,13 +108,13 @@ export class OnboardingSteps {
     if (x.anim === ANIM.JUMP) this.add("jump", 1);
     if (x.anim === ANIM.SPRINT) this.add("sprint", x.dt);
     if (x.anim === ANIM.DODGE) this.add("dodge", 1);
-    this.set("attack", x.dummiesDown);
+    if (x.trained) this.set("attack", 1);
     for (const d of DIGITS) if (x.pressed.has(d)) this.slots.add(d);
     this.set("switch", this.slots.size);
     if (x.pressed.has("KeyE")) this.set("pickup", 1);
     if (x.mapOpen) this.set("map", 1);
     if (x.phrased) this.set("wheel", 1);
-    if (x.voiceOn || x.pressed.has("KeyV")) this.set("voice", 1);
+    if (x.voiceOn || x.pressed.has("KeyK")) this.set("voice", 1);
     // Only actually walking into a ring counts (T9): passing or standing in front of one doesn't.
     if (x.inPortal) this.set("portal", 1);
     const cur = this.current;

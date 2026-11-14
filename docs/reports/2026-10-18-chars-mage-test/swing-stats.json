@@ -1,0 +1,118 @@
+{
+ "aim": {
+  "seam_deg_before_ease": 0.9,
+  "unsolved_bone_frames": 0
+ },
+ "block": {
+  "seam_deg_before_ease": 2.8,
+  "unsolved_bone_frames": 0
+ },
+ "cast": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "cast_mage": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "death": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 1
+ },
+ "emote_cheer": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "emote_dance": {
+  "seam_deg_before_ease": 7.8,
+  "unsolved_bone_frames": 0
+ },
+ "emote_point": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "emote_wave": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "fall": {
+  "seam_deg_before_ease": 1.6,
+  "unsolved_bone_frames": 0
+ },
+ "hit": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "hit_heavy": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 4
+ },
+ "idle": {
+  "seam_deg_before_ease": 1.1,
+  "unsolved_bone_frames": 0
+ },
+ "idle_mage": {
+  "seam_deg_before_ease": 0.4,
+  "unsolved_bone_frames": 0
+ },
+ "jump": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 2
+ },
+ "land": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "melee_heavy": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 8
+ },
+ "melee_light": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 1
+ },
+ "punch": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "punch_heavy": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "roll": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 5
+ },
+ "run": {
+  "seam_deg_before_ease": 21.1,
+  "unsolved_bone_frames": 0
+ },
+ "shoot": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "sprint": {
+  "seam_deg_before_ease": 23.2,
+  "unsolved_bone_frames": 0
+ },
+ "swim": {
+  "seam_deg_before_ease": 2.9,
+  "unsolved_bone_frames": 13
+ },
+ "swim_idle": {
+  "seam_deg_before_ease": 0.6,
+  "unsolved_bone_frames": 0
+ },
+ "throw": {
+  "seam_deg_before_ease": 0.0,
+  "unsolved_bone_frames": 0
+ },
+ "walk": {
+  "seam_deg_before_ease": 3.3,
+  "unsolved_bone_frames": 3
+ },
+ "walk_mage": {
+  "seam_deg_before_ease": 3.5,
+  "unsolved_bone_frames": 0
+ }
+}

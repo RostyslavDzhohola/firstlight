@@ -22,7 +22,7 @@ import { newCharacter } from "@firstlight/shared/content/character";
 
 export async function startServer(
   limits: Partial<{ maxClients: number; soloFillLimit: number; maxCopiesPerBody: number; globalCap: number }> = {},
-  opts: Pick<GameOptions, "mountAfterJson" | "production"> = {},
+  opts: Pick<GameOptions, "mountAfterJson" | "production" | "gateway"> = {},
 ): Promise<Game> {
   characterRepo.current = new MemoryCharacterRepo();
   resetSandboxes(); // admin sandboxes (D-admin-3) are process memory: a new server has none
@@ -46,6 +46,7 @@ export async function startServer(
     verify: chainVerifiers(devVerifier(true)),
     limits: { maxClients: 40, soloFillLimit: 36, maxCopiesPerBody: 2, globalCap: 320, ...limits },
     allowedOrigins: ["http://localhost:5173"],
+    gateway: { signIn: "dev" }, // no Better Auth in-process: gateway seats use dev tokens
     ...opts,
   });
 }

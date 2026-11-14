@@ -9,7 +9,7 @@ import { button, el, icon, sprite } from "../ui/dom.ts";
 import { shareRow } from "../ui/share.ts";
 import { installSprites, portraitSprite } from "../ui/sprites.ts";
 import { STILLS, type Still } from "../ui/loadingStills.ts";
-import { agentsGuideUrl, fmtNum, hallRows, HERO_FADE_MS, HERO_HOLD_MS, heroLive, heroStills, namesLine, newsTiles, progressView, visitsLine, WORLD_STILL, worldCards, type MeInfo } from "./homeModel.ts";
+import { agentCommands, agentsGuideUrl, fmtNum, hallRows, HERO_FADE_MS, HERO_HOLD_MS, heroLive, heroStills, namesLine, newsTiles, progressView, visitsLine, WORLD_STILL, worldCards, type MeInfo } from "./homeModel.ts";
 import { onLandingShown } from "./landing.ts";
 import { startOrrery, wantsOrrery, type Orrery } from "./orrery.ts";
 import { takeHomeNotice, type HomeNotice } from "./leave.ts";
@@ -73,7 +73,7 @@ export function renderWorlds(online: HomeOnline | null): void {
       card.setAttribute("aria-label", w.name);
       card.dataset.world = w.id;
       const pic = el("div", "fl-home__wpic", card);
-      const still = STILL_BY_ID.get(WORLD_STILL[w.id]);
+      const still = STILL_BY_ID.get(WORLD_STILL[w.id] ?? "");
       if (still) {
         const img = el("img", "", pic);
         img.alt = "";
@@ -241,6 +241,41 @@ function agentsLink(): void {
   if (config.publicRepo) a.href = agentsGuideUrl(config.repoUrl);
 }
 
+/**
+ * "Bring your agent": the one-command joins for this server (Claude Code, Codex, curl), each with a
+ * Copy button, and a plain note when the server has agents off (GET /api/agent says so).
+ */
+export function renderAgentCommands(box: HTMLElement, apiUrl: string): void {
+  box.replaceChildren();
+  for (const c of agentCommands(apiUrl)) {
+    const row = el("div", `fl-home__cmd is-${c.id}`, box);
+    row.dataset.cmd = c.id;
+    el("span", "fl-home__cmdlabel", row, c.label);
+    el("code", "", el("pre", "", row), c.text);
+    const copy = button("Copy", "fl-btn fl-btn--sm fl-home__copy", row, () => {
+      void navigator.clipboard?.writeText(c.text).then(
+        () => {
+          copy.textContent = "Copied";
+          window.setTimeout(() => (copy.textContent = "Copy"), 1600);
+        },
+        () => {},
+      );
+    });
+    copy.setAttribute("aria-label", `Copy the ${c.label} command`);
+  }
+}
+
+/** Does this server take agents right now? Shows the "agents off" note when it doesn't. */
+export async function paintAgentsSwitch(note: HTMLElement, apiUrl: string, fetcher: typeof fetch = fetch): Promise<void> {
+  try {
+    const r = await fetcher(`${apiUrl.replace(/\/+$/, "")}/api/agent`, { signal: AbortSignal.timeout(8000) });
+    const body = (await r.json()) as { enabled?: boolean };
+    note.hidden = body.enabled !== false;
+  } catch {
+    note.hidden = true; // unknown: say nothing rather than something wrong
+  }
+}
+
 function boardRow(list: HTMLElement, opts: { rank?: number; sprite: string; name: string; tag?: string | null; val: string; unit?: string; open?: boolean }) {
   const li = el("li", opts.open ? "is-open" : "", list);
   el("span", "rank", li, opts.rank ? String(opts.rank) : "");
@@ -289,6 +324,7 @@ export function renderBoard(board: HomeBoard | null, tab: Tab): void {
  * card, D-fixes-3); the analytics disclosure is the footer's Privacy card.
  */
 export function renderVisits(visits: HomeVisits | null, ourOnline: number | null): void {
+  privacyLink(); // whatever the counts say: the disclosure is always there
   const box = $("home-visits");
   if (!box) return;
   const line = visitsLine(visits, ourOnline);
@@ -313,14 +349,13 @@ export function renderVisits(visits: HomeVisits | null, ourOnline: number | null
     total.replaceChildren("Total visits ");
     el("b", "num", total, line.total);
   } else if (total) total.hidden = true;
-  privacyLink();
 }
 
-/** The footer's "Privacy" link (only with DataFast in the page): a short card on its analytics and the opt-out (#12). */
+/** The footer's "Privacy" link (always: our own funnel is disclosed with or without DataFast): what is counted and the opt-out (#12). */
 function privacyLink(): void {
   const text = privacyText(config.datafast);
   const credit = document.querySelector(".fl-home__credit");
-  if (!text || !credit || document.getElementById("home-privacy")) return;
+  if (!credit || document.getElementById("home-privacy")) return;
   const b = button("Privacy", "fl-link fl-home__privacy", credit as HTMLElement, () => openPrivacy(text));
   b.id = "home-privacy";
   b.dataset.e2e = "home-privacy";
@@ -581,6 +616,10 @@ export async function initHome(): Promise<void> {
   paintData();
   paintMe();
   agentsLink();
+  const cmds = $("home-agents-cmds");
+  if (cmds) renderAgentCommands(cmds, config.apiUrl);
+  const off = $("home-agents-off");
+  if (off) void paintAgentsSwitch(off, config.apiUrl);
   const stillsBox = $("home-stills");
   if (stillsBox) {
     // Runs for the page's life; parked (no timer) while the landing page or the tab is hidden.

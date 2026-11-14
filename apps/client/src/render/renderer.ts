@@ -189,7 +189,7 @@ export async function createRenderer(container: HTMLElement, opts: { onStage?: (
   const killsNow = (): Set<Feature> => (benchOff.size ? new Set([...kills, ...benchOff]) : kills);
 
   const postKeyOf = (s: ResolvedSettings) =>
-    [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale, photo, aoOverride ? `${aoOverride.samples}@${aoOverride.scale}` : ""].join(",");
+    [s.on.bloom, s.on.ao, s.on.traa, s.on.fxaa, s.on.grade, s.on.grain, s.on.vignette, s.post.ao, s.post.bloomScale, photo, aoOverride ? `${aoOverride.samples}@${aoOverride.scale}/${aoOverride.denoise ?? ""}` : ""].join(",");
 
   /** Build the post pipeline for the current settings (`force`: also when they haven't changed). */
   function rebuildPost(force = false) {

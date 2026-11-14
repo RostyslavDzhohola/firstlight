@@ -117,6 +117,23 @@
 .fl-mission.is-done .fl-mission__st { border-color: var(--ok); background: var(--ok); }
 .fl-missions__more { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: calc(.38 * var(--u)) 0 0; border-top: 1px solid rgba(196, 241, 255, .1); font: 600 var(--t-xs)/1.2 var(--font-display); letter-spacing: .06em; color: var(--photon); cursor: pointer; }
 .fl-missions__more:focus-visible { outline: 1px solid var(--photon); outline-offset: 2px; }
+/* #69: the collapse control (its key and a chevron) at the header's end; collapsed, the tracked mission stays on the line. */
+.fl-missions header .fl-missions__h { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.fl-missions__ctl { display: inline-flex; align-items: center; gap: calc(.35 * var(--u)); flex: none; }
+.fl-missions__ctl .fl-key { min-width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); font-size: var(--t-xs); }
+.fl-missions__chev { display: block; width: calc(.55 * var(--u)); height: calc(.55 * var(--u)); border-right: 2px solid var(--photon); border-bottom: 2px solid var(--photon); transform: translateY(-25%) rotate(45deg); }
+.fl-missions__chev.is-closed { transform: rotate(-45deg); }
+/* Each mission's colour (#86) marks its row; the tracked row is filled in it, the others are outlined. */
+.fl-mission .fl-mission__st { border-color: var(--mc, var(--fog-3)); }
+.fl-mission.is-tracked .fl-mission__st { background: var(--mc, var(--hero-gold)); border-color: var(--mc, var(--hero-gold)); }
+button.fl-mission { all: unset; box-sizing: border-box; display: grid; grid-template-columns: calc(1.1 * var(--u)) minmax(0, 1fr) auto; gap: var(--sp-2); align-items: start; width: 100%; padding: calc(.38 * var(--u)) 0; border-top: 1px solid rgba(196, 241, 255, .1); cursor: pointer; pointer-events: auto; }
+button.fl-mission:hover b, button.fl-mission:focus-visible b { color: var(--hero-gold); }
+button.fl-mission:focus-visible { outline: 1px solid var(--photon); outline-offset: 2px; }
+.fl-mission:not(.is-tracked) b { font-weight: 500; color: var(--paper-2); }
+/* Review 2026-11-13 #2: a running trial leads the list in full and lit, but only the player's choice is "tracked". */
+.fl-mission.is-trial { border-left: 2px solid var(--mc, var(--photon)); padding-left: calc(.4 * var(--u)); background: linear-gradient(90deg, rgba(196, 241, 255, .08), transparent 70%); }
+.fl-mission.is-trial b { font-weight: 600; color: var(--paper); }
+.fl-mission .fl-mission__k { display: block; font: 600 calc(.85 * var(--t-xs))/1.2 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--mc, var(--photon)); }
 
 .fl-toasts { width: 100%; display: flex; flex-direction: column; gap: calc(.5 * var(--u)); align-items: flex-end; z-index: var(--z-toast); }
 .fl-toast { display: flex; align-items: center; gap: calc(.7 * var(--u)); max-width: 100%; padding: calc(.55 * var(--u)) calc(.8 * var(--u)) calc(.55 * var(--u)) calc(.6 * var(--u)); animation: fl-pop .45s var(--ease-snap) both; }
@@ -188,6 +205,10 @@
 /* ---------------------------------------------------------------- bottom-centre: hotbar + ammo */
 .fl-hotbar-wrap { position: absolute; left: 50%; bottom: calc(1.4 * var(--u)); transform: translateX(-50%); display: flex; align-items: flex-end; gap: calc(1.2 * var(--u)); }
 .fl-hotbar { position: relative; display: flex; gap: calc(.45 * var(--u)); }
+/* #76: the right mouse's action for the item in hand, under the hotbar. */
+.fl-rmb { position: absolute; left: -50%; right: -50%; top: calc(100% + .2 * var(--u)); display: flex; justify-content: center; align-items: center; gap: calc(.4 * var(--u)); font: 500 var(--t-xs)/1 var(--font-body); color: var(--paper-2); white-space: nowrap; text-shadow: var(--hud-text-shadow); }
+.fl-rmb[hidden] { display: none; }
+.fl-rmb .fl-key { min-width: auto; height: calc(1.05 * var(--u)); padding: 0 calc(.3 * var(--u)); font-size: var(--t-xs); }
 .fl-wname { position: absolute; left: -50%; right: -50%; bottom: calc(100% + .7 * var(--u)); text-align: center; font: 600 var(--t-sm)/1 var(--font-display); letter-spacing: .22em; text-transform: uppercase; color: var(--hero-cream); white-space: nowrap; }
 .fl-slot { position: relative; width: calc(4.5 * var(--u)); height: calc(4.5 * var(--u)); display: grid; place-items: center; transition: transform var(--dur-2) var(--ease-out); }
 .fl-slot > .px { width: calc(2.7 * var(--u)); height: calc(2.7 * var(--u)); }

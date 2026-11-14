@@ -6,6 +6,7 @@ import "./spellBar.css";
 import { SPELLS } from "@firstlight/shared/content/spells";
 import type { SpellBarView } from "../game/spellBook.ts";
 import { el, sprite } from "./dom.ts";
+import { spellTooltip } from "../game/spellInfo.ts";
 
 interface SlotRefs {
   root: HTMLElement;
@@ -34,6 +35,19 @@ export class SpellBar {
   private readonly fill: HTMLElement;
   private readonly val: HTMLElement;
   private last = { fill: -1, val: "", low: false };
+
+  private numbersKey = "";
+
+  /** Tooltips with each spell's numbers at `level` for this starter (#79); DOM only when they change. */
+  setNumbers(level: number, starter: number) {
+    const key = `${level}|${starter}`;
+    if (key === this.numbersKey) return;
+    this.numbersKey = key;
+    SPELLS.forEach((s, i) => {
+      const slot = this.slots[i];
+      if (slot) slot.root.title = spellTooltip(s, level, starter);
+    });
+  }
 
   constructor(spellSlot: HTMLElement, aetherSlot: HTMLElement) {
     this.root.setAttribute("role", "toolbar");

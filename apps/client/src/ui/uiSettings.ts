@@ -35,6 +35,10 @@ export interface UiSettings {
   padAimSlow: boolean;
   /** Rumble on taking damage and on a kill, where the browser supports it. */
   padRumble: boolean;
+  /** Camera view (V, D-view-fp-1): over the shoulder or through the eyes. */
+  view: "third" | "first";
+  /** Field of view in first person (degrees, vertical like `fov`). */
+  fovFirst: number;
 }
 
 export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
@@ -56,6 +60,8 @@ export const UI_DEFAULTS: Readonly<UiSettings> = Object.freeze({
   padCurve: 1.8,
   padAimSlow: true,
   padRumble: true,
+  view: "third",
+  fovFirst: 80,
 }) as UiSettings;
 
 export const SENSITIVITY_RANGE = [0.2, 3] as const;
@@ -94,6 +100,8 @@ export function normalizeUiSettings(raw: unknown): UiSettings {
     padCurve: Math.round(clamp(r.padCurve, PAD_CURVE_RANGE, d.padCurve) * 10) / 10,
     padAimSlow: bool(r.padAimSlow, d.padAimSlow),
     padRumble: bool(r.padRumble, d.padRumble),
+    view: r.view === "first" || r.view === "third" ? r.view : d.view,
+    fovFirst: Math.round(clamp(r.fovFirst, FOV_RANGE, d.fovFirst)),
   };
 }
 

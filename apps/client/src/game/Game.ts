@@ -37,6 +37,7 @@ import { bindUi } from "../ui/bind.ts";
 import { pickDisplayName } from "../ui/account.ts";
 import { hideLoading, loadingFrac, setLoading, setLoadingBadge, stepProgress, WARMUP_FROM, WEBGL2_FALLBACK_LINE, WEBGPU_SLOW_LINE, warmupProgress } from "../ui/loading.ts";
 import { getAccountInfo, invalidatePlayToken, isDevGuest } from "../net/auth.ts";
+import { beacon, funnelStep, markWorld } from "../net/beacon.ts";
 import { PilesView } from "../world/PilesView.ts";
 import { breakablesLayoutPending } from "../world/Breakables.ts";
 import { Planet } from "../world/Planet.ts";
@@ -45,14 +46,16 @@ import { CLOSE } from "@firstlight/shared/net/social";
 import { SANDBOX_REFUSALS } from "./AdminModeClient.ts";
 import { ArrivalWatch, closeAction, ConnectionLost, StorageBackoff, waitFor } from "./arrival.ts";
 import { HitStop } from "./hitStop.ts";
-import { BootGate, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
+import { BootGate, isVersionRefusal, RendererUnavailable, shouldKeepReconnecting } from "./boot.ts";
 import { CombatClient } from "./CombatClient.ts";
 import { GameAudio } from "../audio/Audio.ts";
 import { Input } from "./input.ts";
 import { installControls } from "./controls.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
-import { PlayerController } from "./PlayerController.ts";
+import { CORRECT_KEEP_HEADING_M, PlayerController } from "./PlayerController.ts";
+import { otherView, type ViewMode } from "./view.ts";
+import { uiSettings } from "../ui/uiSettings.ts";
 import { FRAME_MAX_RIDE_S, FRAME_MAX_S, frameClock } from "./frameClock.ts";
 import { bothSolids, stepOut } from "./stepOut.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
@@ -115,6 +118,11 @@ export class Game {
   readonly hitStop = new HitStop();
   /** Scratch: the player's chest for the occluder fade. */
   private readonly fadeChest = new THREE.Vector3();
+  /** The chosen camera view (uiSettings, D-view-fp-1); the player follows it once it exists. */
+  private viewChoice: ViewMode = "third";
+  /** First person: the avatar's eye and the sphere round its head that the occluder fade cuts away. */
+  private readonly eyeAt = new THREE.Vector3();
+  private readonly headCut = { centre: new THREE.Vector3(), radius: 0 };
   private reconnecting = false;
   /** Rejoins after "saving failed" closes: bounded, and not reset by a successful join. */
   private readonly storageBackoff = new StorageBackoff();
@@ -146,6 +154,9 @@ export class Game {
       throw new RendererUnavailable(e); // nothing was attached yet: a retry starts clean
     }
     installShaderMonitor(this.ctx);
+    // The funnel (#85): error reports carry the renderer from here on; a WebGL2 fallback says why.
+    beacon().gfx = { backend: this.ctx.webgpu ? "webgpu" : "webgl2", tier: this.ctx.tier };
+    if (this.ctx.start?.fallback) funnelStep("fallback", undefined, String(this.ctx.start.fallback));
     this.packs = createArtPacks(this.ctx.renderer);
     setAvatarTextureLowRes(this.ctx.tier === "low"); // 512² character textures on Low
     void preloadAvatars(); // character GLBs stream in while we connect and build the world
@@ -229,6 +240,7 @@ export class Game {
     if (!localStorage.getItem("fl.starter") && !automated) {
       hideLoading();
       this.firstChoice = (await this.hud.characterPick({ askName: needsName ? { suggested: info!.name } : undefined })) ?? undefined;
+      funnelStep("pick");
     } else if (needsName) {
       hideLoading(); // the name card sits in #ui, under the loading screen
       await pickDisplayName({ suggested: info!.name, dismissible: true });
@@ -262,6 +274,7 @@ export class Game {
     this.input.endFrame();
     if (!this.bench) this.input.lock();
     this.ctx.renderer.setAnimationLoop(() => this.frame());
+    markWorld(this.ctx.webgpu ? "webgpu" : "webgl2", this.ctx.tier); // the funnel's "world on screen" (#85)
     // On WebGL2 because WebGPU didn't start: ask WebGPU once more at a quiet moment (D-renderer-2).
     if (this.ctx.start) void webgpuSecondChance(this.ctx.start);
   }
@@ -356,6 +369,7 @@ export class Game {
       this.stop();
       return;
     }
+    if (isVersionRefusal(e)) return this.versionChanged();
     if (!shouldKeepReconnecting(e)) {
       hideLoading();
       this.stop();
@@ -363,6 +377,14 @@ export class Game {
     }
     if (e instanceof ConnectionLost && e.action === "rejoin-fresh") invalidatePlayToken();
     void this.reconnect();
+  }
+
+  /** The server was updated under us and this page can't follow (the one automatic reload is used up). */
+  private versionChanged() {
+    hideLoading();
+    this.stop();
+    funnelStep("version");
+    this.menu.showNotice("A NEW VERSION IS OUT", "The game was updated while you played. Reload to play the new version; your character is safe.", "Reload", () => location.reload());
   }
 
   /** Rejoin after an unexpected disconnect: backoff 1.5 s → 30 s, then a "lost connection" screen. */
@@ -380,6 +402,7 @@ export class Game {
           return;
         } catch (e) {
           console.warn("rejoin failed", e);
+          if (isVersionRefusal(e)) return this.versionChanged();
           if ((e instanceof ConnectionLost && e.action === "removed") || !shouldKeepReconnecting(e)) {
             hideLoading();
             if (e instanceof ConnectionLost && e.code !== null) removedFromWorld(e.code);
@@ -392,6 +415,7 @@ export class Game {
       }
       hideLoading();
       this.stop();
+      funnelStep("lost");
       this.menu.showNotice("CONNECTION LOST", "Couldn't reach the server. Your character is safe.", "Try again", () => void this.resume());
     } finally {
       this.reconnecting = false;
@@ -491,7 +515,11 @@ export class Game {
     this.planet = new Planet(this.ctx, body);
     this.env.setBody(body, 0, this.planet.look, this.planet.rig);
     this.particles.setMoteColor(this.planet.look.mote);
-    this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
+    if (!this.player) {
+      this.player = new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
+      this.player.view = this.viewChoice;
+      this.player.onViewChange = (v) => this.chooseView(v); // scrolled all the way in or out
+    }
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
     // The body's structures (Portus' town, a planet's outpost and waystones) block like the server's,
     // and so do its natural solids (trunks, boulders, spires, big rocks: D-solid-1).
@@ -553,7 +581,11 @@ export class Game {
       listenTrials(room, () => Date.now() + this.net.serverOffset); // the same for race / defend / collect attempts, stamped on the server clock (trialState.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
-      this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);
+      this.net.onCorrect = (x, y, z) => {
+        // A near placement (a Skipstep, a refused move) is no arrival: the own avatar doesn't rez in (#78).
+        if (Math.hypot(x - this.player.pos.x, y - this.player.pos.y, z - this.player.pos.z) <= CORRECT_KEEP_HEADING_M) this.self?.blinked();
+        this.player.correct(x, y, z);
+      };
       this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
     }
 
@@ -570,7 +602,8 @@ export class Game {
     if (layout) await Promise.race([layout, new Promise((r) => setTimeout(r, 10_000))]);
     for (let i = 0; i < 12 && this.nature.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1) > 0; i++) await new Promise((r) => setTimeout(r, 0));
     setLoading("Loading characters…", 0.8);
-    await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
+    // The wild sites' GLB (~100–250 KB) resolves null on failure too: their colliders draw as stone.
+    await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready, this.planet.wildSites?.ready]); // resolve null on failure: capsules / box horses
     alive("loading characters");
     if (this.planet.town) {
       // The castle town (Portus) or the pad outpost (a planet) is in the scene before the probe and
@@ -845,6 +878,7 @@ export class Game {
     } else {
       // Photo mode (Shift+P): the body stays put (and can still be hurt) while the camera flies.
       if (this.input.hit(HOTKEYS.photo)) this.photo.toggle(this.ctx.camera);
+      if (this.input.hit(HOTKEYS.view) && !this.photo.active) this.chooseView(otherView(this.player.view));
       if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming(), now);
       this.nature?.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1);
       const p = this.player.pos;
@@ -854,7 +888,8 @@ export class Game {
       m.fx = f.x; m.fy = f.y; m.fz = f.z;
       m.anim = this.player.anim;
       this.net.sendInput(now, m);
-      this.self.set(p.x, p.y, p.z, f.x, f.y, f.z, this.player.anim, this.hitStop.frozen(now) ? 0 : dt);
+      const b = this.player.bodyFacing; // drawn: eased where first person snaps the gameplay facing
+      this.self.set(p.x, p.y, p.z, b.x, b.y, b.z, this.player.anim, this.hitStop.frozen(now) ? 0 : dt);
       focus = this.photo.active ? this.photo.pos : p;
     }
 
@@ -918,12 +953,23 @@ export class Game {
           });
       }
     }
+    this.headCut.radius = 0;
     if (this.photo.active) this.photo.update(dt, this.ctx.camera);
-    else if (!this.bench) this.player.placeCamera(this.ctx.camera, dt);
+    else if (!this.bench) {
+      // First person follows the drawn head (its face socket); dead, the camera pulls out (game/view.ts).
+      const p = this.player;
+      p.dead = !!this.combat.deadUntilRespawn;
+      // (Also in third person: squeezed against a wall it frames from the eyes too, PlayerController CLOSE_IN.)
+      const r = this.self ? this.self.firstPersonHead(this.eyeAt, this.headCut.centre) : 0;
+      p.setHead(r > 0 ? this.eyeAt : null);
+      p.placeCamera(this.ctx.camera, dt);
+      // Nearly in: the body stays and only the head is cut away; on the way the near-camera fade dissolves it all.
+      if (p.eyeBlend > 0.85) this.headCut.radius = r;
+    }
     // Trees, rocks and props between the camera and the player dissolve (not in photo mode or the bench).
     // The cone aims at the drawn avatar's chest bone: in the saddle that's ~0.8 m higher than on foot.
     const chest = this.self ? avatarChest(this.self.root, this.self.socket("back")?.parent ?? null, this.fadeChest) : null;
-    updateOccluderFade(this.ctx.camera, chest, !this.photo.active && !this.bench && !NO_FADE);
+    updateOccluderFade(this.ctx.camera, chest, !this.photo.active && !this.bench && !NO_FADE, this.headCut.radius > 0 ? this.headCut : null);
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.env.afterCamera(this.ctx.camera, dt);
@@ -967,6 +1013,18 @@ export class Game {
     }
     this.perf.frame(now, rawMs / 1000, x);
     this.input.endFrame();
+  }
+
+  /** The stored view choice changed (bind.ts, from uiSettings): the camera follows it. */
+  setView(v: ViewMode) {
+    this.viewChoice = v;
+    if (this.player) this.player.view = v;
+  }
+
+  /** The player picked a view (V, the pad, the touch button, the scroll wheel): store it; setView follows. */
+  chooseView(v: ViewMode) {
+    this.setView(v);
+    if (uiSettings.get().view !== v) uiSettings.set({ view: v });
   }
 
   /** Contact shadow under a character (or horse, r = 1) standing within 6 m of the ground. */

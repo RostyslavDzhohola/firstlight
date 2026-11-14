@@ -36,6 +36,9 @@ export const env = {
   otpPerEmailPerHour: num("OTP_PER_EMAIL_PER_HOUR", 3),
   /** Print dev OTP codes to the console (dev outbox only: no RESEND_API_KEY and not production). */
   devMailLog: process.env.DEV_MAIL_LOG === "1",
+  /** #84: GET /api/account/dev-code hands the save and sign-in cards the code the dev outbox kept.
+   *  Off unless DEV_SIGNIN_CODES=1 (`pnpm dev` sets it); loopback callers only; production refuses to boot with it. */
+  devCodeRoute: process.env.DEV_SIGNIN_CODES === "1",
   /** M11 extra #2 (SPEC §6.14): horses. On in dev and production; FEATURE_HORSES=0 turns them off
    *  (no whistle sales, H refused, clients told through `you.horses`). Mutable for tests. */
   horses: process.env.FEATURE_HORSES !== "0",
@@ -51,16 +54,21 @@ export const env = {
   /** Agents playing at once from one address, and in one room copy (D-agents-3). */
   agentsPerIp: num("AGENTS_PER_IP", 4),
   agentsPerRoom: num("AGENTS_PER_ROOM", 8),
+  /** The hosted agent gateway (/mcp, /api/agent; D-agents-gw-1): seats it plays at once (0 = off), and
+   *  how long a seat may go without a call before it is closed. It follows AGENTS_ENABLED. */
+  agentGatewaySeats: num("AGENT_GATEWAY_SEATS", 16),
+  agentGatewayIdleS: num("AGENT_GATEWAY_IDLE_S", 600),
 };
 
 /**
  * Why a production config must not boot (main.ts exits on any): dev guests would allow
- * impersonation, a missing origin secret makes forwarded IPs spoofable, and database paths must be
+ * impersonation, the dev sign-in code route would hand out codes, a missing origin secret makes forwarded IPs spoofable, and database paths must be
  * explicit (the ./data default is outside the Railway volume, so data would vanish on deploy).
  */
 export function productionConfigProblems(e: Record<string, string | undefined> = process.env): string[] {
   const problems: string[] = [];
   if (e.ALLOW_DEV_GUESTS === "1") problems.push("ALLOW_DEV_GUESTS must not be set in production");
+  if (e.DEV_SIGNIN_CODES === "1") problems.push("DEV_SIGNIN_CODES must not be set in production (it serves sign-in codes)");
   for (const k of ["ORIGIN_SECRET", "BETTER_AUTH_URL", "CLIENT_ORIGIN", "BETTER_AUTH_SECRET", "AUTH_DB_PATH", "GAME_DB_PATH"]) if (!e[k]) problems.push(`${k} is required in production`);
   return problems;
 }

@@ -1,6 +1,8 @@
 // Levels, HP, damage scaling, XP and coins (docs/content.md §1). Pure functions, shared by the
 // server (authority) and the client (HUD previews).
 
+import { BASE_GRAVITY } from "../planet/bodies.ts";
+
 export const LEVEL_CAP = 20;
 
 const round5 = (x: number) => Math.round(x / 5) * 5;
@@ -61,8 +63,10 @@ export function killCoins(tier: EnemyTier, enemyLevel: number): number {
 }
 
 /** Fall damage as a fraction of max HP: 0 up to 8 m, then 8% per metre (lethal at ≥ 20.5 m). */
-export function fallDamageFraction(dropMetres: number): number {
-  return dropMetres <= 8 ? 0 : Math.min(1, (dropMetres - 8) * 0.08);
+export function fallDamageFraction(dropMetres: number, gravity = BASE_GRAVITY): number {
+  // The landing speed is what hurts: under a weaker pull the same drop lands softer (Lumen, #6).
+  const drop = (dropMetres * gravity) / BASE_GRAVITY;
+  return drop <= 8 ? 0 : Math.min(1, (drop - 8) * 0.08);
 }
 
 /** Linear falloff between full-damage range and falloffTo, down to falloffMin. */
@@ -80,3 +84,22 @@ export function splashFalloff(distance: number, radius: number): number {
 
 export const ONBOARDING_XP = 50;
 export const SELL_RATE = 0.25;
+
+/**
+ * Out-of-combat regeneration (#77, content.md §1.1): once a player has neither taken nor dealt damage
+ * for DELAY_S (the server's combat tag), health comes back at PER_SEC of max HP per second until full.
+ * Any hit taken or attack made stops it again, so it never runs inside a fight (`pnpm balance`
+ * checks every creature fight keeps the tag up). Slow on purpose: a tonic is the in-fight heal.
+ */
+export const REGEN = {
+  DELAY_S: 10,
+  PER_SEC: 0.01,
+  /**
+   * Fights whose own rhythm leaves pauses of DELAY_S or more (a boss's plate window, where it holds its
+   * attacks; a defend trial's gap between waves), so the server holds regeneration for the whole
+   * encounter instead (D-fixplay-2): a boss's fighters while it is engaged, a defend attempt's runner
+   * until it ends. `pnpm balance` measures each encounter's longest pause and fails if one reaches
+   * DELAY_S without being listed here.
+   */
+  PAUSED_IN: ["boss", "defend"] as readonly ("boss" | "defend")[],
+} as const;

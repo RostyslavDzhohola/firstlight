@@ -52,6 +52,8 @@ export interface PileStore {
   get(id: string): PileData | undefined;
   /** Remove the body's piles whose expiry has passed; returns their ids. */
   sweep(body: BodyId, now: number): string[];
+  /** Put a pile somewhere else (one a new solid buried: BodyRoom.unburyPile). Returns it moved, or null if gone. */
+  move(id: string, x: number, y: number, z: number): PileData | null;
 }
 
 export class MemoryPileStore implements PileStore {
@@ -110,6 +112,15 @@ export class MemoryPileStore implements PileStore {
       gone.push(p.id);
     }
     return gone;
+  }
+
+  move(id: string, x: number, y: number, z: number): PileData | null {
+    const p = this.index.get(id);
+    if (!p) return null;
+    p.x = x;
+    p.y = y;
+    p.z = z;
+    return p;
   }
 
   take(id: string, index?: number) {

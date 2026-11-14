@@ -1,7 +1,7 @@
 // The home page's pure parts (6a): the worlds list, the progress card, the leaderboard rows and the
 // text lines, built from shared content and the /api/home and /api/account/me answers. No DOM.
 
-import { BODIES, BODY_IDS, type BodyId } from "@firstlight/shared/planet/bodies";
+import { BODIES, BODY_IDS, PLANET_IDS, type BodyId } from "@firstlight/shared/planet/bodies";
 import { BOSS_BY_BODY, npcDef, PORTUS_WILDS } from "@firstlight/shared/content/npcs";
 import { MEDAL_BY_ID, MEDALS } from "@firstlight/shared/content/medals";
 import { LEVEL_CAP, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
@@ -10,6 +10,7 @@ import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import { SPELLS } from "@firstlight/shared/content/spells";
+import { WILD_SITES } from "@firstlight/shared/content/wildSites";
 import { starterStats } from "@firstlight/shared/content/starters";
 import type { HomeOnline, HomeVisits } from "@firstlight/shared/net/home";
 
@@ -21,6 +22,7 @@ const BLURB: Record<BodyId, string> = {
   arcadia: "Where the Brightbits roam.",
   hollowmere: "The Hollow Court keeps the fen.",
   meridian: "Run by Meridian Oversight.",
+  lumen: "Arcadia's moon: through the moon portal by Dawnpad.",
 };
 /** One line per world: the world cards' headline and the in-game arrival card (ui/arrivalCard.ts). */
 const LINE: Record<BodyId, string> = {
@@ -28,6 +30,7 @@ const LINE: Record<BodyId, string> = {
   arcadia: "Golden meadows round Glasswater Lake",
   hollowmere: "Violet dusk over Mourning Mere",
   meridian: "Red canyons and chrome spires",
+  lumen: "Grey craters under a black sky",
 };
 export const worldLine = (id: BodyId): string => LINE[id];
 /** "Levels 1–7"; Portus: "Safe · Lv 1–2" (the creeps outside its walls). */
@@ -55,8 +58,11 @@ export interface WorldCard {
   pads: number;
 }
 
+/** The worlds the home page lists: the hub and the planets. Lumen (#6) is found in the game, up from Arcadia. */
+const HOME_WORLDS = BODY_IDS.filter((id) => id !== "lumen");
+
 export function worldCards(online: HomeOnline | null): WorldCard[] {
-  return BODY_IDS.map((id) => {
+  return HOME_WORLDS.map((id) => {
     const b = BODIES[id];
     const boss = BOSS_BY_BODY[id];
     return {
@@ -126,6 +132,7 @@ export function progressView(me: MeInfo, fallbackStarter = 0, fallbackLook = 0):
   const into = Math.max(0, (c?.xp ?? 0) - xpAtLevel(level));
   const need = xpToNext(level);
   const starter = starterIndex(c?.starter ?? fallbackStarter);
+  // Every body's pads, Lumen's too (the count includes them: pads found up there).
   const padsTotal = BODY_IDS.reduce((s, b) => s + (PADS[BODIES[b].padLayout] ?? 0), 0);
   return {
     name: me.displayName || me.name || "You",
@@ -214,7 +221,7 @@ export function namesLine(names: readonly string[], players: number, max = 3): s
  */
 export const HERO_STILLS = ["portus-plaza-dusk", "arcadia-lake", "hollowmere-planet", "meridian-mesa", "portus-portal"] as const;
 /** The still on each world's card. */
-export const WORLD_STILL: Record<BodyId, string> = { portus: "portus-above", arcadia: "arcadia-pond", hollowmere: "hollowmere-fen", meridian: "meridian-waystation" };
+export const WORLD_STILL: Partial<Record<BodyId, string>> = { portus: "portus-above", arcadia: "arcadia-pond", hollowmere: "hollowmere-fen", meridian: "meridian-waystation" };
 
 /** How long a hero still holds before the next fades in (ms), and the fade (home.css). */
 export const HERO_HOLD_MS = 7000;
@@ -235,7 +242,7 @@ export function heroLive(online: HomeOnline | null): string | null {
 // ------------------------------------------------------------------------------------- what is new
 
 export interface NewsTile {
-  id: "spells" | "hunt" | "starters";
+  id: NewsId;
   title: string;
   text: string;
   /** Sprites shown on the tile (ui/sprites.ts), each with a short label under it. */
@@ -253,13 +260,37 @@ export function huntState(hall: readonly HallLine[] | null): { text: string; cla
   return first ? { text: `First opened by ${first.name} · ${fmtDate(first.foundAt)}`, claimed: true } : { text: "The vault has never been opened. Be the first.", claimed: false };
 }
 
-/** The three tiles of "New in the worlds", written from the shared content so they can't go stale. */
+export type NewsId = "sites" | "spells" | "hunt" | "starters";
+
+/**
+ * Which tiles "New in the worlds" shows, in order (three to a row on a desktop). The 2026-11-13 run
+ * leads with the wild sites. LEAD: as the later lanes of the run merge (play: tutorial, missions panel,
+ * compass; sky: orbiting planets and a moon to visit; weapons: the new weapon models), add a tile for
+ * each in newsTiles() below and list it here, newest first, keeping a multiple of three.
+ */
+export const NEWS_ORDER: readonly NewsId[] = ["sites", "spells", "hunt"];
+
+/** The tiles of "New in the worlds", written from the shared content so they can't go stale. */
 export function newsTiles(hall: readonly HallLine[] | null): NewsTile[] {
+  const all = allNewsTiles(hall);
+  return NEWS_ORDER.map((id) => all.find((t) => t.id === id)!).filter(Boolean);
+}
+
+function allNewsTiles(hall: readonly HallLine[] | null): NewsTile[] {
   const hunt = huntState(hall);
   const levels = SPELLS.map((s) => s.level);
   const trials = GLEAMS.trials.map((id) => MISSION_BY_ID.get(id)!);
   const traits = (i: number) => starterStats(i).traits[0] ?? "";
+  // The planets' sites only: the one on the moon is for the player to find.
+  const sites = WILD_SITES.filter((s) => (PLANET_IDS as readonly string[]).includes(s.body));
+  const planets = [...new Set(sites.map((s) => s.body))];
   return [
+    {
+      id: "sites", title: `${numberWord(sites.length)} wild places to find`,
+      text: `Off the paths on ${planets.map((b) => BODIES[b].name).join(", ").replace(/, ([^,]*)$/, " and $1")}: watchtowers, ruins, a shrine, a cave and a landmark you can see from far away. Each has a guardian and a chest that opens when it falls, and finding one pays XP.`,
+      icons: planets.map((b) => ({ sprite: "chest", label: BODIES[b].name })),
+      state: null,
+    },
     {
       id: "spells", title: "A spellbook for everyone",
       text: `Four spells on ${SPELLS.map((s) => s.keycap).join(" ")}, next to whatever weapon you carry: a blink, a ring of frost, a falling star, a glass ward. They open at levels ${levels.slice(0, -1).join(", ")} and ${levels.at(-1)}.`,
@@ -281,9 +312,40 @@ export function newsTiles(hall: readonly HallLine[] | null): NewsTile[] {
     },
   ];
 }
+const NUMBER_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+const numberWord = (n: number) => NUMBER_WORDS[n] ?? String(n);
 const HEAD_SPRITES = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "head-ninja"];
 
 /** The agents guide in the public repo (shown only once the repo is public). */
 export function agentsGuideUrl(repoUrl: string): string {
   return `${repoUrl.replace(/\/$/, "")}/blob/main/docs/agents/playing.md`;
+}
+
+/** One way to bring an agent in, as the home page's "Bring your agent" block shows it. */
+export interface AgentCommand {
+  id: "claude" | "codex" | "curl";
+  label: string;
+  text: string;
+}
+
+/**
+ * The one-URL joins for this server's API origin (D-agents-gw-1): the remote MCP endpoint for Claude
+ * Code and Codex, and the plain HTTP API in three curl lines (the seat handle the join returns goes
+ * in `$SEAT`).
+ */
+export function agentCommands(apiUrl: string): AgentCommand[] {
+  const api = apiUrl.replace(/\/+$/, "");
+  return [
+    { id: "claude", label: "Claude Code", text: `claude mcp add --transport http firstlight ${api}/mcp` },
+    { id: "codex", label: "Codex", text: `codex mcp add firstlight --url ${api}/mcp` },
+    {
+      id: "curl",
+      label: "curl",
+      text: [
+        `SEAT=$(curl -s -X POST ${api}/api/agent/join -d '{"name":"Scout_7"}' | sed -E 's/.*"seat":"([^"]+)".*/\\1/')`,
+        `curl -s ${api}/api/agent/observe -H "Authorization: Bearer $SEAT"`,
+        `curl -s -X POST ${api}/api/agent/act -H "Authorization: Bearer $SEAT" -d '{"tool":"move","target":"portal:arcadia"}'`,
+      ].join("\n"),
+    },
+  ];
 }

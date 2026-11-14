@@ -16,6 +16,8 @@ import { BOSS_FIRSTS, EGG_BY_ID, type EggId } from "@firstlight/shared/content/s
 import { buyBlock, SHOP_SPOTS, shopSpotAt, type ShopSpot } from "@firstlight/shared/content/shops";
 import { inReach, objectPos, objectsOn, surfaceDistance, WORLD_OBJECT_BY_ID, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPON_BY_ID, WEAPONS } from "@firstlight/shared/content/weapons";
+import { SITE_DISCOVER_MARGIN, siteDiscoveryXp } from "@firstlight/shared/content/wildSites";
+import { wildSiteAt } from "@firstlight/shared/planet/wildSites";
 import { NPC_DEFS, NPC_INDEX, defLevels, type PlanetId } from "@firstlight/shared/content/npcs";
 import type { BossId } from "@firstlight/shared/content/places";
 import type { InvItem, YouState } from "@firstlight/shared/net/protocol";
@@ -155,6 +157,8 @@ export class QuestSystem implements RoomSystem {
   private lastSweep = 0;
   /** The last huntTargets each player was sent (only changes go out). */
   private readonly huntSent = new WeakMap<PlayerActor, string>();
+  /** The mission each player chose to track (#69), if any. */
+  private readonly tracked = new WeakMap<PlayerActor, string>();
 
   constructor(room: BodyRoom) {
     this.room = room;
@@ -177,6 +181,22 @@ export class QuestSystem implements RoomSystem {
     room.onMessage("title", z.object({ medalId: z.string().max(40).nullable() }), (c, m) => this.setTitle(c, m.medalId));
     room.onMessage("interact", z.object({ target: z.string().max(40), code: z.string().max(8).optional() }), (c, m) => this.interact(c, m.target, m.code));
     room.onMessage("questSync", z.object({}).passthrough().optional(), (c) => this.sync(c));
+    // The mission the player tracks (#69): the hunt pointer's targets follow it. Session-only (the
+    // client keeps the choice and sends it again after each join). Shares the quest-op budget: a
+    // throttled change is refused with `denied`, an accepted one acknowledged with `tracked`, so the
+    // client knows to retry its latest choice (review 2026-11-13 #3).
+    room.onMessage("track", z.object({ id: z.string().max(8).nullable() }), (c, m) => {
+      const a = this.room.playerById(c.sessionId);
+      if (!a) return;
+      const live = !a.dead && !a.superseded;
+      if (!this.allowOp(a)) {
+        if (live) c.send("denied", { action: "track", reason: "slow down" });
+        return;
+      }
+      if (m.id) this.tracked.set(a, m.id);
+      else this.tracked.delete(a);
+      c.send("tracked", { id: m.id });
+    });
     this.unsubs.push(onGameEvent(room, (e) => this.onEvent(e)));
     this.unsubs.push(onNpcEvent((e) => this.onNpcEvent(e)));
     this.unsubs.push(onHallChanged((lines) => this.room.broadcast("hall" as never, { lines } as never)));
@@ -446,6 +466,7 @@ export class QuestSystem implements RoomSystem {
     you.title = q.title;
     you.cosmeticsExtras = env.cosmeticsExtras;
     you.gleamVault = !!this.life(a).gleamVault;
+    you.sites = [...(this.life(a).sites ?? [])];
     you.worn = { ...(a.char.worn ?? {}) };
   }
 
@@ -472,6 +493,7 @@ export class QuestSystem implements RoomSystem {
       const q = this.qp(a);
       if (this.room.bodyDef.padLayout !== "none") this.touchPads(a, q);
       this.checkReach(a, q);
+      this.touchSites(a);
       this.trials.tickPlayer(a, now);
       if (a.dead) continue;
       this.eggs.tickPlayer(a, q, now);
@@ -505,7 +527,7 @@ export class QuestSystem implements RoomSystem {
    * client's mission pointer follows these (D-zones-2). Sent when the list changes.
    */
   private sendHuntTargets(a: PlayerActor) {
-    const m = trackedMission(a.char.missions, this.body);
+    const m = trackedMission(a.char.missions, this.body, this.tracked.get(a) ?? null);
     const def = m ? MISSION_BY_ID.get(m.id) : undefined;
     const hunt = !!m && !!def?.hunt && def.body === this.body;
     const ids: string[] = [];
@@ -724,6 +746,7 @@ export class QuestSystem implements RoomSystem {
     a.youDirty = true;
     this.toast(a, `Mission accepted: ${def.name} — ${def.objective}`, "info");
     this.room.saveActor(a);
+    emitGameEvent(this.room, { type: "missionAccepted", playerId: a.id, missionId: id });
   }
 
   activeMissions(a: PlayerActor): { m: CharacterMission; def: MissionDef }[] {
@@ -795,6 +818,30 @@ export class QuestSystem implements RoomSystem {
   }
 
   private readonly reachTargets = new Map<string, V3>();
+
+  /**
+   * Wild sites (content/wildSites.ts): feet within a site's footprint plus SITE_DISCOVER_MARGIN find
+   * it. The first time this life: the discovery XP, saved with the life flag in one transaction (a
+   * failed save leaves it unfound, to try again on the next tick), a toast and the journal line (you.sites).
+   */
+  private touchSites(a: PlayerActor) {
+    if (a.identity.loadtest || !this.room.terrain) return;
+    const p = actorPos(a);
+    const at = wildSiteAt(this.room.terrain, p[0], p[1], p[2], SITE_DISCOVER_MARGIN);
+    if (!at) return;
+    const life = this.life(a);
+    if (life.sites?.includes(at.site.id)) return;
+    const xp = siteDiscoveryXp(at.site);
+    let showXp = (): void => {};
+    const paid = this.grant(a, [], () => {
+      (life.sites ??= []).push(at.site.id);
+      showXp = this.room.addXp(a, xp);
+    });
+    if (!paid) return;
+    showXp();
+    this.toast(a, `Site discovered: ${at.site.name} · levels ${at.site.levels[0]}–${at.site.levels[1]} · +${xp} XP`, "xp");
+    emitGameEvent(this.room, { type: "siteDiscovered", playerId: a.id, site: at.site.id, xp });
+  }
 
   private checkReach(a: PlayerActor, q: QuestPlayer) {
     for (const { m, def } of this.activeMissions(a)) {

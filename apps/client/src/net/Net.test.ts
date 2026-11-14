@@ -150,3 +150,28 @@ describe("Net remotes: who was already there (review A1)", () => {
     await again.net.leave();
   });
 });
+
+describe("Net.flushInput (the swing's heading reaches the server first)", () => {
+  it("sends the frame's input the rate held back, before a message that reads the body's state", () => {
+    const sent: { type: string; msg: any }[] = [];
+    const net = new Net(stallingJoiner().joiner);
+    const room = { send: (type: string, msg: unknown) => void sent.push({ type, msg }) };
+    net.room = room as unknown as NonNullable<Net["room"]>;
+    const m = { x: 0, y: 1000, z: 0, fx: 0, fy: 0, fz: 1, anim: 0 };
+    net.sendInput(1000, m);
+    expect(sent.map((s) => s.type)).toEqual(["input"]);
+    // A turn 90° right 16 ms later: the 20 Hz rate holds the input back...
+    m.fx = -1;
+    m.fz = 0;
+    net.sendInput(1016, m);
+    expect(sent).toHaveLength(1);
+    // ...until the swing flushes it, so the server's melee arc uses the camera's heading.
+    net.flushInput(1016);
+    room.send("melee", { slot: 0, t: 0 });
+    expect(sent.map((s) => s.type)).toEqual(["input", "input", "melee"]);
+    expect(sent[1]!.msg).toMatchObject({ fx: -1, fz: 0, seq: 2 });
+    // Nothing held back: a flush sends nothing.
+    net.flushInput(1020);
+    expect(sent).toHaveLength(3);
+  });
+});

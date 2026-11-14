@@ -27,6 +27,18 @@ describe("missions panel (#3)", () => {
     uiSettings.reset();
   });
 
+  it("lights a running trial and spells it out, but only the player's choice is tracked (review #2)", () => {
+    panel.set([{ id: "t", title: "Swift Gleam", detail: "Rings before the clock", progress: "2/5", state: "open", trial: true }, ...LINES], "3 open");
+    const trial = panel.root.querySelector('[data-e2e="mission-row-t"]')!;
+    expect(trial.classList.contains("is-trial")).toBe(true);
+    expect(trial.classList.contains("is-tracked")).toBe(false);
+    expect(trial.textContent).toContain("Trial running");
+    expect(trial.textContent).toContain("Rings before the clock");
+    expect([...panel.root.querySelectorAll(".is-tracked")].map((r) => (r as HTMLElement).dataset.e2e)).toEqual(["mission-row-b"]);
+    header().click();
+    expect(header().textContent).toContain("Trial: Swift Gleam · 2/5");
+  });
+
   it("shows the missions, and hides with none", () => {
     expect(panel.root.hidden).toBe(true);
     panel.set(LINES, "2 open");

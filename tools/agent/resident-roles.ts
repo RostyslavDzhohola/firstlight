@@ -33,6 +33,8 @@ export interface ResidentStats {
   trials: number;
   /** Metres walked. */
   walked: number;
+  /** Lines said to people who talked to it or walked up (resident-talk.ts). */
+  lines: number;
 }
 
 export interface Resident {
@@ -51,6 +53,8 @@ export interface Resident {
   pause(ms: number): Promise<void>;
   /** 0..1, this resident's own sequence. */
   rng(): number;
+  /** It speaks its own greeting lines (resident-talk.ts): the phrase-wheel hello is left out. */
+  talks?: boolean;
 }
 
 /** A hunter's range: how far from its home pad it fights and roams (metres). Arcadia's Clover Fields start about 150 m out. */
@@ -114,6 +118,12 @@ export async function greet(r: Resident, o: Observation, greeted: Map<string, nu
   if (!p) return false;
   greeted.set(p.name, now);
   await r.agent.lookAt(p.id);
+  // A resident that talks greets in words (resident-talk.ts); it only turns to face them.
+  if (r.talks) {
+    r.stats.greetings++;
+    await r.pause(1200);
+    return true;
+  }
   const said = await r.agent.phrase("Truce?"); // the wheel's friendly hello
   if (said.ok) {
     r.stats.greetings++;

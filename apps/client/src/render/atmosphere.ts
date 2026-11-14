@@ -28,6 +28,8 @@ const col = (hex = 0xffffff) => uniform(new THREE.Color(hex));
 /** Shared atmosphere uniforms (one set per renderer). */
 /** Object layer drawn only into the sun's shadow map (layer 0 is everything the view camera draws). */
 export const SHADOW_ONLY_LAYER = 5;
+/** Sky bodies a sky can hold, moons included (SkyPlanets' instances; SunRig.sky.bodies). */
+export const SKY_BODY_SLOTS = 4;
 
 export const atmo = {
   up: uniform(new THREE.Vector3(0, 1, 0)).setGroup(renderGroup),
@@ -368,9 +370,17 @@ export class SunRig {
   /**
    * Where the sun and the key light are (local sky frame, radians). The environment (day/night
    * clock) writes these every frame; defaults are the body's reference sun. At night the key light
-   * is the moon (a bright sky planet), so the same DirectionalLight keeps the scene readable.
+   * is the moon (Lumen when it is up, else the highest sky planet), so the same DirectionalLight
+   * keeps the scene readable. `bodies`: where each of the look's sky planets is now and its size
+   * against the look's (#5: the environment moves them, SkyPlanets draws them there).
    */
-  readonly sky = { sunElev: 0.6, sunAz: 0.9, keyIsMoon: false, moonElev: 0.5, moonAz: 2.0 };
+  readonly sky = {
+    sunElev: 0.6, sunAz: 0.9, keyIsMoon: false, moonElev: 0.5, moonAz: 2.0,
+    bodies: Array.from({ length: SKY_BODY_SLOTS }, () => ({ elev: 0, az: 0, elong: 0, size: 1 })),
+  };
+  /** The night key's direction, eased like the sun's: it follows the moving bodies and doesn't jump when another one takes over. */
+  private readonly moonDir = new THREE.Vector3(0, 1, 0);
+  private moonSet = false;
 
   constructor(private readonly scene: THREE.Scene, look: BodyLook, private readonly renderer?: THREE.WebGPURenderer) {
     this.look = look;
@@ -408,6 +418,7 @@ export class SunRig {
     this.hemi.groundColor.setHex(look.hemiGround);
     this.hemi.intensity = look.hemiIntensity;
     this.initialised = false;
+    this.moonSet = false; // a new body: its night key starts where its sky puts it
   }
 
   applySettings(s: ResolvedSettings) {
@@ -489,9 +500,13 @@ export class SunRig {
     }
     atmo.sunDir.value.copy(this.sunDir);
     // Key light: the sun by day, the moon at night (switched while both are dim, at twilight).
+    const m = skyDir(up.x, up.y, up.z, this.sky.moonElev, this.sky.moonAz, this.tmp);
+    const moon = this.want.set(m[0], m[1], m[2]);
+    if (!this.moonSet) this.moonDir.copy(moon);
+    else this.moonDir.lerp(moon, 1 - Math.exp(-3 * dt)).normalize();
+    this.moonSet = true;
     if (this.sky.keyIsMoon) {
-      const m = skyDir(up.x, up.y, up.z, this.sky.moonElev, this.sky.moonAz, this.tmp);
-      this.keyDir.set(m[0], m[1], m[2]);
+      this.keyDir.copy(this.moonDir);
     } else {
       this.keyDir.copy(this.sunDir);
     }

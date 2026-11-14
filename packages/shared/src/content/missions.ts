@@ -6,7 +6,7 @@ import type { BodyId } from "../planet/bodies.ts";
 import type { InvItem } from "../net/protocol.ts";
 
 export type MissionType = "hunt" | "find" | "reach" | "race" | "defend" | "collect";
-export type MissionId = "A1" | "A2" | "A3" | "H1" | "H2" | "H3" | "M1" | "M2" | "M3" | "A4" | "H4" | "T1" | "T2" | "T3";
+export type MissionId = "A1" | "A2" | "A3" | "H1" | "H2" | "H3" | "M1" | "M2" | "M3" | "A4" | "H4" | "T1" | "T2" | "T3" | "L1";
 
 export interface HuntTarget {
   /** NPC def id as emitted in kill events by the NPC lane (e.g. "hopbit"). */
@@ -24,8 +24,12 @@ export interface MissionDef {
   objective: string;
   recLevel: [number, number];
   reward: { xp: number; coins: number; items: InvItem[] };
-  /** hunt: kills that count (by any credited player), optionally only inside a place. */
-  hunt?: { targets: HuntTarget[]; place?: string };
+  /**
+   * hunt: kills that count (by any credited player), optionally only inside a place. `site`: the wild
+   * site (content/wildSites.ts) the hunt leads to when none of its creatures is in view (L1: the
+   * Quietfall Wreck, where the Cratermaw nests); it doesn't limit which kills count.
+   */
+  hunt?: { targets: HuntTarget[]; place?: string; site?: string };
   /** find: interact with this world object (only visible while the mission is active). */
   find?: { object: string; itemName: string };
   /** reach: enter the trigger radius around a place. */
@@ -75,6 +79,7 @@ export const GUIDES: Record<Exclude<BodyId, "portus">, GuideDef> = {
   arcadia: { id: "guide_arcadia", body: "arcadia", name: "Lark", role: "a young shepherd", greeting: "Mind the lake. And the sheep. Mostly the lake." },
   hollowmere: { id: "guide_hollowmere", body: "hollowmere", name: "Sexton Mabry", role: "the chapel grave-keeper", greeting: "Every bell here rings for someone. Try not to make it you." },
   meridian: { id: "guide_meridian", body: "meridian", name: "Rook Calder", role: "an ex-Oversight courier", greeting: "Oversight runs this rock. I just run errands they'd rather I didn't." },
+  lumen: { id: "guide_lumen", body: "lumen", name: "Surveyor Odile", role: "a stranded moon surveyor", greeting: "Jump gently. Up here you come down slower than your mistakes." },
 };
 
 const items = (...l: [string, number][]): InvItem[] => l.map(([id, qty]) => ({ id, tier: 1, qty }));
@@ -215,6 +220,15 @@ export const MISSIONS: readonly MissionDef[] = [
     pitch: "The third gleam broke on Meridian's salt. Gather every shard before Oversight files them away.",
     routes: "The Glasspan Salt Flats: open ground, long sightlines, and patrols that notice you.",
   },
+  {
+    // Lumen (#6): Lark on Arcadia sends you up through the moon portal by Dawnpad.
+    id: "L1", body: "lumen", guide: "Lark", giver: "guide_arcadia", type: "hunt", name: "The Thing in the Wreck",
+    objective: "On Lumen, put down the Cratermaw in the Quietfall wreck and 4 Glimmerhops", recLevel: [6, 9],
+    reward: { xp: 650, coins: 110, items: items(["tonic_large", 1]) },
+    hunt: { targets: [{ npcKind: "cratermaw", count: 1, label: "Cratermaw" }, { npcKind: "glimmerhop", count: 4, label: "Glimmerhops" }], site: "quietfall_wreck" },
+    pitch: "See the moon? There's a hauler crashed up there, and something's nesting in it. The moon portal is right behind me.",
+    routes: "Through the moon portal by Dawnpad; on Lumen, follow the crater rims to the broken hauler.",
+  },
 ];
 
 export const MISSION_BY_ID: ReadonlyMap<string, MissionDef> = new Map(MISSIONS.map((m) => [m.id, m]));
@@ -277,9 +291,11 @@ export function huntCredit(def: MissionDef, counts: readonly number[] | undefine
 }
 
 /**
- * The mission the HUD tracker marks as tracked and the mission pointer follows: the first open one
- * given out on `body`, else the first open one anywhere.
+ * The mission the HUD tracker marks as tracked and the mission pointer follows: the one the player
+ * chose (`chosen`, #69) while it is still open, else the first open one given out on `body`, else
+ * the first open one anywhere.
  */
-export function trackedMission<T extends { id: string; done: boolean }>(missions: readonly T[], body: BodyId): T | null {
-  return missions.find((m) => !m.done && MISSION_BY_ID.get(m.id)?.body === body) ?? missions.find((m) => !m.done) ?? null;
+export function trackedMission<T extends { id: string; done: boolean }>(missions: readonly T[], body: BodyId, chosen: string | null = null): T | null {
+  const pick = chosen ? missions.find((m) => m.id === chosen && !m.done && MISSION_BY_ID.has(m.id)) : undefined;
+  return pick ?? missions.find((m) => !m.done && MISSION_BY_ID.get(m.id)?.body === body) ?? missions.find((m) => !m.done) ?? null;
 }

@@ -30,7 +30,7 @@ import type { FractureRequest, FractureResponse } from "./fracture.worker.ts";
 // ------------------------------------------------------------------------------------ material
 
 /** Fracture-face glow per body (the planet accent), kept well under the bloom threshold. */
-const ACCENT: Record<BodyId, number> = { portus: 0xffd8a8, arcadia: 0x36f9f6, hollowmere: 0x5effc8, meridian: 0x49e0e8 };
+const ACCENT: Record<BodyId, number> = { portus: 0xffd8a8, arcadia: 0x36f9f6, hollowmere: 0x5effc8, meridian: 0x49e0e8, lumen: 0xcfe0ff };
 const accent = uniform(new THREE.Color(ACCENT.arcadia));
 let material: THREE.MeshStandardNodeMaterial | null = null;
 

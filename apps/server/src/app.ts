@@ -6,7 +6,7 @@ import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { TokenVerifier } from "./auth/identity.ts";
-import { banKey, directRequestIp } from "./auth/ip.ts";
+import { banKey, directRequestIp, loopbackCaller } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { enterSandbox, isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
 import { identityCheck, storageRecovery, travelRedirect } from "./world/admission.ts";
@@ -21,6 +21,10 @@ import { BOT_BUDGET, BOT_SEAT_KEY, botBudget } from "./world/botBudget.ts";
 import { botSecretFromEnv, checkToolSecret, resetToolGuesses } from "./auth/loadtest.ts";
 import { createPlayGate, playBodyRefusal } from "./world/playGate.ts";
 import type { VerifyContext } from "./auth/identity.ts";
+import { createGateway, mountAgentApi, type Gateway, type GatewayOptions } from "./agents/gateway.ts";
+import { mountMcp } from "./agents/mcpHttp.ts";
+import { mountFunnelIngest } from "./ops/funnel.ts";
+import { expectVisit } from "./world/funnel.ts";
 
 export interface GameOptions {
   port: number;
@@ -38,9 +42,10 @@ export interface GameOptions {
   revalidate?: (userId: string, sessionId?: string) => string | null;
   /** Production: no loopback exemptions from per-address limits (D-security-3, D-security-4). */
   production?: boolean;
+  /** The hosted agent gateway (/mcp, /api/agent; D-agents-gw-1): how its seats sign in, or false for none. */
+  gateway?: Omit<GatewayOptions, "loopback"> | false;
 }
 
-const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
 
 /** /api/play limits (F12 S2): calls per 10 s and unused seats, per account and per address. */
 export const PLAY_LIMITS = {
@@ -116,6 +121,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     next();
   });
 
+  // The funnel's page endpoints read their own small bodies, so they go before the JSON parser (D-ship-6).
+  mountFunnelIngest(app);
   opts.mountBeforeJson?.(app);
   app.use(express.json({ limit: "32kb" }));
 
@@ -133,7 +140,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
 
   app.post("/api/play", async (req, res) => {
     // Before any verification (D-security-3): the request budgets, then the cheap field checks.
-    if (!playGate.admit(directRequestIp(req))) {
+    if (!playGate.admit(directRequestIp(req), loopbackCaller(req))) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
@@ -177,7 +184,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     // Per-address limits skip load-test bots and loopback (local development and in-process tests;
     // production requests always carry the edge's client address).
     // Production has no loopback exemption (D-security-4); addresses are keyed IPv6 per /64.
-    const perAddress = !identity.loadtest && !(!opts.production && ip !== null && LOOPBACK.has(ip));
+    const perAddress = !identity.loadtest && !(!opts.production && loopbackCaller(req));
     if (!identity.loadtest) {
       const key = ip ? banKey(ip) : "unknown";
       const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
@@ -276,6 +283,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
         opts.limits,
       );
       if (result.ok) pendingSeats.bind(claim, result.reservation.sessionId, result.reservation.roomId);
+      // The funnel (#85): the page's visit, so the room can record that this visit joined a world.
+      if (result.ok && !sandbox) expectVisit(result.reservation.sessionId, req.body.visit);
       else pendingSeats.release(claim);
       if (agent && !result.ok) releaseAgentSlot(identity.agentClaim);
       res.json(result);
@@ -300,12 +309,20 @@ export async function createGame(opts: GameOptions): Promise<Game> {
       const room = matchMaker.getLocalRoomById(r.roomId) as BodyRoom | undefined;
       const t = [...(room?.tickTimes ?? [])].sort((a, b) => a - b);
       const q = (p: number) => (t.length ? +t[Math.min(t.length - 1, Math.floor(t.length * p))]!.toFixed(2) : 0);
-      return { roomId: r.roomId, metadata: r.metadata, clients: r.clients, tickP50: q(0.5), tickP95: q(0.95), tickMax: q(1) };
+      return { roomId: r.roomId, metadata: r.metadata, clients: r.clients, tickP50: q(0.5), tickP95: q(0.95), tickP99: q(0.99), tickMax: q(1), npcs: room?.state.npcs.size ?? 0 };
     });
     const mem = process.memoryUsage();
     const cpu = process.cpuUsage();
     res.json({ rooms: stats, rssMB: Math.round(mem.rss / 1048576), heapMB: Math.round(mem.heapUsed / 1048576), cpuUserS: cpu.user / 1e6, cpuSystemS: cpu.system / 1e6, uptimeS: process.uptime() });
   });
+
+  // The agent gateway plays its seats through this very server, over loopback (its port is known once it listens).
+  let listening = opts.port;
+  const gateway: Gateway | null = opts.gateway === false ? null : createGateway({ ...opts.gateway, loopback: () => `http://127.0.0.1:${listening}` });
+  if (gateway) {
+    mountAgentApi(app, gateway, opts.allowedOrigins);
+    mountMcp(app, gateway, opts.allowedOrigins);
+  }
 
   opts.mountAfterJson?.(app);
 
@@ -317,6 +334,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   await gameServer.listen(opts.port);
   const address = httpServer.address();
   const port = typeof address === "object" && address ? address.port : opts.port;
+  listening = port;
 
   return {
     app,
@@ -324,6 +342,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     gameServer,
     port,
     async close() {
+      await gateway?.close();
       await gameServer.gracefullyShutdown(false).catch(() => {});
       await new Promise<void>((r) => httpServer.close(() => r()));
     },

@@ -1,14 +1,15 @@
 // Onboarding on Portus (SPEC §6.12; server: apps/server/src/world/onboarding.ts). Draws the three
-// training dummies, and when the server lists `you.onboarding` runs the tutorial HUD. Attacks near
-// the dummies go to the server as `train` messages; it counts the hits and pays the XP and the Spark
-// medal. Every other step (movement, then weapons, pick-up, map, phrase wheel, optional voice and
-// the walk to a portal) is checked here from the local player and pays nothing; the HUD stays up
-// after the payout until those are done or skipped. Skip: the HUD button (mouse free) or Esc → Skip
-// tutorial.
+// training dummies, and when the server lists `you.onboarding` runs the tutorial HUD. The attack
+// lesson is one left click (#68): the swing goes to the server as a `train` message, which knocks down
+// a dummy in reach and pays the tutorial's XP and the Spark medal. Every other step (movement, then
+// weapons, pick-up, map, phrase wheel, optional voice) is checked here from the local player and pays
+// nothing. It ends in the plaza: the end card's arrow and the compass point at the Arcadia portal
+// until the player leaves Portus. Skip: the HUD button (mouse free) or Esc → Skip tutorial.
 
 import * as THREE from "three/webgpu";
 import { BODIES, portalSpots, type PortalSpot } from "@firstlight/shared";
 import { ONBOARDING } from "@firstlight/shared/content/onboarding";
+import { GUIDES } from "@firstlight/shared/content/missions";
 import type { YouState } from "@firstlight/shared/net/protocol";
 import { WEAPONS, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { config, flags } from "../config.ts";
@@ -17,19 +18,21 @@ import { pauseExtras, type PauseExtra } from "../ui/menu.ts";
 import { OnboardingHud } from "../ui/onboarding.ts";
 import { Panel } from "../ui/panels.ts";
 import { MapPanel } from "../ui/map.ts";
+import { compassGuides, type CompassMarker } from "../social/compass.ts";
+import { bearingTo, type V3 } from "../social/compassMath.ts";
 import { saveReady, skipTutorialSub } from "../ui/saveOffer.ts";
 import { voice } from "../voice/index.ts";
-import { portalAt } from "../world/portalEntry.ts";
 import { TrainingDummies } from "../world/TrainingDummies.ts";
 import { DoneCardTimer } from "./doneCardTimer.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingProgress } from "./onboardingProgress.ts";
-import { dummyCalloutSub, dummyTargets, guideTargets, nextDummy } from "./onboardingTargets.ts";
-import type { StepId } from "./onboardingSteps.ts";
+import { dummyTargets, guideTargets, nextDummy, type GuideTarget } from "./onboardingTargets.ts";
+import { STEPS, type StepId } from "./onboardingSteps.ts";
+import { funnelStep } from "../net/beacon.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Time the end card stays up, counted only while the game is on screen and playable (doneCardTimer.ts). */
-const DONE_CARD_MS = 8000;
+const DONE_CARD_MS = 15000; // long enough to read where to go next (#68); the compass keeps pointing after
 /** How often the card's time is checked after this system is gone (the portal travel). */
 const LINGER_POLL_MS = 100;
 const NO_KEYS: ReadonlySet<string> = new Set();
@@ -60,14 +63,25 @@ export class OnboardingClient implements ClientSystem {
   private readonly portals: PortalSpot[];
   private readonly lastPos = new THREE.Vector3();
   private hasLast = false;
-  private lastTrainAt = 0;
+  private lastTrainAt = -Infinity;
+  /** Where the card's arrow and the compass point now (the nearest dummy, or the Arcadia portal after the end). */
+  private way: { label: string; at: V3 } | null = null;
+  /** The Arcadia portal's centre: where the tutorial sends you next. */
+  private readonly next: V3 | null;
   /** CombatClient hook: the tutorial's tips or its last card are up (the "Progress not saved" toast waits). */
   private readonly busy = () => this.active || !!this.hud;
   /** The card's current step (updated every frame while the tutorial runs). */
   private step: StepId | undefined = undefined;
   private readonly onDummyStep = () => this.active && this.step === "attack";
-  /** Map and minimap: the dummies still standing during the dummy step (#31). */
-  private readonly targets = () => (this.active ? dummyTargets(this.step, this.dummies.dummies.map((d) => d.down)) : []);
+  /** Map and minimap: the dummies still standing during the attack step (#31), then the Arcadia portal. */
+  private readonly targets = (): GuideTarget[] => {
+    if (this.active) return dummyTargets(this.step, this.dummies.dummies.map((d) => d.down));
+    if (!this.ended || !this.next) return [];
+    const l = Math.hypot(this.next[0], this.next[1], this.next[2]) || 1;
+    return [{ id: "next:arcadia", dir: [this.next[0] / l, this.next[1] / l, this.next[2] / l], label: "Arcadia portal" }];
+  };
+  /** The compass carries the card's way (#68, #70). */
+  private readonly compassGuide = (): CompassMarker[] => (this.way ? [{ key: "tutorial", label: this.way.label, colour: "var(--photon)", pos: this.way.at, kind: "guide" }] : []);
   /** The world is on screen and the player can act: no loading screen, pause menu, panel, photo mode or hidden tab. */
   private readonly playable = () => {
     const g = this.game;
@@ -89,6 +103,8 @@ export class OnboardingClient implements ClientSystem {
     this.doneTimer = new DoneCardTimer({ durationMs: DONE_CARD_MS, now: () => performance.now(), visible: this.playable });
     this.dummies = new TrainingDummies(game.ctx.scene, game.planet.terrain);
     this.portals = portalSpots(BODIES[ONBOARDING.BODY], game.planet.terrain);
+    const arcadia = this.portals.find((x) => x.to === "arcadia");
+    this.next = arcadia ? [arcadia.center[0], arcadia.center[1], arcadia.center[2]] : null;
     const room = game.net.room!;
     // Game.enterBody waits for our schema player before creating the body systems.
     const userId = (room.state as any).players?.get(room.sessionId)?.userId ?? "";
@@ -113,6 +129,7 @@ export class OnboardingClient implements ClientSystem {
     game.combat.tutorialBusy = this.busy;
     game.combat.dummyStep = this.onDummyStep;
     guideTargets.current = this.targets;
+    compassGuides.add(this.compassGuide);
     pauseExtras.add(this.pauseRow);
   }
 
@@ -168,7 +185,6 @@ export class OnboardingClient implements ClientSystem {
     if (m.state === "done") {
       this.paid = true;
       this.xpPaid = m.xp;
-      for (let i = 0; i < this.dummies.dummies.length; i++) this.dummies.setDown(i, true);
       if (!this.active) this.finish();
       return;
     }
@@ -176,21 +192,28 @@ export class OnboardingClient implements ClientSystem {
     this.finish();
   }
 
-  /** CombatClient hook: an attack inside the safe zone. True when the dummies took it. */
+  /** Send the attack lesson's swing along the camera ray (the server judges what it reaches). */
+  private sendTrain(now: number) {
+    this.lastTrainAt = now;
+    const cam = this.game.ctx.camera;
+    const o = cam.getWorldPosition(_a);
+    const d = cam.getWorldDirection(_b);
+    this.game.net.room?.send("train", { ox: o.x, oy: o.y, oz: o.z, dx: d.x, dy: d.y, dz: d.z });
+  }
+
+  /** CombatClient hook: an attack inside the safe zone (anywhere in town, #68). True when training took it. */
   attack(def: WeaponDef, tier: TierStats, now: number): boolean {
     if (!this.active || this.paid) return false; // after the payout the server takes no more training hits
     if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none") return false;
     const g = this.game;
     const me = g.player.pos;
-    if (!this.dummies.dummies.some((d) => d.pos.distanceTo(me) < ONBOARDING.NEAR_M)) return false;
     const semi = def.delivery !== "hitscan" || def.id === "stillshot";
     if (semi && !g.input.lmbPressed) return true;
     if (now - this.lastTrainAt < tier.rate * 1000) return true;
-    this.lastTrainAt = now;
+    this.sendTrain(now);
     const cam = g.ctx.camera;
     const o = cam.getWorldPosition(new THREE.Vector3());
     const d = cam.getWorldDirection(new THREE.Vector3());
-    g.net.room?.send("train", { ox: o.x, oy: o.y, oz: o.z, dx: d.x, dy: d.y, dz: d.z });
     // The same local feedback as a real attack (the server's `train` reply adds the hit marker).
     const color = weaponColor(WEAPONS.indexOf(def));
     g.self?.trigger("attack");
@@ -224,6 +247,7 @@ export class OnboardingClient implements ClientSystem {
     this.dummies.update(dt);
     const g = this.game;
     if (this.hud && this.doneTimer.running && this.doneTimer.tick()) this.closeHud();
+    this.pointTheWay();
     if (!this.receivedYou) return;
     const steps = this.progress.steps;
     const ob = this.onboarding;
@@ -240,55 +264,64 @@ export class OnboardingClient implements ClientSystem {
     this.hasLast = true;
     const playing = g.input.inPlay && !g.photo?.active && !Panel.current;
     if (playing && g.input.pressed.has("KeyT")) this.hud.toggleChecklist();
+    // The attack lesson takes any left click (#68). In town CombatClient hands swings to `attack`; out
+    // of town, or with a support item in hand, the click still goes to the server as the lesson's swing.
+    if (playing && !this.paid && this.step === "attack" && g.input.lmbPressed && now - this.lastTrainAt > 250) this.sendTrain(now);
     const look = playing ? (Math.abs(g.input.mouseDX) + Math.abs(g.input.mouseDY)) * g.input.sensitivity + Math.abs(g.input.lookYaw) + Math.abs(g.input.lookPitch) : 0;
     const completed = steps.observe({
       dt,
       moved: playing ? moved : 0,
       lookRad: look,
       anim: g.player.anim,
-      dummiesDown: down,
+      trained: this.paid,
       // Keys as the game saw them this frame (E opens a panel at once, so no panel check here).
       pressed: g.photo?.active ? NO_KEYS : g.input.pressed,
       mapOpen: Panel.current instanceof MapPanel,
       phrased: this.phrased,
       voiceOn: !!voice()?.optedIn,
-      inPortal: !!portalAt(this.portals, p.x, p.y, p.z),
+      inPortal: false, // no portal step since #68
     });
     if (completed.length) this.progress.save();
+    // The funnel (#85): each step the first time this browser does it, with its place in this build's tutorial.
+    for (const id of completed) funnelStep(`tutorial:${id}`, STEPS.findIndex((s) => s.id === id));
     this.phrased = false;
-    if (completed.length && completed[0] !== "attack") g.audio.play("ui");
+    if (completed.length) g.audio.play("ui");
     if (steps.allDone) {
-      this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP, !steps.movedOn("portal"));
+      funnelStep("tutorial_done");
+      this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP);
       this.doneTimer.start();
       this.finish();
+      this.pointTheWay();
       return;
     }
     this.hud.render(steps, this.paid);
+    this.step = steps.current?.id;
+  }
 
-    // Point at the dummies, then at the Arcadia portal, while that's the step on the card.
-    const step = steps.current?.id;
-    this.step = step;
-    let at: THREE.Vector3 | null = null;
-    let title = "";
-    let sub = "";
-    if (step === "attack") {
-      // The nearest dummy still standing; none left, no marker (Codex review: it always aimed at #1).
+  /**
+   * The way (#68): during the attack lesson, the nearest standing dummy when one is near enough to
+   * walk to (a swing anywhere counts, so it's a suggestion); once the tutorial is over, the Arcadia
+   * portal, until the player leaves Portus. One target, shown as the card's arrow and on the compass.
+   */
+  private pointTheWay() {
+    const g = this.game;
+    const p = g.player.pos;
+    let way: { label: string; at: V3 } | null = null;
+    if (this.active && this.step === "attack" && !this.paid) {
       const next = nextDummy(this.dummies.dummies.map((d) => d.down), [p.x, p.y, p.z]);
-      at = next === null ? null : this.dummies.chest(next, _a).addScaledVector(_b.copy(_a).normalize(), 0.9);
-      title = `Training dummies · ${down} / 3 down`;
-      sub = dummyCalloutSub(at ? at.distanceTo(p) : 0);
-    } else if (step === "portal") {
-      const spot = this.portals.find((x) => x.to === "arcadia");
-      if (spot) at = _a.set(spot.center[0], spot.center[1], spot.center[2]);
-      title = "Arcadia";
-      sub = "Levels 1–7 · walk in";
-    }
-    // Off screen or behind the camera it's pinned to the screen edge with an arrow (wayfinding). The
-    // dummies are pointed at from any distance: a player who wandered off is pointed back (#31).
-    this.hud.setCallout(at && (step === "attack" || at.distanceTo(p) < 80) ? at.project(g.ctx.camera) : null, title, sub);
+      const at = next === null ? null : this.dummies.chest(next, _a);
+      if (at && at.distanceTo(p) < ONBOARDING.NEAR_M) way = { label: "Training dummy", at: [at.x, at.y, at.z] };
+    } else if (this.ended && this.next) way = { label: "Arcadia portal", at: this.next };
+    this.way = way;
+    if (!this.hud) return;
+    if (!way) return this.hud.setWay(null);
+    const f = g.player.camForward;
+    const me: V3 = [p.x, p.y, p.z];
+    this.hud.setWay({ label: way.label, deg: bearingTo(me, [f.x, f.y, f.z], way.at), metres: Math.hypot(way.at[0] - p.x, way.at[1] - p.y, way.at[2] - p.z) });
   }
 
   dispose() {
+    compassGuides.delete(this.compassGuide);
     this.progress.save();
     pauseExtras.delete(this.pauseRow);
     if (this.game.combat.training) this.game.combat.training = null;
@@ -299,7 +332,13 @@ export class OnboardingClient implements ClientSystem {
     const hud = this.hud;
     if (hud && this.doneTimer.running) {
       const timer = this.doneTimer;
+      let told = false;
       const poll = setInterval(() => {
+        const body = this.game.bodyId;
+        if (!told && body !== ONBOARDING.BODY && body in GUIDES && this.playable()) {
+          told = true;
+          hud.arrived(BODIES[body].name, GUIDES[body as keyof typeof GUIDES].name);
+        }
         if (!timer.tick()) return;
         clearInterval(poll);
         hud.dispose();

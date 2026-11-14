@@ -4,7 +4,7 @@
 
 import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { BODIES, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
+import { BODIES, BODY_IDS, bodyGravity, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
@@ -17,6 +17,7 @@ import type { Identity } from "../auth/identity.ts";
 import { actorPos, adminSwitch, inSaddle, pushHistory, staleAfterServerMove, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
+import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 import { releaseAgentSlot, useAgentSeat } from "./agents.ts";
@@ -330,7 +331,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
     // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
     const listPiles = !options.loadtest;
-    if (listPiles) for (const p of pileStore.current.list(options.body)) this.addPileToState(p);
+    // A pile a solid added since it was left (a wild site's hull or tower: review 2026-11-13 world
+    // sites, finding 2) moves out to clear ground, saved, before anyone sees it.
+    if (listPiles) for (const p of pileStore.current.list(options.body)) this.addPileToState(this.unburyPile(p));
     this.portals = portalSpots(this.bodyDef, this.terrain);
     this.unsubscribePiles = onPileEvent((e) => {
       if (!listPiles) return;
@@ -374,7 +377,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       a.chargeStartedAt = on ? Date.now() : 0;
       a.chargeItem = on ? (a.char.hotbar[a.char.selected] ?? null) : null;
     });
-    this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
+    this.onMessage("travel", z.object({ to: z.enum(BODY_IDS as unknown as [BodyId, ...BodyId[]]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
       if (!a || (m.on && inSaddle(a, Date.now()))) return;
@@ -486,7 +489,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     void legacy;
     characterRepo.current.ensure?.(auth.userId);
     char ??= characterRepo.current.load(auth.userId);
-    if (!char) char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
+    let charCreated = false;
+    if (!char) {
+      char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
+      charCreated = true;
+    }
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
@@ -544,13 +551,14 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       diedAt: 0,
       lastDamagedBy: null,
       youDirty: true,
-      ...motionFields(Math.hypot(p.x, p.y, p.z), now),
+      ...motionFields(Math.hypot(p.x, p.y, p.z), now, bodyGravity(this.bodyDef)),
       chargeStartedAt: 0,
       chargeItem: null,
       specialReadyAt: 0,
       lastPhraseAt: 0,
       healAcc: 0,
       ...(this.sandbox ? { sandbox: this.sandbox } : {}),
+      ...(charCreated ? { charCreated: true } : {}),
     };
     if (old) {
       const carried = a as unknown as Record<string, unknown>, from = old as unknown as Record<string, unknown>;
@@ -785,7 +793,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     } else {
       if (a.airborne && !swimmingOk && !flying) {
         const drop = a.peakRadius - (R + ground);
-        const frac = fallDamageFraction(drop);
+        const frac = fallDamageFraction(drop, bodyGravity(this.bodyDef));
         if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
       }
       a.airborne = false;
@@ -1012,7 +1020,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    */
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData | null {
     if (owner.identity.loadtest || this.metadata?.loadtest) return null;
-    const g = this.snapToGround(at);
+    // On the ground under `at`: under a lookout or a wall top that is inside the solid, so out to clear ground.
+    const under = this.snapToGround(at);
+    const g = this.pileOutOfSolids(under) ?? under;
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
       x: g[0],
@@ -1035,6 +1045,28 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     return pile;
   }
 
+  /**
+   * Where a pile on the ground at `g` must go, or null if it can stay: inside a structure or a
+   * natural solid (a wreck's hull, a tower's core, a boulder: hidden, and maybe beyond pickup reach
+   * of anywhere a player stands), the nearest clear ground, found the way a player is placed
+   * (clearOfStructures). A pile merely beside a wall or a tree stays put.
+   */
+  private pileOutOfSolids(g: V3): V3 | null {
+    const step = PLAYER_BODY.step;
+    if (!this.structures?.footing(g[0], g[1], g[2], step).inside && !this.nature.footing(g[0], g[1], g[2], step).inside) return null;
+    return this.clearOfStructures(g);
+  }
+
+  /** `p` moved out of a solid it lies in (pileOutOfSolids) and the move saved; else `p`. */
+  private unburyPile(p: PileData): PileData {
+    const q = this.pileOutOfSolids([p.x, p.y, p.z]);
+    if (!q) return p;
+    const moved = pileStore.current.move(p.id, q[0], q[1], q[2]);
+    if (!moved) return p;
+    emitPileEvent({ kind: "update", pile: moved }); // the body's other copy, if it is up
+    return moved;
+  }
+
   private addPileToState(p: PileData) {
     this.piles.set(p.id, p);
     const s = new PileState();
@@ -1052,6 +1084,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.piles.set(p.id, p);
     const s = this.state.piles.get(p.id);
     if (!s) return this.addPileToState(p);
+    s.x = p.x; // moved out of a solid (unburyPile)
+    s.y = p.y;
+    s.z = p.z;
     s.items = Math.min(255, p.items.length);
     s.coins = p.coins;
   }
@@ -1384,7 +1419,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (heightAboveSupport(a, this.moveWorld) > MOVE.groundedAbove) return;
     // Landed.
     const len = Math.hypot(a.state.x, a.state.y, a.state.z);
-    const frac = fallDamageFraction(a.peakRadius - len);
+    const frac = fallDamageFraction(a.peakRadius - len, bodyGravity(this.bodyDef));
     a.airborne = false;
     a.peakRadius = len;
     groundMotion(a, len, now);

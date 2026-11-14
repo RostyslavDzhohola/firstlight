@@ -33,7 +33,6 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 /** The bridge's request handler (exported for the tests). */
 export function bridge(session: Session, onQuit: () => void = () => {}) {
-  let chain: Promise<unknown> = Promise.resolve();
   return async (req: IncomingMessage, res: ServerResponse) => {
     const send = (status: number, body: unknown) => {
       const text = JSON.stringify(body);
@@ -69,11 +68,16 @@ export function bridge(session: Session, onQuit: () => void = () => {}) {
           return send(400, { ok: false, reason: "bad arguments", hint: "the body must be JSON" });
         }
       }
-      // One action at a time, in order; stop jumps the queue to interrupt a walk or a fight.
-      const call = () => callTool(session, name, args);
-      const result = name === "firstlight_stop" ? call() : (chain = chain.then(call, call));
-      const r = (await result) as Record<string, unknown>;
-      return send(r.reason === "unknown tool" ? 404 : 200, r);
+      // One action at a time, in order; stop jumps the queue to interrupt a walk or a fight. A caller
+      // that hangs up takes its call with it: out of the queue if it waits, stopped if it runs.
+      const hangUp = new AbortController();
+      res.on("close", () => {
+        if (!res.writableEnded) hangUp.abort();
+      });
+      const r = await session.call(name, args, { signal: hangUp.signal });
+      if (hangUp.signal.aborted) return;
+      if (r.reason === "queue full") res.setHeader("Retry-After", "2");
+      return send(r.reason === "unknown tool" ? 404 : r.reason === "queue full" ? 429 : 200, r);
     } catch (e) {
       return send(500, { ok: false, reason: "error", hint: (e as Error).message });
     }

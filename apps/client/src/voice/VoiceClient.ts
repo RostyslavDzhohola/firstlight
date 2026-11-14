@@ -10,6 +10,7 @@ import type { Room } from "@colyseus/sdk";
 import { PF } from "@firstlight/shared/net/schema";
 import { filterIceServers, type VoiceServerMessages } from "@firstlight/shared/net/voice";
 import type { Game } from "../game/Game.ts";
+import { HOTKEYS } from "../game/keys.ts";
 import type { ClientSystem } from "../game/systems.ts";
 import { isBlocked, isMuted, isMutedLocally, onSocialChange, setMuted } from "../social/store.ts";
 import { VoiceAudio } from "./audio.ts";
@@ -129,7 +130,7 @@ export class VoiceClient {
     this.requestMic().then(
       (s) => {
         this.setMic(s);
-        this.game.hud.toast("Microphone ready — hold V to talk", "info");
+        this.game.hud.toast("Microphone ready — hold K to talk", "info");
         this.ui.refresh();
       },
       () => {
@@ -144,7 +145,7 @@ export class VoiceClient {
     this.optedIn = true;
     localStorage.setItem(LS.optIn, "1");
     this.room?.sendEnable();
-    this.game.hud.toast(this.micState === "live" ? "Voice on — hold V to talk" : "Voice on — listening only (no microphone)", "info");
+    this.game.hud.toast(this.micState === "live" ? "Voice on — hold K to talk" : "Voice on — listening only (no microphone)", "info");
     this.ui.refresh();
   }
 
@@ -379,7 +380,7 @@ export class VoiceRoom implements ClientSystem {
       "radio:tune/channel full": "That channel is full (8 radios max)",
       "radio:tx/no radio": "You need a radio to talk on B (Portus, 100 coins)",
       "radio:tx/not tuned": "Pick a radio channel first (Esc → Voice & radio)",
-      "radio:tx/voice off": "Turn voice on first (press V)",
+      "radio:tx/voice off": "Turn voice on first (press K)",
       "radio:tx/muted": "A moderator muted your voice",
       "radio:tx/timeout": "Radio released after 60 s — press B again",
       "voice:enable/age": "Voice needs the 16+ confirmation",
@@ -439,9 +440,10 @@ export class VoiceRoom implements ClientSystem {
   private keys(me: any): void {
     const vc = this.vc;
     const input = this.game.input;
-    // Typing in a field counts as both talk keys released (never stay on air).
-    const typing = this.typing();
-    const vPressed = !typing && input.pressed.has("KeyV");
+    // Typing in a field counts as both talk keys released (never stay on air), and so does photo mode:
+    // its K steps the time of day and must never open the microphone (review finding 2, D-fix-view-2).
+    const typing = this.typing() || !!this.game.photo?.active;
+    const vPressed = !typing && input.pressed.has(HOTKEYS.pushToTalk.code);
     if (vPressed && !vc.enabled) {
       if (vc.optedIn) void vc.enableFromGesture();
       else vc.ui.openPanel();
@@ -450,12 +452,12 @@ export class VoiceRoom implements ClientSystem {
     if (vPressed && vc.enabled && vc.micState !== "live") this.game.hud.toast("No microphone — listening only (Esc → Voice & radio to retry)", "warn");
     const wasPtt = vc.ptt;
     const wasRadio = vc.radioTx;
-    vc.ptt = canTalk && !typing && input.down("KeyV");
+    vc.ptt = canTalk && !typing && input.down(HOTKEYS.pushToTalk.code);
 
     const b = !typing && input.down("KeyB");
     if (b && !this.bHeld) {
       this.txDenied = false;
-      if (!vc.enabled) this.game.hud.toast("Turn voice on first (press V)", "warn");
+      if (!vc.enabled) this.game.hud.toast("Turn voice on first (press K)", "warn");
       else if (!vc.hasRadio()) this.game.hud.toast("You need a radio to talk on B (Portus, 100 coins)", "warn");
       else if (!me.radioCh) this.game.hud.toast("Pick a radio channel first (Esc → Voice & radio)", "warn");
       else if (canTalk) {

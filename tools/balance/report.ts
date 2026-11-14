@@ -8,9 +8,10 @@ import { maxHp } from "../../packages/shared/src/content/progression.ts";
 import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
-  affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
-  SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
+  affordability, bossRows, COMBAT_FAMILIES, siteVisits, SITE_TRIP_S, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
+  encounterGaps, regenSafety, SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
 } from "./model.ts";
+import { REGEN } from "../../packages/shared/src/content/progression.ts";
 
 const args = new Set(process.argv.slice(2));
 const f = (x: number, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : "∞");
@@ -29,7 +30,7 @@ const all = checks();
 const failed = all.filter((c) => !c.ok);
 
 if (args.has("--json")) {
-  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), progression: progression(), shop: affordability(), starters: starterRoles(), spells: spellRows(), spellPeaks: spellPeaks(), checks: all }, null, 2));
+  console.log(JSON.stringify({ weapons: weaponTable(), pvp: COMBAT_FAMILIES.flatMap((fam) => PVP_LEVELS.map((l) => pvpCell(fam, l))), creatures: creatureRows(), bosses: bossRows(), sites: siteVisits(), progression: progression(), shop: affordability(), starters: starterRoles(), spells: spellRows(), spellPeaks: spellPeaks(), checks: all }, null, 2));
 } else if (!args.has("--failures")) {
   console.log("# FIRSTLIGHT balance report (tools/balance; D-balance-1)");
   table("Weapon DPS at the tier's gate level (sustained: 60 s with reloads, heat and cooldowns; burst: first 3 s with headshots)",
@@ -52,8 +53,23 @@ if (args.has("--json")) {
     ["Creature", "Tier", "Lv", "HP", "TTK min", "TTK med", "TTK max", "Kills player", "Pack", "Margin"],
     creatureRows().map((r) => [r.name, r.tier, r.enemyLevel, r.hp, f(r.ttkMin), f(r.ttkMedian), f(r.ttkMax), f(r.killsPlayerS, 1), r.packSize, f(r.margin)]));
   table("Bosses: two on-level players, median starter weapon, 70% uptime", ["Boss", "Lv", "HP₂", "Kill (min)"], bossRows().map((b) => [b.id, b.level, b.hp2, f(b.killMin, 1)]));
+  const rg = regenSafety();
+  table(`Out-of-combat regeneration (#77): ${REGEN.PER_SEC * 100}% of max HP a second after ${REGEN.DELAY_S} s without damage taken or dealt`, ["Number", "Value", "Must be"], [
+    ["Longest pause between a hostile creature's attacks", `${f(rg.creatureGapS)} s (${rg.creatureGapId})`, `< ${REGEN.DELAY_S} s`],
+    ["Slowest starter weapon's time between attacks", `${f(rg.starterSwingS)} s`, `< ${REGEN.DELAY_S} s`],
+    ["0 to full health", `${f(rg.fullS, 0)} s`, "≥ 60 s"],
+    ["HP it would add while the quickest regular kills an idle player (if it ran)", `${f(rg.regenInFightShare * 100, 0)}% of max`, "never runs in a fight"],
+    ...encounterGaps().map((e) => [
+      `Longest pause in ${e.kind} ${e.id} (${e.where})`,
+      `${f(e.gapS)} s`,
+      e.kind === "race" || e.kind === "collect" ? "no encounter" : REGEN.PAUSED_IN.includes(e.kind) ? "regen held for the encounter" : `< ${REGEN.DELAY_S} s`,
+    ]),
+  ]);
+  table(`Wild sites on the route (content §3.7): done once at the band's lower level; fight = the guardian and its pack one after another, + ${SITE_TRIP_S} s for the trip`,
+    ["Site", "Done at L", "Discovery XP", "Fight XP", "Coins (chest + kills)", "Minutes"],
+    siteVisits().map((v) => [v.id, v.level, v.discoveryXp, v.fightXp, v.coins, f(v.minutes, 1)]));
   const prog = progression();
-  table("Progression along the intended route (20 s between kills; missions credited at their usual level)",
+  table("Progression along the intended route (20 s between kills; missions and wild sites credited at their usual level)",
     ["Level", "Area", "XP/min", "Coins/min", "Minutes", "Reached at", "Coins at start"],
     prog.map((r) => [r.level, r.area, f(r.xpPerMin, 0), f(r.coinsPerMin, 1), f(r.minutes, 1), f(r.reachedAt, 1), Math.round(r.coinsAtStart)]));
   table("Shop: first level a one-life purse covers the price (T3 after buying the T2 and ~100 of tonics)", ["Item", "Price", "Gate", "Affordable at"], affordability(prog).map((a) => [a.item, a.price, a.gate, a.affordableAt]));

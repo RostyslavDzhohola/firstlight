@@ -14,6 +14,7 @@ import { formatDamage, isLowHp, parsePrompt, shownItem, slotView, type DamageKin
 import { installSprites, portraitSprite } from "./sprites.ts";
 import { uiSettings, type UiSettings } from "./uiSettings.ts";
 import { MissionsPanel, type MissionsMore } from "./missionsPanel.ts";
+import { rmbAction } from "../game/rmbAction.ts";
 import { showSubtitle } from "./subtitle.ts";
 import { showCharacterPick, type CharacterChoice, type CharacterPickOptions } from "./characterPick.ts";
 import { showDeath, type DeathInfo } from "./death.ts";
@@ -65,6 +66,10 @@ export interface MissionLine {
   /** Right column: "3/8", "380 m", "Done". */
   progress: string;
   state?: "open" | "tracked" | "done";
+  /** The running trial's mission: listed first and in full, but "tracked" stays the player's choice. */
+  trial?: boolean;
+  /** The mission's colour (#86: the same on its compass marker and its objects in the world). */
+  colour?: string;
 }
 
 export interface ToastOptions {
@@ -272,6 +277,10 @@ export class Hud {
     this.xpVal = el("span", "v num", xp, "0 / 0");
   }
 
+  private rmb!: HTMLElement;
+  private rmbText!: HTMLElement;
+  private rmbLast: string | null = "";
+
   private buildHotbar() {
     const bar = el("div", "fl-hotbar", this.hotbarWrap);
     bar.setAttribute("role", "toolbar");
@@ -295,6 +304,12 @@ export class Hud {
     el("span", "fl-key", r, "R");
     r.append("Reload");
     this.ammo.hidden = true;
+    // #76: what the right mouse does with the item in hand, under its name.
+    this.rmb = el("div", "fl-rmb", bar);
+    this.rmb.dataset.e2e = "hotbar-rmb";
+    el("span", "fl-key", this.rmb, "RMB");
+    this.rmbText = el("span", "", this.rmb);
+    this.rmb.hidden = true;
     this.spellSlot = el("div", "fl-hud__spells", this.hotbarWrap);
   }
 
@@ -358,6 +373,14 @@ export class Hud {
     const sel = selectedView as SlotView | null;
     const wname = sel?.name ?? "Fists";
     if (wname !== c.wname) this.wname.textContent = c.wname = wname;
+    const held = shownItem(you.hotbar[you.selected]);
+    const hdef = held ? WEAPON_BY_ID.get(held.id) : WEAPON_BY_ID.get("fists");
+    const rmb = rmbAction(hdef, hdef?.tiers[(held?.tier ?? 1) - 1]);
+    if (rmb !== this.rmbLast) {
+      this.rmbLast = rmb;
+      this.rmb.hidden = !rmb;
+      this.rmbText.textContent = rmb ?? "";
+    }
     const ammo = sel?.ammo ? `${sel.ammo.cur}/${sel.ammo.max}` : "";
     if (ammo !== c.ammo) {
       c.ammo = ammo;
@@ -392,6 +415,11 @@ export class Hud {
   }
 
   /** Name and look shown on the player card (from the room state; cheap to call every frame). */
+  /** The character's starter (STARTERS index), for numbers that depend on it (spell power, #79). */
+  get starterIndex(): number {
+    return this.starter;
+  }
+
   setIdentity(name: string, starter: number, palette: number, look = 0) {
     const key = `${name}|${starter}|${palette}|${look}`;
     if (key === this.c.identity) return;
@@ -552,7 +580,7 @@ export class Hud {
   }
 
   /** Speech bubble at screen (x, y) for 3 s. Phrase-wheel lines get their icon. */
-  bubble(x: number, y: number, text: string, opts: { name?: string; slot?: 1 | 2 | 3 | 4 } = {}): HTMLElement {
+  bubble(x: number, y: number, text: string, opts: { name?: string; slot?: 1 | 2 | 3 | 4; ms?: number } = {}): HTMLElement {
     const b = el("div", `fl-bubble${opts.slot ? " is-party" : ""}`, this.world);
     if (opts.slot) b.style.setProperty("--c", `var(--party-${opts.slot})`);
     b.style.setProperty("--x", `${Math.round(x)}px`);
@@ -567,7 +595,7 @@ export class Hud {
       if (opts.slot) el("span", "fl-pip", n, String(opts.slot));
       n.append(opts.name);
     }
-    window.setTimeout(() => b.remove(), 3000);
+    window.setTimeout(() => b.remove(), opts.ms ?? 3000);
     return b;
   }
 

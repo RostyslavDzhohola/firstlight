@@ -3,11 +3,11 @@
 // number that left its band; `pnpm balance` exits non-zero on any.
 
 import { STARTERS } from "../../packages/shared/src/content/weapons.ts";
-import { maxHp } from "../../packages/shared/src/content/progression.ts";
+import { maxHp, REGEN } from "../../packages/shared/src/content/progression.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
-  pvpCell, PVP_LEVELS, roleLeaders, spellPeaks, weaponTable, type Family,
+  encounterGaps, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, type Family,
 } from "./model.ts";
 import { WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
@@ -121,6 +121,19 @@ export function checks(): Check[] {
     add({ id: `boss.${b.id}`, what: `${b.id} two-player kill (min)`, value: fmt(b.killMin, 1), band: `${BOSS_MIN[0]}–${BOSS_MIN[1]}`, ok: inBand(b.killMin, ...BOSS_MIN), source: "content §4 (4.7 / 5.2 / 5.8 min modelled)" });
   }
 
+  // --- out-of-combat regeneration (#77): it never runs inside a fight
+  const rg = regenSafety();
+  add({ id: "regen.creatureGap", what: `Longest pause between a hostile creature's attacks (${rg.creatureGapId})`, value: fmt(rg.creatureGapS), band: `< ${REGEN.DELAY_S} s (regen's delay)`, ok: rg.creatureGapS < REGEN.DELAY_S, source: "#77 (regen can't out-heal a fight)" });
+  add({ id: "regen.starterSwing", what: "Slowest starter weapon's time between attacks", value: fmt(rg.starterSwingS), band: `< ${REGEN.DELAY_S} s (regen's delay)`, ok: rg.starterSwingS < REGEN.DELAY_S, source: "#77 (a fighting player keeps the tag up)" });
+  add({ id: "regen.full", what: "Regeneration from 0 to full health (s)", value: fmt(rg.fullS, 0), band: "≥ 60 s (slower than a tonic)", ok: rg.fullS >= 60, source: "#77 (very slow self-healing)" });
+  // Bosses and trials (review 2026-11-13: not established there): an encounter whose own pauses reach
+  // the delay must be one the server holds regeneration for (REGEN.PAUSED_IN, D-fixplay-2).
+  for (const e of encounterGaps()) {
+    if (e.kind === "race" || e.kind === "collect") continue;
+    const paused = REGEN.PAUSED_IN.includes(e.kind);
+    add({ id: `regen.${e.kind}.${e.id}`, what: `Longest pause in ${e.kind} ${e.id} (${e.where})${paused ? "; regen held for the encounter" : ""}`, value: fmt(e.gapS), band: paused ? `held (REGEN.PAUSED_IN)` : `< ${REGEN.DELAY_S} s (regen's delay)`, ok: paused || e.gapS < REGEN.DELAY_S, source: "#77, D-fixplay-2 (regen can't out-heal a boss or a trial)" });
+  }
+
   // --- progression and coins
   const prog = progression();
   const at = (L: number) => prog.find((r) => r.level === L)!.reachedAt;
@@ -162,7 +175,7 @@ export function checks(): Check[] {
 }
 
 function classOf(f: Family): string {
-  return f === "kunai" ? "ranged" : ["sunbrand", "riverstaff", "axe", "hammer"].includes(f) ? "melee" : ["hexquill", "emberglass", "stormcoil"].includes(f) ? "magic" : "ranged";
+  return f === "kunai" ? "ranged" : ["sunbrand", "riverstaff", "axe", "hammer", "boarspear"].includes(f) ? "melee" : ["hexquill", "emberglass", "stormcoil", "lantern"].includes(f) ? "magic" : "ranged";
 }
 
 function planetOf(npcId: string): string {

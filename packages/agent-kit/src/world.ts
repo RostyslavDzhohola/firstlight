@@ -2,7 +2,8 @@
 // portals, zones and world objects the server validates against and the browser client draws.
 
 import { BODIES, bodyBreakables, createTerrain, natureSolids, padDirs, portalSpots, safeGates, zoneAt, inWalledZone, type BodyDef, type BodyId, type Breakable, type NatureSolids, type PortalSpot, type Terrain, type Zone } from "@firstlight/shared";
-import { GUIDES, MISSION_BY_ID, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, missionsFrom, type MissionDef } from "@firstlight/shared/content/missions";
+import { wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { NPC_AREAS } from "@firstlight/shared/content/npcs";
 import { padName, placeDir, towardDir } from "@firstlight/shared/content/places";
@@ -144,9 +145,10 @@ export class BodyWorld {
     return id2guide(this.id)?.name ?? null;
   }
 
-  /** Missions the guide of this body gives. */
+  /** Missions the guide of this body gives (Lark's include L1, whose objective is on Lumen). */
   missions(): MissionDef[] {
-    return missionsOn(this.id);
+    const g = id2guide(this.id);
+    return g ? missionsFrom(g.id) : [];
   }
 
   /**
@@ -175,6 +177,11 @@ export class BodyWorld {
       } catch {
         return null;
       }
+    }
+    // A hunt that leads to a wild site (L1: the Quietfall Wreck, where the Cratermaw nests).
+    if (def.hunt?.site) {
+      const w = wildSitePlacements(this.terrain).find((x) => x.site.id === def.hunt!.site);
+      if (w) return { pos: this.onGround(w.dir), what: `${w.site.name}, where the hunt leads`, radius: 20 };
     }
     return null;
   }

@@ -24,7 +24,8 @@ describe("QuestWorld NPCs", () => {
       const world = new QuestWorld(new THREE.Scene(), body, createTerrain(body));
       world.update(0.016, { activeMissions: new Set(), cosmeticsExtras: true });
       const npcs = world.props.filter((p) => p.npc);
-      expect(npcs.map((p) => p.def.look).sort(), body).toEqual(body === "portus" ? ["curator", "keeper"] : ["guide", "keeper"]); // Portus: Juno Vale and Sela Marchbank
+      // Portus: Juno Vale and Sela Marchbank; Lumen (#6) has its guide and no shop.
+      expect(npcs.map((p) => p.def.look).sort(), body).toEqual(body === "portus" ? ["curator", "keeper"] : body === "lumen" ? ["guide"] : ["guide", "keeper"]);
       for (const p of npcs) {
         const at = p.npc!.root.getWorldPosition(new THREE.Vector3());
         expect(at.distanceTo(p.pos), `${p.def.id} avatar`).toBeLessThan(0.5);
@@ -105,7 +106,7 @@ describe("QuestWorld near the camera (#22)", () => {
       scene.updateMatrixWorld(true);
       const labels: THREE.Sprite[] = [];
       world.group.traverse((o) => { if ((o as THREE.Sprite).isSprite) labels.push(o as THREE.Sprite); });
-      expect(labels.length, "the keeper's and the guide's labels (Portus: Juno's, Sela's and the Gleam Vault's)").toBe(body === "portus" ? 3 : 2);
+      expect(labels.length, "the keeper's and the guide's labels (Portus: Juno's, Sela's and the Gleam Vault's)").toBe(body === "portus" ? 3 : body === "lumen" ? 1 : 2);
       for (const l of labels) {
         expect(hasLabelFade(l.material), "the label's material fades").toBe(true);
         // The camera coming straight at the label, 1.4 m and then 2.6 m short of it.
@@ -129,8 +130,8 @@ describe("QuestWorld near the camera (#22)", () => {
         for (const m of figure) expect(occluderFadeOf(m, at.clone().addScaledVector(dir, -2), dir, at.clone().addScaledVector(dir, 3), at), `${p.def.id}`).toBe(1);
       }
       // An outpost draws its own stall (D-b2-3): no second, placeholder one inside it.
-      const keeper = world.props.find((x) => x.def.look === "keeper")!;
-      expect(!!keeper.root.getObjectByName("stall:awning"), "QuestWorld's stall").toBe(body === "portus");
+      const keeper = world.props.find((x) => x.def.look === "keeper");
+      if (keeper) expect(!!keeper.root.getObjectByName("stall:awning"), "QuestWorld's stall").toBe(body === "portus");
       world.dispose();
     });
   }

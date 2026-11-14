@@ -3,7 +3,8 @@ import { WEAPONS } from "../../packages/shared/src/content/weapons.ts";
 import { npcDef } from "../../packages/shared/src/content/npcs.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import { checks } from "./bands.ts";
-import { clampHits, closingTime, creatureTimeline, damageBy, dodgeFactor, gatedTier, hitTimeline, novaHeadshotLevels, progression, pvpCell, SERVER_CHARGE_ALLOWANCE, SERVER_RATE_ALLOWANCE, spellPeaks, spellRows, timeToKill } from "./model.ts";
+import { clampHits, closingTime, creatureTimeline, damageBy, dodgeFactor, gatedTier, hitTimeline, novaHeadshotLevels, progression, pvpCell, SERVER_CHARGE_ALLOWANCE, SERVER_RATE_ALLOWANCE, SITE_TRIP_S, siteVisits, spellPeaks, spellRows, timeToKill } from "./model.ts";
+import { siteDiscoveryXp, WILD_SITES } from "../../packages/shared/src/content/wildSites.ts";
 
 const w = (id: string) => WEAPONS.find((x) => x.id === id)!;
 
@@ -234,8 +235,35 @@ describe("the shipped catalogues", () => {
     expect(progression()[1]!.reachedAt).toBe(1);
   });
 
+  it("puts every wild site on the route once, at its band's lower level, and the route is faster for it (review 2026-11-13)", () => {
+    const v = siteVisits();
+    expect(v.map((x) => x.id)).toEqual(WILD_SITES.map((s) => s.id));
+    for (const [i, x] of v.entries()) {
+      expect(x.level).toBe(WILD_SITES[i]!.levels[0]);
+      expect(x.discoveryXp).toBe(siteDiscoveryXp(WILD_SITES[i]!));
+      expect(x.fightXp).toBeGreaterThan(x.discoveryXp); // the fight is the reward; discovery a token
+      expect(x.coins).toBeGreaterThanOrEqual(WILD_SITES[i]!.chest.coins);
+      expect(x.minutes).toBeGreaterThan(SITE_TRIP_S / 60);
+    }
+    const wreck = progression().find((r) => r.level === 19)!;
+    expect(wreck.minutes).toBeGreaterThan(v.at(-1)!.minutes); // the site's time is on the level it is done at
+  });
+
   it("every balance check is in band (run `pnpm balance` for the report)", () => {
     const failed = checks().filter((c) => !c.ok).map((c) => `${c.id}: ${c.value} (band ${c.band}; ${c.source})`);
     expect(failed).toEqual([]);
+  });
+});
+
+describe("regeneration against bosses and trials (D-fixplay-2)", () => {
+  it("covers every boss and trial, and every encounter whose pauses reach the delay is held", async () => {
+    const { encounterGaps } = await import("./model.ts");
+    const { REGEN } = await import("../../packages/shared/src/content/progression.ts");
+    const gaps = encounterGaps();
+    expect(gaps.map((g) => g.id)).toEqual(expect.arrayContaining(["tidewrath", "hollow_king", "the_receiver", "T1", "T2", "T3", "H4"]));
+    // The plate window (8 s kneel + the attack spacing) reaches the delay: the reason for the hold.
+    expect(gaps.find((g) => g.id === "tidewrath")!.gapS).toBeGreaterThanOrEqual(REGEN.DELAY_S);
+    expect(gaps.find((g) => g.id === "T2")!.gapS).toBe(25);
+    for (const g of gaps) if (g.gapS >= REGEN.DELAY_S) expect(REGEN.PAUSED_IN as readonly string[], g.id).toContain(g.kind);
   });
 });

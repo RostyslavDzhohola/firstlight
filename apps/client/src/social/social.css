@@ -24,6 +24,20 @@
 .fl-compass .mk.wp { z-index: 1; }
 .fl-compass .mk.wp i { width: calc(.85 * var(--u)); height: calc(.85 * var(--u)); border-radius: 1px; background: var(--waypoint); transform: rotate(45deg); }
 .fl-compass .mk.wp span { color: var(--waypoint); }
+/* Home (#70): the nearest pad, or the plaza on Portus: a filled pad disc with a house roof notch. */
+.fl-compass .mk.home i { width: calc(.95 * var(--u)); height: calc(.95 * var(--u)); background: var(--dawn-3); clip-path: polygon(50% 0, 100% 45%, 100% 100%, 0 100%, 0 45%); border-radius: 0; box-shadow: none; }
+.fl-compass .mk.home span { color: var(--dawn-3); top: calc(3.2 * var(--u)); } /* a row lower: often near SAFE */
+/* The tracked mission (#70): a gold chevron in the mission's colour, over the others. */
+.fl-compass .mk.mission { z-index: 2; }
+.fl-compass .mk.mission i { width: calc(1.1 * var(--u)); height: calc(1.1 * var(--u)); clip-path: polygon(50% 100%, 0 0, 50% 28%, 100% 0); border-radius: 0; box-shadow: none; }
+.fl-compass .mk.mission span { color: var(--hero-gold); font-weight: 700; }
+/* The tutorial's next place (#68): a photon arrow head. */
+.fl-compass .mk.guide { z-index: 2; }
+.fl-compass .mk.guide i { width: calc(1.05 * var(--u)); height: calc(1.05 * var(--u)); clip-path: polygon(50% 100%, 0 0, 50% 28%, 100% 0); border-radius: 0; box-shadow: none; }
+.fl-compass .mk.guide span { color: var(--photon); }
+/* An undiscovered wild site (game/siteCompass.ts): a bronze "?" and its distance. */
+.fl-compass .mk.site i { width: calc(0.8 * var(--u)); height: calc(0.8 * var(--u)); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border-radius: 0; box-shadow: none; }
+.fl-compass .mk.site span { color: #f5d6a8; font-weight: 700; }
 
 /* ---------------------------------------------------------------- player list (Tab) */
 .fl-plist { z-index: 45; }

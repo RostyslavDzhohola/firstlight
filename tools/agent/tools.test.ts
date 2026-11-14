@@ -9,9 +9,9 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { pickTarget } from "./examples/hunter.ts";
-import { handleRpc, MCP_PROTOCOL, parseRpc } from "./mcp.ts";
+import { handleRpc, MCP_PROTOCOL, parseRpc, rpcServer } from "./mcp.ts";
 import { bridge } from "./serve.ts";
-import { callTool, checkArgs, PLAYBOOK, Session, TOOLS, TOOL_BY_NAME } from "./tools.ts";
+import { callTool, checkArgs, PLAYBOOK, Session, TOOLS, TOOL_BY_NAME, type ToolDef } from "./tools.ts";
 
 describe("tool schemas", () => {
   it("every tool is named, described and closed to unknown arguments", () => {
@@ -207,5 +207,149 @@ describe("MCP: a line that is JSON but not a request", () => {
     // An object that isn't a request still gets its -32600 from the handler, with its id.
     const odd = parseRpc('{"id":9,"params":null}') as { msg: never };
     expect(await handleRpc(new Session(() => {}), odd.msg)).toMatchObject({ id: 9, error: { code: -32600 } });
+  });
+});
+
+// Review 2026-11-13 (agent gateway, GPT-6.1 Sol) #1 and #4: every queued call was kept, however many,
+// and a caller that went away (hung up, or sent notifications/cancelled) left its call to run later.
+const waitFor = async (cond: () => boolean, ms = 3000) => {
+  for (const t0 = Date.now(); !cond(); await new Promise((ok) => setTimeout(ok, 5))) if (Date.now() - t0 > ms) throw new Error("waitFor timed out");
+};
+
+describe("a session holds a bounded queue, and a caller that leaves takes its call with it", () => {
+  /** A session whose `firstlight_slow` runs until released or stopped; records starts and stops. */
+  function held(maxPending: number) {
+    const s = new Session();
+    s.maxPending = maxPending;
+    const started: string[] = [];
+    let running: ((r: Record<string, unknown>) => void) | null = null;
+    let stops = 0;
+    const schema = { type: "object", additionalProperties: false, properties: { tag: { type: "string", description: "which call this is" } } } as const;
+    const slow: ToolDef = {
+      name: "firstlight_slow",
+      description: "test",
+      needsAgent: false,
+      inputSchema: schema,
+      run: (_s, a) => new Promise((ok) => (started.push(a.tag), (running = ok))),
+    };
+    const stop: ToolDef = {
+      name: "firstlight_stop",
+      description: "test",
+      needsAgent: false,
+      inputSchema: { type: "object", additionalProperties: false, properties: {} },
+      run: async () => {
+        stops++;
+        running?.({ ok: false, reason: "cancelled", hint: "stopped" });
+        return { ok: true };
+      },
+    };
+    s.tools = new Map([[slow.name, slow], [stop.name, stop]]);
+    const release = () => running?.({ ok: true });
+    return { s, started, release, stops: () => stops };
+  }
+
+  it("refuses a call past the bound at once, and runs the rest in order", async () => {
+    const { s, started, release } = held(3);
+    const a = s.call("firstlight_slow", { tag: "a" });
+    const b = s.call("firstlight_slow", { tag: "b" });
+    const c = s.call("firstlight_slow", { tag: "c" });
+    expect(s.pending).toBe(3);
+    expect(await s.call("firstlight_slow", { tag: "d" })).toMatchObject({ ok: false, reason: "queue full" });
+    // stop still jumps the queue (it is how a caller interrupts a long action).
+    expect(await s.call("firstlight_stop", {})).toEqual({ ok: true });
+    expect(await a).toMatchObject({ reason: "cancelled" });
+    await waitFor(() => started.length === 2);
+    release();
+    await b;
+    await waitFor(() => started.length === 3);
+    release();
+    await c;
+    expect(started).toEqual(["a", "b", "c"]);
+    expect(s.pending).toBe(0);
+  });
+
+  it("a waiting call whose caller leaves never runs, frees its place, and doesn't stop the running one", async () => {
+    const { s, started, release, stops } = held(2);
+    const a = s.call("firstlight_slow", { tag: "a" });
+    const gone = new AbortController();
+    const b = s.call("firstlight_slow", { tag: "b" }, { signal: gone.signal });
+    expect(await s.call("firstlight_slow", { tag: "c" })).toMatchObject({ reason: "queue full" });
+    gone.abort();
+    expect(await b).toMatchObject({ ok: false, reason: "cancelled" });
+    expect(s.pending).toBe(1);
+    const c = s.call("firstlight_slow", { tag: "c" });
+    release();
+    await a;
+    await waitFor(() => started.length === 2);
+    release();
+    await c;
+    expect(started).toEqual(["a", "c"]);
+    expect(stops()).toBe(0);
+  });
+
+  it("the running call whose caller leaves is stopped, and the next one starts", async () => {
+    const { s, started, release, stops } = held(4);
+    const gone = new AbortController();
+    const a = s.call("firstlight_slow", { tag: "a" }, { signal: gone.signal });
+    const b = s.call("firstlight_slow", { tag: "b" });
+    await waitFor(() => started.length === 1);
+    gone.abort();
+    expect(await a).toMatchObject({ reason: "cancelled" });
+    expect(stops()).toBe(1);
+    await waitFor(() => started.length === 2);
+    release();
+    expect(await b).toEqual({ ok: true });
+  });
+
+  it("MCP over stdio: notifications/cancelled stops the call it names and drops its answer", async () => {
+    const { s, started, release, stops } = held(4);
+    const server = rpcServer(s);
+    const call = (id: number, tag: string) => server.handle({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "firstlight_slow", arguments: { tag } } });
+    const a = call(7, "a");
+    const b = call(8, "b");
+    const c = call(9, "c");
+    await waitFor(() => started.length === 1);
+    // The waiting one: out of the queue, never run, no answer.
+    expect(await server.handle({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 8, reason: "user" } })).toBeNull();
+    expect(await b).toBeNull();
+    // The running one: stopped, no answer; the next starts.
+    await server.handle({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 7 } });
+    expect(await a).toBeNull();
+    expect(stops()).toBe(1);
+    await waitFor(() => started.length === 2);
+    // Unknown, finished and malformed cancellations are ignored.
+    for (const params of [{ requestId: 99 }, { requestId: "9" }, {}, null]) expect(await server.handle({ jsonrpc: "2.0", method: "notifications/cancelled", params: params as never })).toBeNull();
+    release();
+    expect(await c).toMatchObject({ id: 9, result: { isError: false } });
+    expect(started).toEqual(["a", "c"]);
+    expect(server.inFlight.size).toBe(0);
+  });
+
+  it("the HTTP bridge: 429 when the queue is full, and a caller that hangs up leaves the queue", async () => {
+    const { s, started, release } = held(2);
+    const handler = bridge(s);
+    const server = createServer((req, res) => void handler(req, res));
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const post = (tag: string, signal?: AbortSignal) => fetch(`${base}/slow`, { method: "POST", body: JSON.stringify({ tag }), signal });
+      const a = post("a");
+      await waitFor(() => started.length === 1);
+      const gone = new AbortController();
+      const b = post("b", gone.signal).catch(() => null);
+      await waitFor(() => s.pending === 2);
+      const full = await post("c");
+      expect(full.status).toBe(429);
+      expect(await full.json()).toMatchObject({ ok: false, reason: "queue full" });
+      gone.abort();
+      await b;
+      await waitFor(() => s.pending === 1);
+      release();
+      expect((await a).status).toBe(200);
+      expect(started).toEqual(["a"]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((ok) => server.close(() => ok()));
+    }
   });
 });

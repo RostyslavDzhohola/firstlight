@@ -7,6 +7,7 @@ import { color, float, mix, mx_noise_float, smoothstep, time, uv, vec2 } from "t
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { PALETTES } from "./material.ts";
 import { applyOccluderFadeGated } from "../occluderFade.ts";
+import { sculptedWeapon } from "./sculpted.ts";
 
 type MatKey = "metal" | "metalLight" | "brass" | "wood" | "leather" | "cord" | "ivory" | "feather" | "glass" | "accent" | "blade";
 
@@ -100,6 +101,8 @@ const sph = (r: number, w = 10, h = 8) => new THREE.SphereGeometry(r, w, h);
 const torus = (r: number, t: number, seg = 12) => new THREE.TorusGeometry(r, t, 5, seg);
 
 const H = Math.PI / 2;
+/** How far the code-built bow's string stands off its grip (m, weapon +X). */
+const BOW_BRACE = 0.1;
 
 function design(id: string): Piece[] {
   switch (id) {
@@ -189,15 +192,57 @@ function design(id: string): Piece[] {
         P(box(0.06, 0.07, 0.2), "wood", [0, 0.01, -0.1]),
       ];
     case "longbow": {
+      // Limbs along +Z like the staffs (#56): the clips then hold it upright in aim and shoot, its back
+      // (-X) to the target and the string (+X) towards the archer. The braced limbs bend towards the string.
       const pts: THREE.Vector3[] = [];
       for (let i = 0; i <= 12; i++) {
         const t = i / 12 - 0.5;
-        pts.push(new THREE.Vector3(0, t * 1.5, -0.12 * Math.cos(t * Math.PI) + 0.05));
+        pts.push(new THREE.Vector3(BOW_BRACE * (1 - Math.cos(t * Math.PI)), 0, t * 1.5));
       }
       return [
         P(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.014, 5), "wood"),
-        P(cylZ(0.002, 0.002, 1.44, 3), "cord", [0, 0, -0.08], [H, 0, 0]),
-        P(cylZ(0.02, 0.02, 0.12, 8), "leather", [0, 0, 0.0], [H, 0, 0]),
+        P(cylZ(0.002, 0.002, 1.44, 3), "cord", [BOW_BRACE * 0.97, 0, 0]),
+        P(cylZ(0.02, 0.02, 0.12, 8), "leather"),
+      ];
+    }
+    case "boarspear":
+      // Winged Boarspear stand-in: ash shaft, iron socket and wings, a flat leaf blade
+      return [
+        P(cylZ(0.017, 0.015, 1.36, 8), "wood", [0, 0, 0.12]),
+        P(cylZ(0.019, 0.013, 0.09, 8), "metal", [0, 0, 0.82]),
+        P(box(0.011, 0.11, 0.014), "metal", [0, 0, 0.865]),
+        P(new THREE.OctahedronGeometry(1, 0), "metalLight", [0, 0, 0.995], [0, 0, 0], [0.004, 0.032, 0.125]),
+        P(cylZ(0.0205, 0.0205, 0.26, 8), "leather", [0, 0, 0.01]),
+        P(cylZ(0.012, 0.019, 0.06, 8), "metal", [0, 0, -0.54]),
+      ];
+    case "crossbow": {
+      // Windlass Crossbow stand-in (held like a gun): walnut tiller, steel prod, stirrup, loaded bolt
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 10; i++) {
+        const t = (i / 10) * 2 - 1;
+        pts.push(new THREE.Vector3(t * 0.33, 0.054, 0.312 - 0.07 * t * t));
+      }
+      return [
+        P(box(0.045, 0.09, 0.7), "wood", [0, 0.014, -0.025]),
+        P(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, 0.009, 5), "metalLight"),
+        P(torus(0.045, 0.005, 10), "metal", [0, 0.03, 0.39], [H, 0, 0]),
+        P(cylZ(0.004, 0.004, 0.36, 6), "wood", [0, 0.064, 0.19]),
+        P(new THREE.ConeGeometry(0.007, 0.04, 4).rotateX(H), "metalLight", [0, 0.064, 0.39]),
+        P(cylZ(0.006, 0.006, 0.14, 6), "metal", [0, -0.055, -0.1], [0.5, 0, 0]),
+      ];
+    }
+    case "lantern": {
+      // Shepherd's Lantern stand-in: hazel staff bent into a crook, a small lit lantern hanging from it
+      const crook = new THREE.TorusGeometry(0.075, 0.012, 6, 12, Math.PI)
+        .applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0)));
+      return [
+        P(cylZ(0.017, 0.013, 1.42, 8), "wood", [0, 0, 0.21]),
+        P(crook, "wood", [0, 0.075, 0.92]),
+        P(cylZ(0.0205, 0.0205, 0.28, 8), "leather", [0, 0, 0.02]),
+        P(new THREE.CylinderGeometry(0.018, 0.022, 0.065, 8), "glass", [0, 0.15, 0.79]),
+        P(new THREE.ConeGeometry(0.031, 0.024, 8), "metal", [0, 0.15, 0.836]),
+        P(new THREE.CylinderGeometry(0.031, 0.031, 0.012, 8), "metal", [0, 0.15, 0.748]),
+        P(cylZ(0.003, 0.003, 0.06, 4), "metal", [0, 0.15, 0.87]),
       ];
     }
     case "stillshot":
@@ -239,8 +284,12 @@ function design(id: string): Piece[] {
 
 const built = new Map<string, THREE.Object3D | null>();
 
-/** A fresh Object3D for this weapon id (shares geometry/materials with every other copy). */
+/** A fresh Object3D for this weapon id (shares geometry/materials with every other copy): the sculpted
+ *  model where one has loaded, else the code-built one. */
 export function weaponModel(id: string, palette: number): THREE.Object3D | null {
+  // A sculpted GLB (sculpted.ts) replaces the code-built model once it has loaded.
+  const sculpted = sculptedWeapon(id, palette);
+  if (sculpted) return sculpted;
   const key = `${id}:${palette}`;
   let proto = built.get(key);
   if (proto === undefined) {

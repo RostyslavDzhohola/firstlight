@@ -63,6 +63,15 @@ export const PALETTES: Record<BodyId, TerrainPalette> = {
     bandHeight: 6,
     grassDensity: 0.18,
   },
+  // Lumen (#6): grey highlands, darker basin dust, pale ejecta.
+  lumen: {
+    grass: srgb(0x8e8b85), grass2: srgb(0x9c9992), grassDry: srgb(0xb0ada6), grassDeep: srgb(0x6e6c68), dirt: srgb(0x5e5c58),
+    rock: srgb(0x7c7a76), rock2: srgb(0x9a9792),
+    sand: srgb(0xc4c0b8), bed: srgb(0x4e4c4a), snow: srgb(0xe0ded8), snowLine: 999,
+    bands: [srgb(0x8a8782), srgb(0x77746f), srgb(0x9c9893)],
+    bandHeight: 5,
+    grassDensity: 0,
+  },
 };
 
 function mix(a: RGB, b: RGB, t: number): RGB {

@@ -6,7 +6,7 @@
 import { SHOP_SPOT_BY_ID } from "@firstlight/shared/content/shops";
 import { EGG_BY_ID } from "@firstlight/shared/content/secrets";
 import * as THREE from "three/webgpu";
-import { PLANET_IDS, type BodyId } from "@firstlight/shared";
+import type { BodyId } from "@firstlight/shared";
 import type { HallLine } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { PF } from "@firstlight/shared/net/schema";
@@ -15,14 +15,18 @@ import type { AvatarView } from "../render/Avatars.ts";
 import { CosmeticRig, Nameplates } from "../render/Cosmetics.ts";
 import { PlateBars } from "../render/plates.ts";
 import { MapPanel } from "../ui/map.ts";
-import { AdminConsole, CuratorPanel, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
+import { AdminConsole, CuratorPanel, GuidePanel, guideBody, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
 import { gleamsWon } from "@firstlight/shared/content/gleams";
 import { ShopPanel } from "../ui/shop.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
 import type { Game } from "./Game.ts";
 import { HOTKEYS, hits } from "./keys.ts";
 import { trialSeen } from "./trialState.ts";
+import { missionTrack, stepTrackKey, TrackSync } from "./missionTrack.ts";
+import { MISSIONS_KEY } from "../ui/missionsPanel.ts";
+import { uiSettings } from "../ui/uiSettings.ts";
 import { worldPrompt } from "./worldPrompt.ts";
+import { pickInteract } from "./interactTarget.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Survives body changes: the latest Hall of Firsts and a staged scene waiting for travel to finish. */
@@ -58,10 +62,14 @@ export class QuestClient implements ClientSystem {
   private readonly plateBars = new PlateBars();
   private readonly console: AdminConsole;
   private readonly rigs = new Map<AvatarView, CosmeticRig>();
-  private readonly interactables: { def: WorldObjectDef; pos: [number, number, number] }[];
+  private readonly interactables: { item: WorldObjectDef; def: WorldObjectDef; pos: [number, number, number]; dist: number }[];
+  private readonly inReachNow: QuestClient["interactables"] = [];
   private lastYou: unknown = null;
   private t = 0;
   private readonly onKey = (e: KeyboardEvent) => this.key(e);
+  /** The server hears which mission is tracked (#69): its hunt targets follow it. */
+  private readonly offTrack: () => void;
+  private readonly trackSync: TrackSync;
 
   constructor(game: Game) {
     this.game = game;
@@ -71,9 +79,9 @@ export class QuestClient implements ClientSystem {
     this.world.setHall(hall);
     this.interactables = objectsOn(body)
       .filter((o) => o.trigger === "interact")
-      .map((def) => ({ def, pos: objectPos(def, (x, y, z) => terrain.groundHeight(x, y, z)) }));
+      .map((def) => ({ item: def, def, pos: objectPos(def, (x, y, z) => terrain.groundHeight(x, y, z)), dist: 0 }));
     this.shop = new ShopPanel(game);
-    this.guide = (PLANET_IDS as readonly BodyId[]).includes(body) ? new GuidePanel(game, body as Exclude<BodyId, "portus">) : null;
+    this.guide = guideBody(body) ? new GuidePanel(game, body) : null;
     this.curator = body === "portus" ? new CuratorPanel(game) : null;
     this.journal = new JournalPanel(game);
     this.keypad = new KeypadPanel(game);
@@ -98,11 +106,17 @@ export class QuestClient implements ClientSystem {
       void this.game.travel(m.body);
     });
     room.onMessage("denied", (m: { action: string; reason: string }) => {
+      if (m.action === "track") return this.trackSync.denied(); // retried quietly with the latest choice
       const text = DENIED[`${m.action}:${m.reason}`];
       if (text) this.game.hud.toast(text, "warn");
     });
     for (const t of ["medal", "missionDone", "shop"]) room.onMessage(t, () => {});
     room.send("questSync", {});
+    // Review #3: one send in flight, the latest choice wins, refusals and lost sends are retried.
+    const sync = (this.trackSync = new TrackSync((id) => room.send("track", { id })));
+    room.onMessage("tracked", (m: { id: string | null }) => sync.acked(m.id));
+    sync.reset(missionTrack.chosen);
+    this.offTrack = missionTrack.onChange((id) => sync.want(id));
     if (pendingStage) {
       room.send("admin", { cmd: "stage", args: { n: pendingStage.n, all: pendingStage.all } });
       pendingStage = null;
@@ -127,6 +141,11 @@ export class QuestClient implements ClientSystem {
     if (!this.game.input.inPlay || this.game.photo?.active) return;
     if (e.code === "KeyM") this.map.open();
     else if (e.code === "KeyJ") this.journal.show();
+    else if (e.code === MISSIONS_KEY.code && !e.shiftKey && !e.repeat) uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
+    else if (e.code === MISSIONS_KEY.code && e.shiftKey) {
+      // Shift+L: track the next open mission (the panel can't be clicked while the mouse looks around); once per press.
+      stepTrackKey(missionTrack, this.game.hud.you?.missions ?? [], e);
+    }
   }
 
   private pileNear(): boolean {
@@ -139,22 +158,24 @@ export class QuestClient implements ClientSystem {
     return near;
   }
 
-  private nearestObject(active: Set<string>): WorldObjectDef | null {
+  /** The object E takes: of those in reach, the one under the crosshair (game/interactTarget.ts, D-view-6). */
+  private targetObject(active: Set<string>): WorldObjectDef | null {
     const p = this.game.player.pos;
     const at: [number, number, number] = [p.x, p.y, p.z];
-    let best: WorldObjectDef | null = null;
-    let bestD = Infinity;
+    const cands = this.inReachNow;
+    cands.length = 0;
     for (const o of this.interactables) {
       if (o.def.egg && EGG_BY_ID.get(o.def.egg)?.extra && !this.game.hud.you?.cosmeticsExtras) continue;
       if (o.def.mission && !active.has(o.def.mission)) continue;
       if (!inReach(o.pos, at, o.def.range, 0.3)) continue;
-      const d = surfaceDistance(o.pos, at);
-      if (d < bestD) {
-        bestD = d;
-        best = o.def;
-      }
+      o.dist = surfaceDistance(o.pos, at);
+      cands.push(o);
     }
-    return best;
+    if (!cands.length) return null;
+    const cam = this.game.ctx.camera;
+    cam.getWorldPosition(_eye);
+    cam.getWorldDirection(_look);
+    return pickInteract(cands, _eye.toArray(_eyeA), _look.toArray(_lookA), this.game.player.firstPerson ? "first" : "third");
   }
 
   private promptFor(o: WorldObjectDef): string {
@@ -187,7 +208,7 @@ export class QuestClient implements ClientSystem {
 
     // Prompts and E (piles win: the combat client picks those up).
     if (!g.combat.deadUntilRespawn && !Panel.current && !g.photo?.active && !this.pileNear()) {
-      const o = this.nearestObject(active);
+      const o = this.targetObject(active);
       if (o) {
         g.hud.setPrompt(this.promptFor(o));
         if (g.input.inPlay && g.input.pressed.has("KeyE")) this.use(o);
@@ -242,6 +263,8 @@ export class QuestClient implements ClientSystem {
 
   dispose() {
     window.removeEventListener("keydown", this.onKey);
+    this.offTrack();
+    this.trackSync.dispose();
     Panel.current?.close(false);
     this.console.close();
     this.world.dispose();
@@ -252,6 +275,11 @@ export class QuestClient implements ClientSystem {
     this.rigs.clear();
   }
 }
+
+const _eye = new THREE.Vector3();
+const _look = new THREE.Vector3();
+const _eyeA: [number, number, number] = [0, 0, 0];
+const _lookA: [number, number, number] = [0, 0, 0];
 
 export function createQuestClient(game: Game): ClientSystem | null {
   return game.net.room ? new QuestClient(game) : null;

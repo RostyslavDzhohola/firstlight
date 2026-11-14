@@ -476,6 +476,7 @@ describe("nothing in a sandbox is saved (D-admin-3, real path: SQLite)", () => {
     const p = await bot("patient", "arcadia", "");
     const pa = serverRoom(p).actors.get(p.id)!;
     pa.state.hp = 40;
+    pa.combatUntil = Date.now() + 120_000; // in a fight: out-of-combat regeneration (#77) stays off, only a heal could move HP
     const { s } = await owner("medic");
     mode(s, { action: "hand", id: "patchkit", tier: 3 });
     await until("patchkit", () => s.you.hotbar[s.you.selected]?.id === "patchkit");

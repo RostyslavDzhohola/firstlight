@@ -8,6 +8,7 @@ import { vegetationModels } from "./vegetationModels.ts";
 import { config } from "../config.ts";
 import { atmo } from "./atmosphere.ts";
 import { PROP_PALETTES } from "./propGeometry.ts";
+import { applyLodFade } from "./lodFade.ts";
 import { applyOccluderFade } from "./occluderFade.ts";
 import type { TextureSlot } from "./artpacks/ArtPacks.ts";
 import { mossy } from "./meadow.ts";
@@ -329,8 +330,10 @@ export function vegetationMaterial(kind: PropKind, atlas: THREE.Texture, imposto
     const tangent = normalize(cross(ref, up));
     m.positionNode = positionLocal.add(tangent.mul(sway));
   }
-  // Trunks, crowns and rocks between the camera and the player dissolve (occluderFade.ts).
+  // Trunks, crowns and rocks between the camera and the player dissolve (occluderFade.ts), and the
+  // near mesh and far card share the pixels of an instance in the cross-fade band (lodFade.ts, #74).
   applyOccluderFade(m);
+  applyLodFade(m);
   materials.set(key, m);
   return m;
 }

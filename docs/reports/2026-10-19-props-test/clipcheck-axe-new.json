@@ -1,0 +1,97 @@
+{
+ "char": "ash",
+ "prop": "axe",
+ "model": "new",
+ "tol_m": 0.02,
+ "model_scale": 1.04,
+ "clips": {
+  "idle": {
+   "frames": 76,
+   "flags": []
+  },
+  "walk": {
+   "frames": 41,
+   "flags": []
+  },
+  "run": {
+   "frames": 29,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.084,
+     "frame": 2
+    }
+   ]
+  },
+  "sprint": {
+   "frames": 21,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.08,
+     "frame": 2
+    }
+   ]
+  },
+  "jump": {
+   "frames": 41,
+   "flags": []
+  },
+  "fall": {
+   "frames": 76,
+   "flags": []
+  },
+  "land": {
+   "frames": 39,
+   "flags": []
+  },
+  "roll": {
+   "frames": 45,
+   "flags": [
+    {
+     "body": "head",
+     "depth_m": 0.098,
+     "frame": 20
+    },
+    {
+     "body": "thigh_r",
+     "depth_m": 0.056,
+     "frame": 24
+    },
+    {
+     "body": "calf_r",
+     "depth_m": 0.052,
+     "frame": 24
+    }
+   ]
+  },
+  "hit": {
+   "frames": 11,
+   "flags": []
+  },
+  "melee_light": {
+   "frames": 14,
+   "flags": []
+  },
+  "melee_heavy": {
+   "frames": 61,
+   "flags": [
+    {
+     "body": "thigh_l",
+     "depth_m": 0.05,
+     "frame": 38
+    },
+    {
+     "body": "calf_l",
+     "depth_m": 0.046,
+     "frame": 38
+    }
+   ]
+  },
+  "block": {
+   "frames": 38,
+   "flags": []
+  }
+ },
+ "flags_total": 7
+}

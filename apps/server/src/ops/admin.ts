@@ -23,7 +23,7 @@ export interface OpsDeps {
   allowedOrigins: string[];
 }
 
-/** Mount /admin and /stats (call after express.json()). */
+/** Mount /admin and /stats (call after express.json()). The funnel's ingest is mounted by app.ts, before it. */
 export function mountOps(app: Express, deps: OpsDeps): void {
   installErrorCapture();
   const gate = deps.requireAdmin as RequestHandler;

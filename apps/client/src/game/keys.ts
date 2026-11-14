@@ -20,6 +20,10 @@ export const HOTKEYS = {
   screenshot: { code: "KeyP", caps: ["P"] },
   /** Admins only (was `, now taken by the performance overlay). */
   adminConsole: { code: "Backquote", shift: true, caps: ["Shift", "`"] },
+  /** First / third person (D-view-fp-1): V, the genre's key. Push to talk moved to K. */
+  view: { code: "KeyV", caps: ["V"] },
+  /** Push to talk while voice chat is on (hidden in this build, D-controls-1); was V. */
+  pushToTalk: { code: "KeyK", caps: ["K"] },
 } as const satisfies Record<string, Hotkey>;
 
 /** Does a key press (code + Shift state) hit this hotkey? Shift must match exactly. */
@@ -70,7 +74,10 @@ export const BINDINGS: readonly Binding[] = [
   { code: "KeyF", what: "spell: Frostbloom" },
   { code: "KeyX", what: "spell: Wishfall" },
   { code: "KeyZ", what: "spell: Glasswing Ward" },
-  { code: "KeyV", what: "push to talk", voice: true },
+  { code: HOTKEYS.pushToTalk.code, what: "push to talk", voice: true },
   { code: "KeyB", what: "radio", voice: true },
   { code: "Escape", shift: true, what: "mute everyone", voice: true },
+  { code: HOTKEYS.view.code, what: "first / third person" },
+  { code: "KeyL", what: "missions panel: collapse / expand (#69)" },
+  { code: "KeyL", shift: true, what: "track the next mission (#69)" },
 ];

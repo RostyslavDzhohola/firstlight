@@ -7,7 +7,8 @@
 // Runs every frame: module scratch vectors, no allocations.
 
 import * as THREE from "three/webgpu";
-import type { Terrain } from "@firstlight/shared";
+import { BASE_GRAVITY, bodyGravity, type Terrain } from "@firstlight/shared";
+import { fallDamageFraction } from "@firstlight/shared/content/progression";
 import { emptyContact, resetContact, type PropContact } from "@firstlight/shared/planet/collide";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
@@ -16,6 +17,7 @@ import { easeShare, stepsFor } from "./frameClock.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 import { BASE_MOVE, starterMove } from "@firstlight/shared/content/starters";
+import { EyeFollow, smoothBlend, stepBlend, VIEW, viewFor, wheelView, type ViewMode } from "./view.ts";
 
 /** Solid things the player can't walk through (intact breakable props). */
 export interface MoveColliders {
@@ -40,7 +42,8 @@ export const MOVE = {
   run: BASE_MOVE.run,
   sprint: BASE_MOVE.sprint,
   swim: 3,
-  gravity: 18,
+  /** The base pull (m/s²); each body's own comes from bodyGravity (Lumen's is a quarter, #6). */
+  gravity: BASE_GRAVITY,
   jumpSpeed: 6.6,
   dodgeDistance: 4.5,
   dodgeTime: 0.3,
@@ -52,8 +55,6 @@ export const MOVE = {
   accel: 12,
   mountAccel: 5, // a horse has weight: slower to speed up, stop and turn
   airAccel: 3,
-  fallSafe: 8,
-  fallLethal: 20.5,
   /** NPC movement effects (set by world/npcs/NpcRenderer; on foot it rewrites run/sprint instead):
    *  riding reads them through mountedSpeed. */
   slow: 0,
@@ -97,6 +98,9 @@ const _cam = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
 const _start = new THREE.Vector3();
+const _aUp = new THREE.Vector3();
+const _aT = new THREE.Vector3();
+const _aAxis = new THREE.Vector3();
 const _lens = new THREE.Vector3();
 const _lensF = new THREE.Vector3();
 const _lensR = new THREE.Vector3();
@@ -108,6 +112,18 @@ const _lensMoved = new THREE.Vector3();
 const _lensPush = new THREE.Vector3();
 const _lensSide = new THREE.Vector3();
 const _probeTarget = new THREE.Vector3();
+const _eye = new THREE.Vector3();
+const _eyeTarget = new THREE.Vector3();
+const _eyeBase = new THREE.Vector3();
+const _eyeDir = new THREE.Vector3();
+/** First person: the eye may back off a solid in front of it this far (m) behind the head's centre (the head is cut away). */
+export const EYE_BACKOFF = 0.3;
+/**
+ * Third person pressed in closer than this (m) to the head (a wall or a crate behind the player): the
+ * camera moves to the eyes instead, the head cut away, until its line is clear past CLOSE_OUT (#34).
+ */
+export const CLOSE_IN = 0.6;
+export const CLOSE_OUT = 0.9;
 /**
  * The camera stops this far (m) short of a structure between the head and where it would be; with
  * the player pressed against a wall (the wall under CAMERA_WALL_GAP × 2 behind the head) it keeps half
@@ -146,16 +162,40 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
 /** Server corrections closer than this (metres) keep the camera heading (F12 confirm Sonnet N-6). */
 export const CORRECT_KEEP_HEADING_M = 25;
+/**
+ * Outside first person the drawn body follows the (already eased) facing this fast (1/s): it is
+ * there within a few frames, and leaving first person mid-turn doesn't snap it.
+ */
+const BODY_CATCH_UP = 40;
 
 export class PlayerController {
   readonly pos = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
-  /** Unit tangent the character faces. */
+  /**
+   * Unit tangent the character faces for gameplay: sent to the server, which swings melee along it.
+   * In first person on foot it is the camera's heading at once (the swing goes to the crosshair).
+   */
   readonly facing = new THREE.Vector3(0, 0, 1);
+  /** The facing the own avatar is drawn with: `facing`, eased where first person snaps it (review finding 1). */
+  readonly bodyFacing = new THREE.Vector3(0, 0, 1);
   /** Unit tangent the camera looks along (yaw only). */
   readonly camForward = new THREE.Vector3(0, 0, 1);
   camPitch = -0.15;
   camDistance = 4.6;
+  /** The view the player chose (game/view.ts); `dead` pulls the camera out to third person meanwhile. */
+  view: ViewMode = "third";
+  dead = false;
+  /** 0 third person … 1 first person: where the camera is on its way between the two. */
+  viewBlend = 0;
+  /** 0 … 1: third person squeezed against the head, framed from the eyes instead (CLOSE_IN, #34). */
+  closeBlend = 0;
+  private closeGoal = 0;
+  /** The scroll wheel changed the view (Game stores the choice). */
+  onViewChange: ((v: ViewMode) => void) | null = null;
+  /** The first-person eye (feet-relative, eased) and the head it follows (Game sets it from the avatar each frame). */
+  readonly eye = new EyeFollow();
+  private readonly headPoint = new THREE.Vector3();
+  private hasHead = false;
   /** How far behind the head the camera may sit now (a structure in the way pulls it in). */
   private camReach = Infinity;
   /** Where the lens was put on its line last time (the near-plane check can bring it in further). */
@@ -257,7 +297,7 @@ export class PlayerController {
     this.pos.set(x, y, z);
     this.vel.set(0, 0, 0);
     const up = _up.copy(this.pos).normalize();
-    for (const v of [this.camForward, this.facing]) {
+    for (const v of [this.camForward, this.facing, this.bodyFacing]) {
       v.addScaledVector(up, -v.dot(up));
       if (v.lengthSq() < 1e-8) {
         const ref = Math.abs(up.z) < 0.9 ? AXIS_Z : AXIS_X;
@@ -268,6 +308,20 @@ export class PlayerController {
     this.fallStartRadius = this.pos.length();
   }
 
+  /**
+   * After a blink the server placed (Skipstep: its `correct` came first and stopped the body): move on
+   * with `vel`, the velocity from before it, along the new ground, and keep a jump that was still
+   * rising (#78: the hop was cut off 26 ms in and the body dropped where it landed). A fall's speed
+   * is not kept (the blink put the feet on the ground there).
+   */
+  resumeAfterBlink(vel: THREE.Vector3) {
+    const up = _up.copy(this.pos).normalize();
+    const along = vel.dot(up);
+    const rise = Math.max(0, along);
+    this.vel.copy(vel).addScaledVector(up, rise - along);
+    if (rise > 0) this.onGround = false;
+  }
+
   /** Place the player (arrival, travel, respawn): the camera faces the body's reference direction. */
   teleport(x: number, y: number, z: number) {
     this.pos.set(x, y, z);
@@ -276,12 +330,39 @@ export class PlayerController {
     const ref = Math.abs(up.z) < 0.9 ? AXIS_Z : AXIS_X;
     this.camForward.copy(ref).addScaledVector(up, -ref.dot(up)).normalize();
     this.facing.copy(this.camForward);
+    this.bodyFacing.copy(this.facing);
     this.fallStartRadius = this.pos.length();
     // A new place: the camera starts out at full reach over the right shoulder, nothing pinned.
     this.camReach = Infinity;
     this.lensReach = Infinity;
     this.shoulder = this.shoulderGoal = 1;
     this.pinnedT = 0;
+    this.eye.snap();
+    this.closeBlend = this.closeGoal = 0;
+  }
+
+  /** How far the camera is towards the eye framing (first person, or third squeezed against the head). */
+  get eyeBlend(): number {
+    return Math.max(this.viewBlend, this.closeBlend);
+  }
+
+  /** The view the camera is heading to now (the choice, unless a state pulls it out: game/view.ts viewFor). */
+  get viewNow(): ViewMode {
+    return viewFor(this.view, { dead: this.dead });
+  }
+
+  /** In first person (or on the way there past half-way): the body faces where the camera looks. */
+  get firstPerson(): boolean {
+    return this.viewNow === "first" && this.viewBlend > 0.5;
+  }
+
+  /**
+   * The avatar's eye point this frame (planet space: its face socket), or null without a skinned model
+   * (the eye then stands at VIEW.eyeHeight). Set before placeCamera.
+   */
+  setHead(p: THREE.Vector3 | null) {
+    this.hasHead = !!p;
+    if (p) this.headPoint.copy(p);
   }
 
   /** A shove (m/s) along `dir` (projected onto the ground plane), with a little lift. */
@@ -332,7 +413,15 @@ export class PlayerController {
       this.camForward.applyAxisAngle(up, yaw).normalize();
       this.camPitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity + (input.lookPitch || 0);
       this.camPitch = Math.max(-1.25, Math.min(0.9, this.camPitch));
-      if (input.wheel) this.camDistance = Math.max(2.5, Math.min(9, this.camDistance + input.wheel * 0.5));
+      if (input.wheel) {
+        // All the way in goes into first person, and out of it again (game/view.ts wheelView).
+        const w = wheelView(this.view, this.camDistance, input.wheel);
+        this.camDistance = w.distance;
+        if (w.view !== this.view) {
+          this.view = w.view;
+          this.onViewChange?.(w.view);
+        }
+      }
     }
     const right = _right.crossVectors(this.camForward, up).normalize();
 
@@ -403,7 +492,7 @@ export class PlayerController {
     } else if (this.swimming) {
       vUpNew = 0;
     } else {
-      vUpNew -= MOVE.gravity * dt;
+      vUpNew -= bodyGravity(this.terrain.body) * dt;
       if (this.onGround && !this.frozen && input.pressed.has("Space")) {
         vUpNew = MOVE.jumpSpeed;
         this.onGround = false;
@@ -424,14 +513,14 @@ export class PlayerController {
     // carry the body across a thin prop (a fence blocks 0.47 m either side of its middle), and a
     // fast fall can't skip a top's 0.4 m landing band.
     let floorR = 0;
-    if (!this.colliders && !this.structures && !this.nature) this.pos.addScaledVector(this.vel, dt);
+    if (!this.colliders && !this.structures && !this.nature) this.advance(dt, vH);
     else {
       const c = this.contact;
       const sc = this.structureContact;
       const steps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(Math.max((vH.length() * dt) / SUBSTEP_H, (Math.abs(vUpNew) * dt) / SUBSTEP_V))));
       const h = dt / steps;
       for (let k = 0; k < steps; k++) {
-        this.pos.addScaledVector(this.vel, h);
+        this.advance(h, vH);
         // Feet never below the ground mid-frame: uphill a step along the old tangent plane ends under
         // it, where a solid on the slope (its base is the ground at its centre) is checked against
         // feet lower than they will stand, and the snap below then lifted them into it (Codex review).
@@ -479,7 +568,7 @@ export class PlayerController {
       this.pos.copy(newUp).multiplyScalar(groundR);
       if (!wasOnGround) {
         const drop = this.fallStartRadius - groundR;
-        if (drop > MOVE.fallSafe && !this.swimming && !this.adminFly) this.pendingFallDamage += Math.min(1, ((drop - MOVE.fallSafe) * 0.08));
+        if (!this.swimming && !this.adminFly) this.pendingFallDamage += fallDamageFraction(drop, bodyGravity(this.terrain.body));
       }
       this.onGround = true;
       this.swimming = false;
@@ -510,8 +599,13 @@ export class PlayerController {
 
     // Face movement (or the camera when aiming; a roll keeps facing where it goes).
     const hSpeed = vH.length();
-    if (aiming && this.dodgeT <= 0) this.facing.lerp(this.camForward, easeShare(18, dt)).normalize();
+    // First person on foot faces the camera at once, so the swing and the cast go where the crosshair
+    // is on the frame of a turn; the drawn body turns after it (bodyFacing).
+    const fpFacing = this.firstPerson && !this.mounted && this.dodgeT <= 0;
+    if (fpFacing) this.facing.copy(this.camForward);
+    else if (aiming && this.dodgeT <= 0) this.facing.lerp(this.camForward, easeShare(18, dt)).normalize();
     else if (hSpeed > 0.5) this.facing.lerp(_dir.copy(vH).normalize(), easeShare(this.mounted ? 6 : 10, dt)).normalize();
+    this.easeBody(fpFacing ? 18 : BODY_CATCH_UP, dt);
 
     this.anim = this.dodgeT > 0 ? ANIM.DODGE
       : this.swimming ? ANIM.SWIM
@@ -520,6 +614,15 @@ export class PlayerController {
       : hSpeed > 3.5 ? ANIM.RUN
       : hSpeed > 0.3 ? ANIM.WALK
       : ANIM.IDLE;
+  }
+
+  /** Ease the drawn facing towards the gameplay one at `rate` (1/s), kept on this frame's ground plane. */
+  private easeBody(rate: number, dt: number) {
+    const up = _up.copy(this.pos).normalize();
+    const b = this.bodyFacing;
+    b.addScaledVector(up, -b.dot(up));
+    if (b.lengthSq() < 1e-8 || b.dot(this.facing) < -0.999) b.copy(this.facing);
+    else b.normalize().lerp(this.facing, easeShare(rate, dt)).normalize();
   }
 
   /** Lift feet that are under the terrain up onto it (radially). */
@@ -585,6 +688,32 @@ export class PlayerController {
 
   /** Over-the-shoulder camera. */
   /** Drop the motion into a push (`c` from a resolve), so the body slides along what pushed it. */
+  /**
+   * Move by the velocity for `h` seconds on the sphere (sky review 1): the ground part along the great
+   * circle, turning the velocity (and `vH`, the roll's heading) with the ground, and the radial part
+   * straight up or down. A straight line through the air would carry a fast body away from the
+   * centre (on Lumen, 240 m, a 16 m/s gallop lifted it by a quarter of the moon's pull), while the
+   * server's envelope is a radial ballistic path: a jump is as high at a gallop as standing still.
+   */
+  private advance(h: number, vH: THREE.Vector3) {
+    const r = this.pos.length();
+    const up = _aUp.copy(this.pos).divideScalar(r || 1);
+    const vUp = this.vel.dot(up);
+    const t = _aT.copy(this.vel).addScaledVector(up, -vUp);
+    const ground = t.length() * h;
+    if (!(r > 1) || ground < 1e-9) {
+      this.pos.addScaledVector(this.vel, h);
+      return;
+    }
+    const axis = _aAxis.crossVectors(up, t).normalize();
+    const angle = ground / r;
+    this.pos.applyAxisAngle(axis, angle);
+    this.vel.applyAxisAngle(axis, angle);
+    vH.applyAxisAngle(axis, angle);
+    if (this.dodgeT > 0) this.dodgeDir.applyAxisAngle(axis, angle);
+    this.pos.addScaledVector(_aUp.copy(this.pos).divideScalar(r), vUp * h);
+  }
+
   private slide(c: PropContact, vH: THREE.Vector3) {
     const n = _dir.set(c.nx, c.ny, c.nz);
     const into = this.vel.dot(n);
@@ -605,10 +734,83 @@ export class PlayerController {
   /** `dt`: the game time since the last placement (s); the eases move by it, not by a step per placement (review B2). */
   placeCamera(camera: THREE.PerspectiveCamera, dt = 1 / 60) {
     const t = Math.max(0, dt);
-    this.camEaseOut = CAMERA_EASE_OUT_MPS * t;
+    const wantFirst = this.viewNow === "first";
+    const was = this.eyeBlend;
+    const wasView = this.viewBlend;
+    this.viewBlend = stepBlend(this.viewBlend, wantFirst ? 1 : 0, t);
+    // Leaving first person: the third-person camera grows back out from the head (eased, never through a wall).
+    if (wasView === 1 && this.viewBlend < 1) this.camReach = this.lensReach = 0;
     const up = _up.copy(this.pos).normalize();
     const right = _right.crossVectors(this.camForward, up).normalize();
     const look = _look.copy(this.camForward).applyAxisAngle(right, this.camPitch);
+    if (this.viewBlend >= 1) {
+      // All the way in: the eye only, no third-person line to check.
+      this.closeBlend = this.closeGoal = 0;
+      if (was === 0) this.eye.snap();
+      this.placeEye(camera, up, right, look, t);
+      camera.position.copy(_eye);
+      camera.up.copy(up);
+      camera.lookAt(_eyeTarget);
+      return;
+    }
+    this.placeThird(camera, up, right, look, t);
+    // Squeezed against the head: frame from the eyes until the line behind is clear again (#34).
+    const near = _cam.distanceTo(_head);
+    if (wantFirst) this.closeGoal = 0;
+    else if (near < CLOSE_IN) this.closeGoal = 1;
+    else if (near > CLOSE_OUT) this.closeGoal = 0;
+    if (this.closeGoal || this.closeBlend > 0 || this.viewBlend > 0) {
+      if (was === 0) this.eye.snap();
+      // The eyes only if they have a clear view themselves; else the third-person lens stays (it is clear).
+      if (!this.placeEye(camera, up, right, look, t) && !wantFirst) this.closeGoal = 0;
+    }
+    this.closeBlend = stepBlend(this.closeBlend, this.closeGoal, t);
+    const k = smoothBlend(this.eyeBlend);
+    if (k > 0) {
+      _cam.lerp(_eye, k);
+      _target.lerp(_eyeTarget, k);
+    }
+    camera.position.copy(_cam);
+    camera.up.copy(up);
+    camera.lookAt(_target);
+  }
+
+  /**
+   * The first-person eye into `_eye` and its look target into `_eyeTarget`: the head's height and lean
+   * (eased, no sway or roll: game/view.ts EyeFollow), a little in front of the face. A solid right in
+   * front (pressed against a wall) backs the eye off along the heading until the near plane is clear.
+   */
+  private placeEye(camera: THREE.PerspectiveCamera, up: THREE.Vector3, right: THREE.Vector3, look: THREE.Vector3, t: number): boolean {
+    if (this.hasHead) {
+      const d = _eyeDir.copy(this.headPoint).sub(this.pos);
+      this.eye.follow(d.dot(up), d.dot(this.camForward), d.dot(right), t);
+    } else this.eye.rest(rideCamera(this.rideBlend).lift, t);
+    const base = _eyeBase.copy(this.pos).addScaledVector(up, this.eye.up).addScaledVector(right, this.eye.side);
+    const ahead = this.eye.forward + VIEW.eyeForward;
+    // From in front of the face back along the heading, down to EYE_BACKOFF behind the head's centre:
+    // the first spot nothing stands between the head and, with the whole near plane clear.
+    for (let along = ahead; along >= -EYE_BACKOFF - 1e-6; along -= CAMERA_LENS_STEP) {
+      _eye.copy(base).addScaledVector(this.camForward, along);
+      _eyeTarget.copy(_eye).addScaledVector(look, 6);
+      if (this.eyeReachable(base, _eye) && !this.lensBlocked(camera, _eye, _eyeTarget, up)) return true;
+    }
+    // Nowhere clear (a face in a wall under a low beam): at the head's centre, the best there is.
+    _eye.copy(base);
+    _eyeTarget.copy(_eye).addScaledVector(look, 6);
+    return false;
+  }
+
+  /** Nothing solid between the head's centre `base` and the eye at `p` (with the lens pad). */
+  private eyeReachable(base: THREE.Vector3, p: THREE.Vector3): boolean {
+    const d = _eyeDir.copy(p).sub(base);
+    const l = d.length();
+    if (l < 1e-6) return true;
+    return this.cameraHit(base, d.divideScalar(l), l + CAMERA_LENS_PAD) > l + CAMERA_LENS_PAD;
+  }
+
+  /** The over-the-shoulder camera into `_cam`, its look target into `_target`. */
+  private placeThird(camera: THREE.PerspectiveCamera, up: THREE.Vector3, right: THREE.Vector3, look: THREE.Vector3, t: number) {
+    this.camEaseOut = CAMERA_EASE_OUT_MPS * t;
     const ride = rideCamera(this.rideBlend); // in the saddle: eyes higher, camera further back
     const head = _head.copy(this.pos).addScaledVector(up, 1.65 + ride.lift);
     const back = this.camDistance + ride.back;
@@ -627,9 +829,6 @@ export class PlayerController {
       const other = own < CAMERA_SWAP_REACH ? this.cameraLine(camera, head, look, right, up, back, -this.shoulderGoal, false, _probe, _probeTarget) : 0;
       if (other > own + CAMERA_SWAP_GAIN) this.shoulderGoal = -this.shoulderGoal;
     } else if (settled && this.shoulderGoal < 0 && this.cameraLine(camera, head, look, right, up, back, 1, false, _probe, _probeTarget) >= this.lineFull) this.shoulderGoal = 1;
-    camera.position.copy(_cam);
-    camera.up.copy(up);
-    camera.lookAt(target);
   }
 
   /**

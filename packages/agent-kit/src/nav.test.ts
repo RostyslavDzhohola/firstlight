@@ -30,6 +30,11 @@ describe("steering", () => {
   it("leaves every walled safe zone through a gate and comes back in, on every body", () => {
     for (const id of BODY_IDS) {
       const w = bodyWorld(id);
+      // A body with no walled safe zone (Lumen, the moon) has no gates to steer through.
+      if (!w.walledCentre) {
+        expect(w.gates, id).toEqual([]);
+        continue;
+      }
       expect(w.gates.length, id).toBeGreaterThan(0);
       const centre = w.walledCentre!;
       const start = w.onGround(id === "portus" ? towardDir(centre, norm(w.gates[0]!), 6, w.R) : centre);

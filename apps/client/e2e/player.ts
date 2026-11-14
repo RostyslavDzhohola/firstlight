@@ -78,7 +78,7 @@ export interface Snap {
   ui: { visibleE2e: string[]; overlays: string[]; pauseMenuMode: string | null; photo: boolean | null; loggedOutCard: boolean };
   lastDenied: { action: string; reason: string; t: number } | null;
   net?: { roomId: string; sessionId: string } | null;
-  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; maxHp?: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
+  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; view?: string | null; viewNow?: string | null; viewBlend?: number | null; name: string | null; starter: number | null; hp: number | null; maxHp?: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
   zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "outpost" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
   /** The nearest pad's centre (Portus: the plaza). */
   pad?: Target | null;
@@ -494,12 +494,25 @@ export class Player {
   async walkTo(target: (s: Snap) => Target | null, arrived: (s: Snap) => boolean, opts: { timeoutMs?: number; sprint?: boolean; avoidPortal?: boolean } = {}) {
     const until = Date.now() + (opts.timeoutMs ?? 30_000);
     const trail: number[][] = [];
-    let side = "KeyD";
+    let stuck = 0;
+    let best = { d: Infinity, at: Date.now() };
+    let leftTown = false;
     while (Date.now() < until) {
       const s = await this.snap();
       if (arrived(s)) return true;
       const t = target(s);
       if (!t) return false;
+      // Inside a walled outpost or town with the target beyond its wall, the walk slides along the
+      // palisade without getting closer (150 s on Arcadia's): no 2 m of progress in 8 s there, and it
+      // leaves through the nearest gate (once per walk), then goes on from outside.
+      const now = Date.now();
+      if (t.surface < best.d - 2) best = { d: t.surface, at: now };
+      else if (!leftTown && now - best.at > 8000 && (s.gates?.length ?? 0) > 0 && s.zone?.server === "safe") {
+        leftTown = true;
+        await this.walkOutOfTown(Math.max(20_000, until - now));
+        best = { d: Infinity, at: Date.now() };
+        continue;
+      }
       const go = await this.steer(t.bearing, Math.min(4, t.surface + 0.5), s, opts.avoidPortal ?? true);
       if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
       const ms = Math.max(150, Math.min(900, (Math.min(t.surface, go.clear) / 6) * 1000));
@@ -509,17 +522,31 @@ export class Player {
         const a = trail[trail.length - 4]!;
         const b = s.player!.pos;
         if (Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1) {
-          // Still stuck (a slope, a creature, a corner the rays missed): back off, side-step, hop.
-          await this.hold(["KeyS"], 400);
-          await this.hold([side], 900);
-          await this.hold([side, "KeyW"], 700);
-          await this.tap("Space");
-          side = side === "KeyD" ? "KeyA" : "KeyD";
+          await this.unstick(t.bearing, ++stuck);
           trail.length = 0;
         }
       }
     }
     return arrived(await this.snap());
+  }
+
+  /**
+   * Stuck on the way to `want` (degrees from the camera; `attempt` counts from 1 per walk): a low
+   * fence or wall the clearance rays see over, a slope, a creature. Back off, turn well off the blocked
+   * line to one side (the most open of 70–130° there, by the rays), sprint round it and hop. The side
+   * stays the same for two attempts before switching, so a long wall (an outpost's) is walked round
+   * instead of bounced along by alternating side-steps. Returns the heading taken.
+   */
+  async unstick(want: number, attempt: number): Promise<number> {
+    if (attempt > 1 && attempt % 2 === 1) this.lastSide = -this.lastSide;
+    await this.hold(["KeyS"], 500);
+    const offs = [70, 90, 110, 130].map((o) => wrap180(want + this.lastSide * o));
+    const got = (await this.clearance(offs, 12)) ?? [];
+    const heading = got.find((c) => c.clear >= 6)?.bearing ?? offs[1]!;
+    await this.turn(heading);
+    await this.hold(["ShiftLeft", "KeyW"], 1400);
+    await this.tap("Space");
+    return heading;
   }
 
   /**
