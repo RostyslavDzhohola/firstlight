@@ -181,20 +181,24 @@ export async function sendEmailCode(email: string): Promise<Result> {
 }
 
 
-let devKeyAsk: Promise<string> | null = null;
-/** This run's dev sign-in key, which the Vite dev server gives only to this machine's own pages (vite.config.ts). */
-function devSigninKey(): Promise<string> {
-  devKeyAsk ??= fetch("/@firstlight/dev-key", { cache: "no-store" })
-    .then((r) => (r.ok ? r.text() : ""))
-    .catch(() => "");
-  return devKeyAsk;
+/** This run's dev sign-in key: what the page opened from the link Vite printed kept (net/devKey.ts; never fetched). */
+async function devSigninKey(): Promise<string> {
+  const { devKeyIn } = await import("./devKey.ts");
+  let store: Storage | null = null;
+  try {
+    store = localStorage;
+  } catch {
+    /* blocked storage */
+  }
+  return devKeyIn(store) ?? "";
 }
 
 /**
  * #84: a local server without a mail key sends no email; it keeps the code and hands it to the card
  * (GET /api/account/dev-code) when asked with this run's key, which only the root `pnpm dev` gives
- * the server and the Vite dev server (and Vite only to this machine's pages). In every build
- * __FL_DEV_CODES__ is a literal false, so this returns before any fetch (which the bundler drops).
+ * the server and the Vite dev server, and Vite only to the developer's terminal, as a link (D-sec3-6).
+ * In every build __FL_DEV_CODES__ is a literal false, so this returns before any of it (which the
+ * bundler drops).
  * The queued send for a returning player's address goes out just after the answer, so this tries a
  * few times.
  */

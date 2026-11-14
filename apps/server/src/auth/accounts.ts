@@ -367,7 +367,8 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
       // production" is not enough, and neither is "looks local": a header's absence proves nothing (a
       // reverse proxy on this machine that adds no forwarding header looks exactly like the developer;
       // review round two, blocker 1). The code is readable only with the key the root `pnpm dev`
-      // generated for this run (tools/dev.ts), which only the developer's own server and Vite hold;
+      // generated for this run (tools/dev.ts), which only the developer's own server and Vite hold,
+      // and Vite shows only in the developer's terminal, as a link (no request returns it; D-sec3-6);
       // without that key configured the route does not exist. Defence in depth around it: the
       // DEV_SIGNIN_CODES=1 opt-in, never in production, a loopback socket with a loopback Host and no
       // forwarding header (localDevRequest), and an Origin that is absent or one of our client

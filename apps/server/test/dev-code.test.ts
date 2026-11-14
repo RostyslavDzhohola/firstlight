@@ -227,12 +227,16 @@ describe("the switch", () => {
       rmSync(out, { recursive: true, force: true });
     }
   });
-  it("the dev client sends the key, which the Vite dev server hands only to this machine's pages, never in a module or a build", () => {
+  // Review round three, #2: the key itself could be fetched from Vite through a proxy that made the
+  // request look local. Now no request returns it (client net/devKey.test.ts drives the plugin).
+  it("the dev client sends the key, which no request returns: Vite prints it in the terminal as a link, never in a module or a build", () => {
     const vite = readFileSync(new URL("../../client/vite.config.ts", import.meta.url), "utf8");
     expect(vite).toMatch(/__FL_DEV_CODES__:\s*JSON\.stringify\(command === "serve"/);
     expect(vite).toMatch(/apply: "serve"/);
+    expect(vite).not.toMatch(/middlewares\.use|dev-key"|devKeyGuard/);
+    expect(vite).toMatch(/#fl-dev-key=\$\{key\}/);
     const auth = readFileSync(new URL("../../client/src/net/auth.ts", import.meta.url), "utf8");
     expect(auth).toMatch(/"x-firstlight-dev-key"/);
-    expect(auth).toMatch(/"\/@firstlight\/dev-key"/);
+    expect(auth).not.toMatch(/fetch\("\/@firstlight/);
   });
 });

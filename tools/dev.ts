@@ -2,9 +2,11 @@
 // thing only this launcher does: a fresh random key for this run, DEV_SIGNIN_KEY, handed to both
 // processes through their environment. The dev client sends it when it asks the server for a sign-in
 // code the dev outbox kept (#84, GET /api/account/dev-code); the server serves codes only to a holder
-// of the key, and without one the route does not exist. Nothing else on the machine or the network
-// has it, so a proxy, another site's page or a LAN neighbour can't read a code (review round two,
-// blocker 1). Vite gives the key to the dev server's pages only, never to a build (vite.config.ts).
+// of the key, and without one the route does not exist (review round two, blocker 1). No request
+// returns the key, so a proxy, another site's page or a LAN neighbour can't get it (review round
+// three, #2; D-sec3-6): Vite prints a link with the key in its fragment in this terminal ("Dev
+// sign-in codes: open http://localhost:5173/#fl-dev-key=…"), and the browser that opens it once per
+// run keeps it (apps/client/src/net/devKey.ts). Never in a build (vite.config.ts).
 //
 // Starting the two by hand: set the same DEV_SIGNIN_KEY (43+ random characters) for both.
 
