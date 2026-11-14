@@ -124,6 +124,8 @@ export interface Npc extends NpcActor {
   unreachBy?: { id: string; since: number };
   /** Golden Hopbit / Ticket #000 bookkeeping. */
   egg?: { follower: string | null; since: number; walker?: string; walkFrom?: V3; walkDir?: V3 };
+  /** The food chain (#15): a Dusk Wolf hunting a Woolback (its id) until the hunt gives up. */
+  hunt?: { prey: string; until: number } | null;
   /**
    * Raised by a wrong egg-puzzle answer (reason "egg", key = egg id) or an admin staged scene (reason
    * "stage"): capped per player and room, they expire, and share one repeat-kill decay key.

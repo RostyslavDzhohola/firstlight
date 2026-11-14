@@ -5,6 +5,7 @@
 // Cantors raising Bonewalkers, and the two egg NPCs (Golden Hopbit E3, Ticket #000 E9).
 
 import { NF, NPC_ANIM, NPC_INDEX, NPC_RULES } from "@firstlight/shared/content/npcs";
+import { ECO, ECO_GRAZER, ECO_PREDATOR } from "@firstlight/shared/content/ecology";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, npcSpeedFactor, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
@@ -25,7 +26,8 @@ export function think(sys: NpcSystem, n: Npc, now: number, dt: number) {
   if (n.mode === MODE.SPAWN) {
     if (now >= n.modeUntil) {
       n.state.flags &= ~(NF.SPAWNING | NF.INVULN);
-      sys.setMode(n, MODE.IDLE, now, now + 500);
+      // A food-chain group walking back in (#15) heads for its home ground; everyone else idles.
+      sys.setMode(n, n.goal ? MODE.WANDER : MODE.IDLE, now, now + 500);
       sys.setAnim(n, NPC_ANIM.IDLE);
     }
     return;
@@ -34,6 +36,7 @@ export function think(sys: NpcSystem, n: Npc, now: number, dt: number) {
     updateAttack(sys, n, now, dt);
     return;
   }
+  if (n.hunt) return hunt(sys, n, now, dt);
   if (n.def.id === "golden_hopbit") return golden(sys, n, now, dt);
   if (n.def.id === "ticket_000") return ticket(sys, n, now, dt);
   switch (n.mode) {
@@ -69,6 +72,74 @@ export function think(sys: NpcSystem, n: Npc, now: number, dt: number) {
     default:
       return calm(sys, n, now, dt);
   }
+}
+
+// ------------------------------------------------------------------------------------ the food chain (#15)
+
+/**
+ * Called from the NPC scan: now and then a calm Dusk Wolf of a food-chain pack spots a Woolback within
+ * ECO.huntRadius and its pack goes after it together. Nobody's fight: players in sight come first.
+ */
+export function startHunts(sys: NpcSystem, now: number, sdt: number) {
+  const eco = sys.eco;
+  if (!eco) return;
+  const chance = sdt / ECO.huntEverySeconds;
+  let prey: Npc[] | null = null;
+  for (const n of sys.npcs.values()) {
+    if (n.dead || n.hunt || n.target || n.spawned || n.def.id !== ECO_PREDATOR || !n.point || eco.roleOf(n.point.id) !== "predator") continue;
+    if ((n.mode !== MODE.IDLE && n.mode !== MODE.WANDER) || Math.random() >= chance) continue;
+    prey ??= [...sys.npcs.values()].filter((m) => !m.dead && !m.spawned && m.def.id === ECO_GRAZER && m.mode !== MODE.SPAWN);
+    let best: Npc | null = null;
+    let bd: number = ECO.huntRadius;
+    for (const m of prey) {
+      const d = dist(n.pos, m.pos);
+      if (d < bd) {
+        bd = d;
+        best = m;
+      }
+    }
+    if (!best) continue;
+    const until = now + ECO.huntSeconds * 1000;
+    for (const w of sys.npcs.values()) {
+      if (w.point !== n.point || w.dead || w.target || w.hunt || (w.mode !== MODE.IDLE && w.mode !== MODE.WANDER)) continue;
+      w.hunt = { prey: best.id, until };
+      w.goal = null;
+      sys.setMode(w, MODE.CHASE, now);
+      sys.setAnim(w, NPC_ANIM.RUN);
+    }
+  }
+}
+
+function hunt(sys: NpcSystem, n: Npc, now: number, dt: number) {
+  const h = n.hunt!;
+  // A player in sight comes first: the hunt is dropped for the fight.
+  if (now >= n.nextThink) {
+    n.nextThink = now + 250;
+    const p = perceive(sys, n, now);
+    if (p) {
+      n.hunt = null;
+      aggro(sys, n, p, now, true);
+      return;
+    }
+  }
+  const prey = sys.npcs.get(h.prey);
+  if (!prey || prey.dead || now > h.until) {
+    n.hunt = null;
+    sys.setMode(n, MODE.RETURN, now);
+    return;
+  }
+  const d = dist(n.pos, prey.pos);
+  if (d <= n.radius + prey.radius + 0.9) {
+    sys.predatorKill(prey, n);
+    n.hunt = null;
+    // It eats: a rest before it wanders home.
+    sys.setMode(n, MODE.IDLE, now, now + ECO.feedSeconds * 1000);
+    sys.setAnim(n, NPC_ANIM.GRAZE);
+    return;
+  }
+  // The prey bolts when the pack is close (it has its own head start).
+  if (d < ECO.preyFleeRadius && prey.mode !== MODE.FLEE && !prey.target && !prey.attack) startFlee(sys, prey, n.pos, now, 4000);
+  moveTo(sys, n, prey.pos, n.def.runSpeed, dt, 0.3);
 }
 
 // ------------------------------------------------------------------------------------ calm

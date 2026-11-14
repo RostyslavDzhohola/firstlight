@@ -15,13 +15,15 @@ import type { V3 } from "../geometry.ts";
 import type { RoomSystem } from "../systems.ts";
 import { chest, stepNpcProjectiles, type NpcProjectile } from "./attacks.ts";
 import { BossController } from "./boss.ts";
-import { onNpcHurt, think } from "./brain.ts";
+import { onNpcHurt, startHunts, think } from "./brain.ts";
 import { NPC_COPY_SYSTEM, restoreNpcCopy, snapshotNpcCopy, type NpcCopyState } from "./persist.ts";
 import { MODE, MODE_NAME, type Mode, type Npc } from "./npc.ts";
 import { pruneRewardMaps, rewardKill } from "./rewards.ts";
 import { PayoutQueue } from "./payouts.ts";
 import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
 import { buildSpawnPoints, type SpawnPoint } from "./spawns.ts";
+import { ECO_RETURN_SECONDS, Ecology } from "./ecology.ts";
+import { ECO } from "@firstlight/shared/content/ecology";
 import { clearOfStructures, makeGround, npcBody, placeOnGround, type Ground } from "./steer.ts";
 import { NPC_TUNING } from "./tuning.ts";
 import { dist, dist2, dot, flatDist, len, stableTangentAt, tangentDir, tangentize, up } from "./vec.ts";
@@ -43,6 +45,8 @@ interface GroupState {
   cleared: boolean;
   respawnLeft: number;
   lastNearAt: number;
+  /** A food-chain group (#15) coming back: it walks in from nearby instead of appearing at home. */
+  arrive?: boolean;
 }
 
 interface TokenBook {
@@ -71,6 +75,8 @@ export class NpcSystem implements RoomSystem {
   readonly groups: GroupState[];
   readonly npcs = new Map<string, Npc>();
   readonly boss: BossController | null;
+  /** The food chain (#15): Woolbacks and Dusk Wolves by region cell; null on Portus and the moon. */
+  readonly eco: Ecology | null;
   readonly projectiles: NpcProjectile[] = [];
   live: LivePlayer[] = [];
   noises: Noise[] = [];
@@ -105,6 +111,8 @@ export class NpcSystem implements RoomSystem {
     // Portus has no boss and no planet tables, but its wild land outside the town walls has creeps (D-zones-1).
     this.points = buildSpawnPoints(world.terrain, this.arena);
     this.groups = this.points.map((p) => ({ point: p, active: false, members: p.members.map(() => null), dead: p.members.map(() => false), cleared: false, respawnLeft: 0, lastNearAt: 0 }));
+    const eco = this.planet ? new Ecology(world.body.id, this.groups) : null;
+    this.eco = eco?.enabled ? eco : null;
     const bd = BOSS_BY_BODY[world.body.id];
     this.boss = bd && this.arena ? new BossController(this, bd, this.arena) : null;
     // A fresh room on a copy that was emptied or restarted keeps its dead boss and cleared groups (F12 B2).
@@ -130,6 +138,7 @@ export class NpcSystem implements RoomSystem {
       const sdt = this.lastScan ? (now - this.lastScan) / 1000 : 0;
       this.lastScan = now;
       this.scan(now, sdt);
+      this.stepEcology(now, sdt);
       this.auras();
     }
     if (now - this.lastPrune >= 60_000) {
@@ -225,15 +234,21 @@ export class NpcSystem implements RoomSystem {
       const near = this.nearestLiveAny(g.point.pos);
       // Wake within activateRadius; stay awake while anyone is within the (larger) despawn radius.
       if (near <= (g.active ? NPC_TUNING.despawnRadius : act)) g.lastNearAt = now;
+      const role = this.eco?.roleOf(g.point.id) ?? null;
       if (g.cleared) {
         const slow = near <= NPC_RULES.respawnSlowRadius;
-        g.respawnLeft -= sdt * (slow ? 0.5 : 1);
+        // A food-chain group comes back as fast as its cell can spare animals (#15), never while it is near-empty.
+        g.respawnLeft -= sdt * (slow ? 0.5 : 1) * (role ? this.eco!.returnRate(g.point.id) : 1);
         // A slowed countdown drifts from wall time: checkpoint it (≤ 1/s) so a crash can't respawn it early.
         if (slow && sdt > 0) this.copyDirty = true;
         if (g.respawnLeft <= 0) {
           g.cleared = false;
           g.dead.fill(false);
           this.copyDirty = true;
+          if (role) {
+            g.arrive = true;
+            this.eco!.counts.returns++;
+          }
         }
       }
       // A Golden Hopbit whose own timer ran out comes back to its pack while the pack is still out.
@@ -243,8 +258,54 @@ export class NpcSystem implements RoomSystem {
         this.spawnGroup(g, now);
         budget -= g.point.members.length;
       }
+      // A live food-chain group below its cell's fill gains a member now and then (born, or wandered in).
+      else if (role && g.active && !g.cleared && this.ambientOn && sdt > 0 && Math.random() < sdt / ECO.refillSeconds) this.refill(g, now);
       else if (g.active && now - g.lastNearAt > NPC_TUNING.despawnAfterMs && !g.members.some((m) => m && m.target)) this.despawnGroup(g);
     }
+  }
+
+  /**
+   * The food chain's numbers (#15): which cells have chain groups awake (the real wolves hunt there)
+   * and how many players stand in each; then the real wolves look for prey.
+   */
+  private stepEcology(now: number, sdt: number) {
+    const eco = this.eco;
+    if (!eco) return;
+    const live = new Set<number>();
+    for (const g of this.groups) if (g.active) {
+      const e = eco.groups.get(g.point.id);
+      if (e) live.add(e.cell);
+    }
+    let crowd: Map<number, number> | null = null;
+    if (this.live.length > 1) {
+      crowd = new Map();
+      for (const l of this.live) {
+        const c = eco.cellAt(l.pos[0], l.pos[1], l.pos[2]);
+        if (c) crowd.set(c.cell, (crowd.get(c.cell) ?? 0) + 1);
+      }
+    }
+    if (eco.tick(sdt, (c) => live.has(c), (c) => Math.max(0, (crowd?.get(c) ?? 1) - 1))) this.copyDirty = true;
+    if (sdt > 0 && live.size) startHunts(this, now, sdt);
+  }
+
+  /** Bring back one member a live food-chain group is short of, beside the herd (#15). */
+  private refill(g: GroupState, now: number) {
+    const want = this.eco!.want(g.point.id);
+    let out = 0;
+    for (let i = 0; i < g.members.length; i++) if (g.members[i] && !g.dead[i]) out++;
+    if (out >= want) return;
+    const i = g.dead.findIndex((d, k) => d && !g.members[k]);
+    if (i < 0) return;
+    g.dead[i] = false;
+    this.eco!.counts.births++;
+    this.spawnGroup(g, now);
+  }
+
+  /** A wolf caught its prey (#15): the prey dies (no rewards, nobody's kill) and the cell counts it. */
+  predatorKill(prey: Npc, wolf: Npc) {
+    if (prey.dead || wolf.dead) return;
+    prey.state.hp = 0;
+    this.onKilled(prey, null, true);
   }
 
   /** Nearest player of any kind (alive, connected or lingering) — spawning only needs presence. */
@@ -253,8 +314,28 @@ export class NpcSystem implements RoomSystem {
   }
 
   private spawnGroup(g: GroupState, now: number) {
-    g.active = true;
     const pt = g.point;
+    const eco = this.eco?.groups.has(pt.id) ? this.eco : null;
+    if (eco && !g.active) {
+      // A food-chain group (#15) comes out only as full as its cell: the rest are away (dead flags).
+      const want = eco.want(pt.id);
+      if (want <= 0) {
+        g.cleared = true;
+        g.dead.fill(true);
+        g.respawnLeft = ECO_RETURN_SECONDS * NPC_TUNING.respawnScale;
+        return;
+      }
+      let out = 0;
+      for (let i = 0; i < g.dead.length; i++) if (!g.dead[i]) out++;
+      for (let i = g.dead.length - 1; i >= 0 && out > want; i--) if (!g.dead[i]) {
+        g.dead[i] = true;
+        out--;
+      }
+    }
+    g.active = true;
+    // Returning: they walk in from ECO.arriveFrom metres off, in a direction of the point's own.
+    const arrive = eco && g.arrive ? ((pt.id * 2.399963) % (Math.PI * 2)) : null;
+    g.arrive = false;
     for (let i = 0; i < pt.members.length; i++) {
       if (g.dead[i] || g.members[i]) continue;
       const m = pt.members[i]!;
@@ -263,11 +344,19 @@ export class NpcSystem implements RoomSystem {
         continue;
       }
       const def = NPC_DEFS[m.def]!;
-      const d = walk(pt.dir, pt.t1, m.a, pt.t2, m.b, this.ground.R);
+      const off = arrive === null ? 0 : ECO.arriveFrom;
+      const d = walk(pt.dir, pt.t1, m.a + Math.cos(arrive ?? 0) * off, pt.t2, m.b + Math.sin(arrive ?? 0) * off, this.ground.R);
       const R = this.ground.R;
       let pos = placeOnGround(this.ground, [d[0] * R, d[1] * R, d[2] * R], def.locomotion, def.hover ?? 0);
       if (def.locomotion !== "hover" && len(pos) - R < this.ground.water - 0.6 && def.locomotion === "ground") pos = placeOnGround(this.ground, pt.pos, def.locomotion, def.hover ?? 0);
       const n = this.createNpc(m.def, m.level, pos, now, { point: pt, member: i, roam: pt.roam });
+      if (arrive !== null) {
+        // Home is still the herd's ground: they walk there once they've materialised.
+        const h = walk(pt.dir, pt.t1, m.a, pt.t2, m.b, R);
+        n.home = placeOnGround(this.ground, [h[0] * R, h[1] * R, h[2] * R], def.locomotion, def.hover ?? 0);
+        n.anchor = [n.home[0], n.home[1], n.home[2]];
+        n.goal = [n.home[0], n.home[1], n.home[2]]; // brain.ts walks there when the spawn ends
+      }
       if (m.golden) n.state.flags |= NF.GOLDEN;
       if (def.id === "ticket_000" || def.id === "crypt_sentinel" && pt.kind === "single") n.facing = stableTangentAt(pos);
       g.members[i] = n;
@@ -509,7 +598,7 @@ export class NpcSystem implements RoomSystem {
     onNpcHurt(this, n, p ?? null, this.now || this.world.now());
   }
 
-  private onKilled(n: Npc, by: string | null) {
+  private onKilled(n: Npc, by: string | null, byPredator = false) {
     if (n.dead) return;
     const now = this.world.now();
     n.dead = true;
@@ -534,9 +623,12 @@ export class NpcSystem implements RoomSystem {
         g.respawnLeft = g.point.respawnSec * NPC_TUNING.respawnScale;
       }
       this.copyDirty = true;
+      const role = this.eco?.roleOf(g.point.id);
+      if (role && !n.spawned) this.eco!.onDeath(g.point.id, role, byPredator);
     }
     if (n.summoner) this.npcs.get(n.summoner)?.raised.delete(n.id);
     this.dissolveChildren(n);
+    if (byPredator) return; // the wolf's meal: nobody's kill, no drops (#15)
     if (n.def.family === "egg") return; // eggs pay through their own rules (brain.ts)
     rewardKill(this, n, by, now);
   }
@@ -852,7 +944,17 @@ export class NpcSystem implements RoomSystem {
           id: n.id, kind: n.defIndex, def: n.def.id, level: n.level, x: n.pos[0], y: n.pos[1], z: n.pos[2], hx: n.home[0], hy: n.home[1], hz: n.home[2],
           hp: n.state.hp, maxHp: n.state.maxHp, mode: MODE_NAME[n.mode], flags: n.state.flags, target: n.target?.id ?? "", area: n.point?.area ?? null, boss: !!n.boss,
         }));
-        this.world.send(p, "npcList", { npcs: out, req: msg.req ?? null, points: this.points.length, active: this.groups.filter((g) => g.active).length, tickMs: this.avgTickMs });
+        this.world.send(p, "npcList", { npcs: out, req: msg.req ?? null, points: this.points.length, active: this.groups.filter((g) => g.active).length, tickMs: this.avgTickMs, eco: this.eco?.summary() ?? null });
+        break;
+      }
+      case "eco": {
+        // The food chain's numbers (#15): the planet's totals and the cell the admin stands in;
+        // `run` seconds fast-forwards the model alone (a time-lapse for tests and films).
+        if (!this.eco) return;
+        const run = num("run", 0);
+        if (run > 0 && Number.isFinite(run)) this.eco.advance(run);
+        const at = actorPos(p);
+        this.world.send(p, "npcList", { npcs: [], req: msg.req ?? null, points: this.points.length, active: this.groups.filter((g) => g.active).length, tickMs: this.avgTickMs, eco: this.eco.summary(), ecoCell: this.eco.cellAt(at[0], at[1], at[2]), ecoCounts: this.eco.counts });
         break;
       }
       case "ambient": {

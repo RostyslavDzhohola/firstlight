@@ -30,6 +30,8 @@ export interface NpcCopyState {
    * saves have [spawn point id, return time]; -1 keeps a pre-key server from reading the id.
    */
   golden?: [number, number, string?][];
+  /** The food chain (#15): w, p, forage per region cell (ecology.ts). */
+  eco?: number[];
 }
 
 function sig(p: SpawnPoint): string {
@@ -58,8 +60,9 @@ export function snapshotNpcCopy(sys: NpcSystem, now: number): NpcCopyState | nul
     const pt = sys.groups[p]?.point;
     if (pt) golden.push([-1, back, spawnKey(pt)]);
   }
-  if (!groups.length && !boss && !fight && !golden.length) return null;
-  return { v: 1, at: now, groups, ...(boss ? { boss } : {}), ...(fight ? { fight } : {}), ...(golden.length ? { golden } : {}) };
+  const eco = sys.eco?.snapshot();
+  if (!groups.length && !boss && !fight && !golden.length && !eco) return null;
+  return { v: 1, at: now, groups, ...(boss ? { boss } : {}), ...(fight ? { fight } : {}), ...(golden.length ? { golden } : {}), ...(eco ? { eco } : {}) };
 }
 
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -84,6 +87,7 @@ function validFight(f: unknown): f is BossFight {
 export function restoreNpcCopy(sys: NpcSystem, s: NpcCopyState | null, now: number) {
   if (!s || typeof s !== "object" || s.v !== 1) return;
   const away = num(s.at) ? Math.max(0, (now - s.at) / 1000) : 0;
+  sys.eco?.restore(s.eco, away);
   const byKey = new Map(sys.groups.map((g) => [spawnKey(g.point), g]));
   for (const e of Array.isArray(s.groups) ? s.groups : []) {
     if (!e || typeof e !== "object" || !str(e.k)) continue;
