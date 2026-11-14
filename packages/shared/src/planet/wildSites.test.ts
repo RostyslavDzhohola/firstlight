@@ -132,23 +132,7 @@ describe("wild site colliders", () => {
     expect(ck.crosses(court[0], court[1], court[2], wall[0], wall[1], wall[2])).toBe(true);
   });
 
-  it("lets a player climb the watchtowers step by step to the lookout", () => {
-    for (const name of ["a_watchtower", "m_relay"]) {
-      const prefab = WILD_SITE_PREFABS.find((p) => p.name === name)!;
-      const top = prefab.lookout[2];
-      const boxes = prefab.solids.filter((s) => s[0] === 0 && s[7] === 0);
-      const touching = (a: (typeof boxes)[number], b: (typeof boxes)[number]) =>
-        Math.abs(a[1] - b[1]) <= a[3] + b[3] + 0.05 && Math.abs(a[2] - b[2]) <= a[4] + b[4] + 0.05;
-      const start = boxes.filter((s) => s[6] <= 0.35);
-      const seen = new Set(start);
-      const queue = [...start];
-      while (queue.length) {
-        const a = queue.shift()!;
-        for (const b of boxes) if (!seen.has(b) && touching(a, b) && b[6] - a[6] <= PLAYER_BODY.step && b[6] - a[6] > -2) { seen.add(b); queue.push(b); }
-      }
-      expect([...seen].some((s) => Math.abs(s[6] - top) < 1e-6), `${name}: lookout reachable`).toBe(true);
-    }
-  });
+  // Climbing the watchtowers is walked by the real controller against the server: apps/server/test/wild-site-climb.test.ts.
 
   it("finds a site by its discovery ring", () => {
     const t = T("meridian");
