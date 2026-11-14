@@ -15,14 +15,18 @@ import { bool, cameraPosition, clamp, dot, float, interleavedGradientNoise, leng
 
 /** Without a skeleton (the capsule stand-in): the chest is this far above the rendered feet (m). */
 export const FADE_CHEST = 1.0;
-/** Half-size of the cleared area round the chest at the player's distance (m): head to feet. */
-export const FADE_RADIUS = 1.05;
+/** Half-size of the cleared area round the chest at the player's distance (m): head to feet, plus a soft rim (#74). */
+export const FADE_RADIUS = 1.35;
 /** Half-size of the cleared area along the aim (the crosshair) at the player's distance (m). */
 export const FADE_AIM_RADIUS = 0.45;
 /** Fragments within this depth of the player's (m) stay solid: a trunk beside you isn't in the way. */
 export const FADE_DEPTH_MARGIN = 0.3;
-/** Fraction of the cone (from its centre) that is fully cleared; the rest is a soft dither ramp. */
-export const FADE_CORE = 0.6;
+/**
+ * Fraction of the cone (from its centre) that is fully cleared; the rest is a soft dither ramp. 0.45 of
+ * 1.35 m keeps the cleared core at 0.6 m (as before) and widens the ramp from 0.42 to 0.74 m, so a trunk
+ * eases in and out as the camera turns past it instead of popping (#74).
+ */
+export const FADE_CORE = 0.45;
 /**
  * The local player's own avatar (#22, D-view-5): fully there with the camera beyond OWN_FADE_FAR (m)
  * of its chest and head, fully dissolved within OWN_FADE_NEAR. A wall or a stall behind the player
