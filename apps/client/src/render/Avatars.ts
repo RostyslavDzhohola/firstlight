@@ -127,6 +127,35 @@ const BODY_SOCKET: readonly (readonly [number, number, number, number])[] = [
 export const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
   new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0)));
 
+/**
+ * Block grips (#76, D-fix-view-3): while the guard is held (`block_hold`) these held items turn in the
+ * hand, a rotation in the hand socket's axes after the mount (Euler XYZ, degrees). The shared block
+ * clip holds a sword's guard; a staff held its way ran through the Kappa's hat brim and down into the
+ * shell. Turned, it lies across the guard. Checked on both Kappa looks with the held-prop clip check
+ * (tools/blender/props3d/prop_check.py --rot) and renders from three sides.
+ */
+const BLOCK_GRIP_DEG: Readonly<Record<string, readonly [number, number, number]>> = {
+  riverstaff: [-135, -5, 12],
+};
+const BLOCK_GRIP = new Map(
+  Object.entries(BLOCK_GRIP_DEG).map(([id, [x, y, z]]) => [id, new THREE.Quaternion().setFromEuler(new THREE.Euler((x * Math.PI) / 180, (y * Math.PI) / 180, (z * Math.PI) / 180, "XYZ"))]),
+);
+/** Seconds the held item takes to turn into its block grip and back (about the clip's own blend in). */
+export const BLOCK_GRIP_TIME = 0.15;
+const _grip = new THREE.Quaternion();
+
+/**
+ * The held item's rotation in the hand socket: its mount (`rest`: GUN_GRIP or none) turned by the
+ * weapon's block grip, `t` of the way (0 … 1, smoothstepped). Weapons without a block grip stay at rest.
+ */
+export function heldWeaponQuat(id: string, t: number, rest: THREE.Quaternion, out: THREE.Quaternion): THREE.Quaternion {
+  const grip = BLOCK_GRIP.get(id);
+  out.copy(rest);
+  if (!grip || t <= 0) return out;
+  const x = Math.min(1, t);
+  return out.premultiply(_grip.identity().slerp(grip, x * x * (3 - 2 * x)));
+}
+
 /** Free what one avatar owns: each unique cloned skeleton (bone texture) and every mesh object's
  *  per-object render state (Object3D.dispose() fires the event the renderer listens for). Shared
  *  template geometry, materials and the atlas are never disposed here. */
@@ -258,6 +287,9 @@ export class AvatarView {
   private readonly attached = new Map<SocketName, THREE.Object3D>();
   private weaponIndex = 0;
   private weaponObj: THREE.Object3D | null = null;
+  /** The held item's mount in the hand (GUN_GRIP or none) and how far it is turned into its block grip (0 … 1). */
+  private readonly weaponRest = new THREE.Quaternion();
+  private blockGripT = 0;
   private flagBits = 0;
   private lastAnim: number = ANIM.IDLE;
   private speed = 0;
@@ -334,7 +366,10 @@ export class AvatarView {
     if (obj) {
       // Swords, staffs, wands and bows run through the fist (blade towards the thumb: the socket's
       // rest axes). Guns sit in the hand instead: muzzle along the knuckles, top towards the thumb.
-      if (def.cls === "ranged" && def.delivery !== "arrow") obj.quaternion.copy(GUN_GRIP);
+      if (def.cls === "ranged" && def.delivery !== "arrow") this.weaponRest.copy(GUN_GRIP);
+      else this.weaponRest.identity();
+      obj.quaternion.copy(this.weaponRest);
+      this.blockGripT = 0;
       socket.add(obj);
       this.weaponObj = obj;
       obj.visible = this.rezSolid;
@@ -648,6 +683,7 @@ export class AvatarView {
     this.clock += dt;
     this.drive(anim);
     this.lastAnim = anim;
+    this.stepBlockGrip(dt);
     // LOD-aware mixer stepping
     this.pendingDt += dt;
     if (this.lod === "full") {
@@ -661,6 +697,17 @@ export class AvatarView {
         this.pendingDt = 0;
       }
     } else if (this.pendingDt > 1) this.pendingDt = 1;
+  }
+
+  /** Turn the held item into its block grip while the guard is held, and back out after (#76). */
+  private stepBlockGrip(dt: number) {
+    const obj = this.weaponObj;
+    if (!obj) return;
+    const goal = this.currentName === "block_hold" ? 1 : 0;
+    if (goal === this.blockGripT) return;
+    const step = dt / BLOCK_GRIP_TIME;
+    this.blockGripT = goal > this.blockGripT ? Math.min(1, this.blockGripT + step) : Math.max(0, this.blockGripT - step);
+    heldWeaponQuat(WEAPONS[this.weaponIndex]?.id ?? "", this.blockGripT, this.weaponRest, obj.quaternion);
   }
 
   dispose() {

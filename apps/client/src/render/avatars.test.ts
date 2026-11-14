@@ -450,3 +450,20 @@ describe("the own avatar after a Skipstep (#78)", () => {
     expect(mod.fallClip("fall", true)).toBe("fall");
   });
 });
+
+describe("the Riverstaff's block grip (#76)", () => {
+  it("turns in the hand while the guard is held, eased both ways; other items and guns stay on their mount", () => {
+    const rest = new THREE.Quaternion();
+    const q = new THREE.Quaternion();
+    const axis = (t: number, id = "riverstaff", r = rest) => new THREE.Vector3(0, 0, 1).applyQuaternion(mod.heldWeaponQuat(id, t, r, q));
+    expect(axis(0).z).toBeCloseTo(1, 9);
+    const held = axis(1);
+    expect(held.angleTo(new THREE.Vector3(0, 0, 1))).toBeGreaterThan(0.5); // a real turn, not a nudge
+    const half = axis(0.5);
+    expect(half.angleTo(held)).toBeGreaterThan(0.1);
+    expect(half.angleTo(new THREE.Vector3(0, 0, 1))).toBeGreaterThan(0.1);
+    expect(axis(1, "sunbrand").z).toBeCloseTo(1, 9); // the clip was made for a sword's guard
+    const gun = mod.GUN_GRIP;
+    expect(mod.heldWeaponQuat("carbine", 1, gun, q).angleTo(gun)).toBeCloseTo(0, 9);
+  });
+});
