@@ -16,6 +16,7 @@ import { config } from "../../config.ts";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { rebindAvatarTextures } from "./material.ts";
 import { makeRideClip } from "./ride.ts";
+import { preloadSculptedWeapons, SCULPTED_FILE_COUNT } from "./sculpted.ts";
 import type { TextureSlot } from "../artpacks/ArtPacks.ts";
 
 /** Every look's model file (STARTER_LOOKS ids): first the five starters' original looks, in
@@ -144,7 +145,7 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
   let done = 0;
   const low = lowRes;
   const own = ownNormal;
-  const total = MODEL_FILES.length * 2 + STARTER_FILES.length + 1;
+  const total = MODEL_FILES.length * 2 + STARTER_FILES.length + 1 + SCULPTED_FILE_COUNT;
   const tick = <T>(p: Promise<T>) => p.then((v) => { onProgress?.(++done / total); return v; });
 
   const [anims, chars, textures] = await Promise.all([
@@ -157,6 +158,8 @@ async function load(onProgress?: (frac: number) => void): Promise<AvatarAssets> 
       ]);
       return { albedo, normal };
     })),
+    // Sculpted held items (never rejects: a failed one keeps its code-built model).
+    preloadSculptedWeapons(loader, low, () => onProgress?.(++done / total)),
   ]);
 
   const clips = new Map<string, THREE.AnimationClip>();

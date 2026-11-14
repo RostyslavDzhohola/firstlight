@@ -7,6 +7,7 @@ import { color, float, mix, mx_noise_float, smoothstep, time, uv, vec2 } from "t
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { PALETTES } from "./material.ts";
 import { applyOccluderFadeGated } from "../occluderFade.ts";
+import { sculptedWeapon } from "./sculpted.ts";
 
 type MatKey = "metal" | "metalLight" | "brass" | "wood" | "leather" | "cord" | "ivory" | "feather" | "glass" | "accent" | "blade";
 
@@ -239,8 +240,12 @@ function design(id: string): Piece[] {
 
 const built = new Map<string, THREE.Object3D | null>();
 
-/** A fresh Object3D for this weapon id (shares geometry/materials with every other copy). */
+/** A fresh Object3D for this weapon id (shares geometry/materials with every other copy): the sculpted
+ *  model where one has loaded, else the code-built one. */
 export function weaponModel(id: string, palette: number): THREE.Object3D | null {
+  // A sculpted GLB (sculpted.ts) replaces the code-built model once it has loaded.
+  const sculpted = sculptedWeapon(id, palette);
+  if (sculpted) return sculpted;
   const key = `${id}:${palette}`;
   let proto = built.get(key);
   if (proto === undefined) {
