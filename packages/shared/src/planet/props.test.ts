@@ -49,7 +49,8 @@ function meshFlatness(positions: Float32Array, indices: Uint32Array, x: number, 
   return null;
 }
 
-describe("props", () => {
+// Each test places real props over every body (1-7 s alone on a loaded M1): 30 s, not the 5 s default.
+describe("props", { timeout: 30_000 }, () => {
   const terrains = Object.fromEntries(BODY_IDS.map((id) => [id, createTerrain(id)])) as Record<BodyId, Terrain>;
 
   it("is deterministic: two terrain instances give identical props", () => {
@@ -65,7 +66,6 @@ describe("props", () => {
     }
   });
 
-  // Builds real chunk meshes for every body: ~1-2 s alone, past 5 s when the full suite loads the machine.
   it("places props on the rendered ground, never on water or steep rock", () => {
     let total = 0;
     for (const id of BODY_IDS) {
@@ -91,7 +91,7 @@ describe("props", () => {
       }
     }
     expect(total).toBeGreaterThan(200);
-  }, 30_000);
+  });
 
   it("keeps pad clearings and the Portus plaza free", () => {
     for (const id of ["arcadia", "hollowmere", "meridian"] as const) {
