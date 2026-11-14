@@ -37,12 +37,55 @@ running game, the stack listed in the thread, and the play link in a reply a lit
 | Venue | Fit | Note |
 | --- | --- | --- |
 | X, the owner's account | Best | Accounts that repost this kind of work: @threejs, @WebGL_WebGPU, @levelsio, @xikhar, @Rahzell83, @Andrew_Blumson, @RemixGG_, @NetNetCap (agent-playable games). Unverified as "the top ten": they are the ones seen this month. |
-| Show HN | Good | Plain title, the link, a short honest paragraph; the open source and the agent kit are the story there. |
+| Show HN | Good | The rule is "something you made that people can try": the game opens with no sign-up, which is what they ask for. Plain title, backstory, no marketing words; be there to answer. |
 | r/threejs, r/WebGames, r/playmygame, r/IndieDev | Good | Check each subreddit's self-promotion rule on the day; several allow it only in a weekly thread. |
 | VibeBoard newsletter ("Friday Ten") | Good | A weekly list of free browser games with a jam calendar; pitch by email. |
-| awesome-ai-built-games (GitHub list) | Easy | A pull request adding one line. |
+| awesome-ai-built-games (GitHub list) | Easy | Wants a live game with no waitlist and public evidence that AI wrote most of the code (the repo's history and `docs/reviews/` are that). Submit through its issue form or a pull request. |
+| awesome-ai-game (same maintainer) | Easy | For games where AI is part of play: the agent gateway and the residents qualify. |
 | itch.io page | Easy | A free HTML5 listing that links to the live site; little discovery by itself, useful for jam entries. |
 | MCP directories (Glama and similar) | Good for the hook | List the agent MCP server once the public gateway is on. |
+
+## Drafts
+
+Every claim below must be true of the deployed build on the day; check each against the live site.
+
+**X, first post** (with the clip):
+
+> An open world in your browser where your AI agent plays next to you.
+>
+> No install, no login. Real-time footage: three.js + WebGPU, models built in Blender.
+
+**X, thread:**
+
+> 1/ Three planets and a hub, one life per character. Die and your pile stays in the world for anyone to take.
+>
+> 2/ Agents join by the same server rules as people. One line connects Claude Code or Codex (an MCP endpoint on the game server), and every agent wears an AI chip.
+>
+> 3/ Stack: three.js r186 (WebGPU, WebGL2 fallback), Colyseus, SQLite, Blender run headless from Python recipes. Built by coding agents, reviewed by other models, every review in the repo.
+>
+> 4/ Open source, MIT. Code: github.com/RostyslavDzhohola/firstlight
+>
+> 5/ Play: firstlight.one4all.dev
+
+**Show HN:**
+
+> Title: Show HN: Firstlight – an open-world browser game that AI agents can play too
+>
+> Firstlight is a free, open-source multiplayer world that runs in a desktop browser: a hub, three
+> planets, creatures and bosses, missions, one life per character. There is no install and no sign-up;
+> you pick a name and you're in.
+>
+> The part I'd like feedback on: agents play in the same worlds as people, by the same server rules. The
+> game server exposes an MCP endpoint and a small HTTP API, so a model with no browser and no GPU can
+> join, read the world as text and act with high-level commands. Agents are labelled in game.
+>
+> It is three.js (WebGPU with a WebGL2 fallback) and a Colyseus server that decides everything. Almost
+> all of the code was written by coding agents and reviewed by other models; the reviews are in the repo.
+> It is early: tell me where it breaks.
+
+**awesome-ai-built-games entry:**
+
+> [Firstlight](https://firstlight.one4all.dev) - A multiplayer open world with three planets, one life per character, and AI agents that play next to people. Built with Claude Code, Codex · Three.js
 
 ## Jams and showcases
 
