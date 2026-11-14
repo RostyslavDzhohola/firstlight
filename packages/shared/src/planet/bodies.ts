@@ -1,9 +1,10 @@
-// The four bodies of FIRSTLIGHT: the safe hub Portus and three planets.
+// The bodies of FIRSTLIGHT: the safe hub Portus, three planets, and Lumen, Arcadia's moon (#6).
 // Terrain numbers are tuning values; radius and pad layout come from DECISIONS.md.
 
-export type BodyId = "portus" | "arcadia" | "hollowmere" | "meridian";
-export const BODY_IDS: readonly BodyId[] = ["portus", "arcadia", "hollowmere", "meridian"];
-export const PLANET_IDS: readonly Exclude<BodyId, "portus">[] = ["arcadia", "hollowmere", "meridian"];
+export type BodyId = "portus" | "arcadia" | "hollowmere" | "meridian" | "lumen";
+export const BODY_IDS: readonly BodyId[] = ["portus", "arcadia", "hollowmere", "meridian", "lumen"];
+/** The three planets (each with an outpost, a shop, eggs and a boss); Lumen is a moon, not one of them. */
+export const PLANET_IDS: readonly Exclude<BodyId, "portus" | "lumen">[] = ["arcadia", "hollowmere", "meridian"];
 
 /**
  * Where a feature sits: midpoint of two pads, centre of three pads, a pad, or (`between`) a fraction `t` of the
@@ -38,6 +39,8 @@ export interface TerrainParams {
   offset: number;
   /** Terrace step height in metres (0 = none). Meridian's mesas. */
   terrace: number;
+  /** Hashed impact craters (bowl and rim) scattered over the body: Lumen's. Absent = none. */
+  craters?: { count: number; minRadius: number; maxRadius: number; depth: number };
 }
 
 export interface BodyDef {
@@ -55,6 +58,16 @@ export interface BodyDef {
   peaks: PeakFeature[];
   /** Level range of enemies (planets only). */
   levels: [number, number];
+  /** Pull on players (m/s²); absent = BASE_GRAVITY. Lumen's low gravity makes long, floaty jumps. */
+  gravity?: number;
+}
+
+/** The pull everywhere but Lumen (m/s²): the client controller's and the server's movement envelope. */
+export const BASE_GRAVITY = 18;
+
+/** A body's pull on players (m/s²). */
+export function bodyGravity(body: BodyDef): number {
+  return body.gravity ?? BASE_GRAVITY;
 }
 
 const planetDefaults: TerrainParams = {
@@ -135,6 +148,25 @@ export const BODIES: Record<BodyId, BodyDef> = {
       { name: "Signal Ridge", at: { mid: [2, 0] }, height: 70, radius: 100 },
     ],
     levels: [12, 20],
+  },
+  // Arcadia's moon (#6): small, dry and cratered, a quarter of the pull (a jump rises ~5 m and
+  // hangs for ~3 s). No seas: the water level sits far below the ground, so its basins stay dust.
+  lumen: {
+    id: "lumen",
+    name: "Lumen",
+    radius: 240,
+    seed: 4004,
+    chunksPerFace: 6,
+    padLayout: "icosa",
+    waterLevel: -60,
+    terrain: {
+      ...planetDefaults, hillAmp: 5, hillScale: 90, mountainAmp: 12, mountainScale: 70, maskScale: 200, detailAmp: 0.7, offset: 2,
+      craters: { count: 34, minRadius: 7, maxRadius: 30, depth: 0.32 },
+    },
+    lakes: [{ name: "the Hush", at: { mid: [3, 7] }, radius: 50, depth: 9 }],
+    peaks: [],
+    levels: [6, 9],
+    gravity: 4.5,
   },
 };
 

@@ -6,7 +6,7 @@ import type { BodyId } from "../planet/bodies.ts";
 import type { InvItem } from "../net/protocol.ts";
 
 export type MissionType = "hunt" | "find" | "reach" | "race" | "defend" | "collect";
-export type MissionId = "A1" | "A2" | "A3" | "H1" | "H2" | "H3" | "M1" | "M2" | "M3" | "A4" | "H4" | "T1" | "T2" | "T3";
+export type MissionId = "A1" | "A2" | "A3" | "H1" | "H2" | "H3" | "M1" | "M2" | "M3" | "A4" | "H4" | "T1" | "T2" | "T3" | "L1";
 
 export interface HuntTarget {
   /** NPC def id as emitted in kill events by the NPC lane (e.g. "hopbit"). */
@@ -75,6 +75,7 @@ export const GUIDES: Record<Exclude<BodyId, "portus">, GuideDef> = {
   arcadia: { id: "guide_arcadia", body: "arcadia", name: "Lark", role: "a young shepherd", greeting: "Mind the lake. And the sheep. Mostly the lake." },
   hollowmere: { id: "guide_hollowmere", body: "hollowmere", name: "Sexton Mabry", role: "the chapel grave-keeper", greeting: "Every bell here rings for someone. Try not to make it you." },
   meridian: { id: "guide_meridian", body: "meridian", name: "Rook Calder", role: "an ex-Oversight courier", greeting: "Oversight runs this rock. I just run errands they'd rather I didn't." },
+  lumen: { id: "guide_lumen", body: "lumen", name: "Surveyor Odile", role: "a stranded moon surveyor", greeting: "Jump gently. Up here you come down slower than your mistakes." },
 };
 
 const items = (...l: [string, number][]): InvItem[] => l.map(([id, qty]) => ({ id, tier: 1, qty }));
@@ -214,6 +215,15 @@ export const MISSIONS: readonly MissionDef[] = [
     collect: { pieces: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `t3_shard_${i}`), radius: 2.5, limitS: 240, itemName: "gleam shards" },
     pitch: "The third gleam broke on Meridian's salt. Gather every shard before Oversight files them away.",
     routes: "The Glasspan Salt Flats: open ground, long sightlines, and patrols that notice you.",
+  },
+  {
+    // Lumen (#6): Lark on Arcadia sends you up through the moon portal by Dawnpad.
+    id: "L1", body: "lumen", guide: "Lark", giver: "guide_arcadia", type: "hunt", name: "The Thing in the Wreck",
+    objective: "On Lumen, put down the Cratermaw in the Quietfall wreck and 4 Glimmerhops", recLevel: [6, 9],
+    reward: { xp: 650, coins: 110, items: items(["tonic_large", 1]) },
+    hunt: { targets: [{ npcKind: "cratermaw", count: 1, label: "Cratermaw" }, { npcKind: "glimmerhop", count: 4, label: "Glimmerhops" }] },
+    pitch: "See the moon? There's a hauler crashed up there, and something's nesting in it. The moon portal is right behind me.",
+    routes: "Through the moon portal by Dawnpad; on Lumen, follow the crater rims to the broken hauler.",
   },
 ];
 

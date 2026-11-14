@@ -4,7 +4,7 @@
 
 import { CloseCode, Room, ServerError, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { BODIES, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
+import { BODIES, BODY_IDS, bodyGravity, createTerrain, inWalledZone, isSafe, natureSolids, padDirs, portalNear, portalSpots, type BodyDef, type BodyId, type NatureSolids, type PortalSpot, type Terrain } from "@firstlight/shared";
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
@@ -377,7 +377,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       a.chargeStartedAt = on ? Date.now() : 0;
       a.chargeItem = on ? (a.char.hotbar[a.char.selected] ?? null) : null;
     });
-    this.onMessage("travel", z.object({ to: z.enum(["portus", "arcadia", "hollowmere", "meridian"]) }), (c, m) => this.travelRequest(c, m.to));
+    this.onMessage("travel", z.object({ to: z.enum(BODY_IDS as unknown as [BodyId, ...BodyId[]]) }), (c, m) => this.travelRequest(c, m.to));
     this.onMessage("scope", z.object({ on: z.boolean() }), (c, m) => {
       const a = this.actor(c);
       if (!a || (m.on && inSaddle(a, Date.now()))) return;
@@ -547,7 +547,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       diedAt: 0,
       lastDamagedBy: null,
       youDirty: true,
-      ...motionFields(Math.hypot(p.x, p.y, p.z), now),
+      ...motionFields(Math.hypot(p.x, p.y, p.z), now, bodyGravity(this.bodyDef)),
       chargeStartedAt: 0,
       chargeItem: null,
       specialReadyAt: 0,
@@ -788,7 +788,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     } else {
       if (a.airborne && !swimmingOk && !flying) {
         const drop = a.peakRadius - (R + ground);
-        const frac = fallDamageFraction(drop);
+        const frac = fallDamageFraction(drop, bodyGravity(this.bodyDef));
         if (frac > 0) dealDamage(this.host, null, a, frac * starterMaxHp(a.char.starter, a.char.level), false);
       }
       a.airborne = false;
@@ -1414,7 +1414,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     if (heightAboveSupport(a, this.moveWorld) > MOVE.groundedAbove) return;
     // Landed.
     const len = Math.hypot(a.state.x, a.state.y, a.state.z);
-    const frac = fallDamageFraction(a.peakRadius - len);
+    const frac = fallDamageFraction(a.peakRadius - len, bodyGravity(this.bodyDef));
     a.airborne = false;
     a.peakRadius = len;
     groundMotion(a, len, now);

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three/webgpu";
-import { dayT, nextStrike, SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
-import { atmo, SunRig } from "./atmosphere.ts";
+import { DAY_MS, dayT, nextStrike, skyBodyPlace, SKY_PROFILES, skyState, sunAngles } from "@firstlight/shared";
+import { atmo, SKY_BODY_SLOTS, SunRig } from "./atmosphere.ts";
 import { bakedSunMatch, Environment, lampLight, lightFactors, referenceDayT } from "./environment.ts";
 import { LOOKS } from "./looks.ts";
 import { emptyStored, resolveSettings, type Feature } from "./quality.ts";
@@ -438,5 +438,94 @@ describe("weather", () => {
     }
     expect(thunder.length).toBeGreaterThan(0);
     for (const d of thunder) expect(expected.has(Math.round(d * 1e6))).toBe(true);
+  });
+});
+
+describe("sky bodies on their orbits (#5, #6)", () => {
+  const T = Date.UTC(2026, 10, 14, 3);
+  const angles = (rig: SunRig, n: number) => rig.sky.bodies.slice(0, n).map((b) => [b.elev, b.az]);
+
+  it("cross the sky while the player stands still, the same for every client at a server time", () => {
+    vi.useFakeTimers({ now: T, toFake: ["Date"] });
+    const a = setup("arcadia"), b = setup("arcadia");
+    for (const s of [a, b]) {
+      s.env.setServerSky(skyState("arcadia", 0, T));
+      s.env.update(1 / 60);
+    }
+    const n = a.look.skyPlanets.length;
+    expect(angles(a.rig, n)).toEqual(angles(b.rig, n));
+    const before = angles(a.rig, n);
+    vi.setSystemTime(T + DAY_MS / 8); // three hours of game time
+    a.env.update(1 / 60);
+    const after = angles(a.rig, n);
+    for (let i = 0; i < n; i++) expect(Math.hypot(after[i]![0]! - before[i]![0]!, Math.sin(after[i]![1]! - before[i]![1]!)), `body ${i}`).toBeGreaterThan(0.2);
+    // Where the shared orbits put them.
+    const sun = sunAngles("arcadia", a.env.dayT);
+    a.look.skyPlanets.forEach((sp, i) => {
+      const want = skyBodyPlace("arcadia", sp.body, sun.elev, sun.az, T + DAY_MS / 8);
+      expect(a.rig.sky.bodies[i]!.elev).toBeCloseTo(want.elev, 6);
+      expect(a.rig.sky.bodies[i]!.az).toBeCloseTo(want.az, 6);
+    });
+  });
+
+  it("every sky holds Lumen, last (no halo), within the slots SkyPlanets draws", () => {
+    for (const body of ["portus", "arcadia", "hollowmere", "meridian"] as const) {
+      const sky = LOOKS[body].skyPlanets;
+      expect(sky.at(-1)?.body, body).toBe("lumen");
+      expect(sky.length, body).toBeLessThanOrEqual(SKY_BODY_SLOTS);
+    }
+  });
+
+  it("the night key comes from Lumen while it is up, else the highest body, never lower than 18°", () => {
+    vi.useFakeTimers({ now: T, toFake: ["Date"] });
+    let fromMoon = 0, fromOther = 0;
+    for (const body of ["arcadia", "meridian"] as const) {
+      const { env, rig, look } = setup(body);
+      const n = look.skyPlanets.length, m = n - 1;
+      for (let i = 0; i < 300; i++) {
+        vi.setSystemTime(T + i * 23_000);
+        env.update(1 / 60);
+        const bodies = rig.sky.bodies.slice(0, n);
+        const moonUp = bodies[m]!.elev > 0;
+        const want = moonUp ? bodies[m]! : bodies.reduce((a, b) => (b.elev > a.elev ? b : a));
+        expect(rig.sky.moonAz, `${body} ${i}`).toBe(want.az);
+        expect(rig.sky.moonElev, `${body} ${i}`).toBeCloseTo(Math.max((18 * Math.PI) / 180, want.elev), 9);
+        if (moonUp) fromMoon++;
+        else fromOther++;
+      }
+    }
+    expect(fromMoon).toBeGreaterThan(0);
+    expect(fromOther).toBeGreaterThan(0);
+  });
+
+  it("a fixed sky (the bench, ?nodaynight) and a held time of day hold the bodies still", () => {
+    vi.useFakeTimers({ now: T, toFake: ["Date"] });
+    const fixed = setup("meridian", ["daynight"]), held = setup("arcadia");
+    held.env.timeOverride = 0.8;
+    for (const s of [fixed, held]) s.env.update(1 / 60);
+    const a = [angles(fixed.rig, 4), angles(held.rig, 4)];
+    vi.setSystemTime(T + 3 * DAY_MS);
+    for (const s of [fixed, held]) s.env.update(1 / 60);
+    expect([angles(fixed.rig, 4), angles(held.rig, 4)]).toEqual(a);
+  });
+
+  it("the night key eases when another body takes over: no jump in the light", () => {
+    vi.useFakeTimers({ now: T, toFake: ["Date"] });
+    const { env, rig } = setup("arcadia");
+    const focus = new THREE.Vector3(0, 500, 0);
+    let prev: THREE.Vector3 | null = null, maxStep = 0;
+    for (let i = 0; i < 4000; i++) {
+      vi.setSystemTime(T + i * 2_400); // four game days, two and a half game minutes a frame
+      env.update(1 / 60);
+      rig.update(focus, 1 / 60);
+      if (!rig.sky.keyIsMoon) {
+        prev = null;
+        continue;
+      }
+      const d = rig.sun.position.clone().sub(focus).normalize();
+      if (prev) maxStep = Math.max(maxStep, d.angleTo(prev));
+      prev = d;
+    }
+    expect(maxStep).toBeLessThan(0.1);
   });
 });

@@ -33,7 +33,7 @@ export function nextHints(s: { body: BodyId; missions: readonly { id: string; do
   return out.filter((id) => !s.seen.has(id)).map((id) => NEXT_HINTS[id]);
 }
 
-const PORTAL_WORD: Record<Exclude<BodyId, "portus">, string> = { arcadia: "cyan", hollowmere: "violet", meridian: "orange" };
+const PORTAL_WORD: Record<Exclude<BodyId, "portus">, string> = { arcadia: "cyan", hollowmere: "violet", meridian: "orange", lumen: "pearl" };
 const TRIAL_PLACE: Record<1 | 2 | 3, string> = { 1: "then out to Highscore Hill", 2: "then south to Thornwood", 3: "then out to the Glasspan Salt Flats" };
 
 /** How to reach a trial from Portus: "Hollowmere: through the plaza's violet portal, then south to Thornwood". "" for other missions. */

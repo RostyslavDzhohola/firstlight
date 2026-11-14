@@ -60,9 +60,9 @@ function emptyPlacement(item: number, prefab: number, scale: number): TownPlacem
 
 // ------------------------------------------------------------------------------------ the sites of a body
 
-/** The pad outpost site data of a body (null on Portus). */
+/** The pad outpost site data of a body (null on Portus and on Lumen, which has bare pads). */
 export function outpostSite(body: BodyId): OutpostSite | null {
-  return body === "portus" ? null : OUTPOSTS[body as OutpostBody];
+  return body === "portus" ? null : (OUTPOSTS[body as OutpostBody] ?? null);
 }
 
 /** Pad 0's anchor on a planet (the outpost's frame). */
@@ -96,8 +96,12 @@ export function sitePlacements(terrain: Terrain): readonly TownPlacement[] {
   if (terrain.body.id === TOWN_BODY) {
     list = TOWN_LAYOUT.map((it, i) => placeTownItem(it, i, terrain));
   } else {
-    const site = outpostSite(terrain.body.id)!;
+    const site = outpostSite(terrain.body.id);
     const out: TownPlacement[] = [];
+    if (!site) {
+      placementCache.set(terrain, out);
+      return out;
+    }
     const a0 = outpostAnchor(terrain);
     site.layout.forEach((it, i) => out.push(placeSiteItem(a0, it[1], it[2], it[3], R, R + it[5], emptyPlacement(i, it[0], it[4]))));
     const pads = padDirs(terrain.body);
@@ -128,7 +132,7 @@ function waystonePlacement(terrain: Terrain, k: number, prefab: number): TownPla
 
 /** The prefab table the placements of `body` index. */
 export function sitePrefabs(body: BodyId): readonly TownPrefab[] {
-  return body === TOWN_BODY ? TOWN_PREFABS : outpostSite(body)!.prefabs;
+  return body === TOWN_BODY ? TOWN_PREFABS : (outpostSite(body)?.prefabs ?? []);
 }
 
 /**

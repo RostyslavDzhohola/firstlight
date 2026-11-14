@@ -248,7 +248,7 @@ export class Planet {
     const ux = px / l, uy = py / l, uz = pz / l;
     this.focus.set(px, py, pz);
     this.rig.update(this.focus, dt);
-    this.skyPlanets.update(camera);
+    this.skyPlanets.update(camera, this.rig.sky.bodies);
     localFrame(ux, uy, uz, this.east, this.north);
     this.grass.setWind(this.wind.set(this.east[0] * 0.8 + this.north[0] * 0.6, this.east[1] * 0.8 + this.north[1] * 0.6, this.east[2] * 0.8 + this.north[2] * 0.6).normalize());
     this.cullHorizon(camera.position);

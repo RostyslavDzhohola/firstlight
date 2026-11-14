@@ -73,7 +73,7 @@ export function renderWorlds(online: HomeOnline | null): void {
       card.setAttribute("aria-label", w.name);
       card.dataset.world = w.id;
       const pic = el("div", "fl-home__wpic", card);
-      const still = STILL_BY_ID.get(WORLD_STILL[w.id]);
+      const still = STILL_BY_ID.get(WORLD_STILL[w.id] ?? "");
       if (still) {
         const img = el("img", "", pic);
         img.alt = "";

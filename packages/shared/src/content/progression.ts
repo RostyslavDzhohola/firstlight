@@ -1,6 +1,8 @@
 // Levels, HP, damage scaling, XP and coins (docs/content.md §1). Pure functions, shared by the
 // server (authority) and the client (HUD previews).
 
+import { BASE_GRAVITY } from "../planet/bodies.ts";
+
 export const LEVEL_CAP = 20;
 
 const round5 = (x: number) => Math.round(x / 5) * 5;
@@ -61,8 +63,10 @@ export function killCoins(tier: EnemyTier, enemyLevel: number): number {
 }
 
 /** Fall damage as a fraction of max HP: 0 up to 8 m, then 8% per metre (lethal at ≥ 20.5 m). */
-export function fallDamageFraction(dropMetres: number): number {
-  return dropMetres <= 8 ? 0 : Math.min(1, (dropMetres - 8) * 0.08);
+export function fallDamageFraction(dropMetres: number, gravity = BASE_GRAVITY): number {
+  // The landing speed is what hurts: under a weaker pull the same drop lands softer (Lumen, #6).
+  const drop = (dropMetres * gravity) / BASE_GRAVITY;
+  return drop <= 8 ? 0 : Math.min(1, (drop - 8) * 0.08);
 }
 
 /** Linear falloff between full-damage range and falloffTo, down to falloffMin. */

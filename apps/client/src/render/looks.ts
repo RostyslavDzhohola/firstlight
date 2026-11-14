@@ -2,15 +2,16 @@
 // linear when loaded into uniforms). Angles: radians unless the name says degrees.
 // Film rule 1: each planet is saturated around one key hue plus one accent.
 
-import type { BodyId } from "@firstlight/shared";
+import type { BodyId, OrbitId } from "@firstlight/shared";
 import type { GradeParams } from "./post.ts";
 
+/**
+ * Another body in this sky. Where it stands is not art direction: it is on its orbit (#5, shared
+ * skyBodyPlace), so it rises, sets and drifts. Airless bodies (Lumen) come last: they get no halo.
+ */
 export interface SkyPlanetSpec {
-  body: BodyId;
-  /** Elevation and azimuth in the local sky frame, degrees. */
-  elevDeg: number;
-  azDeg: number;
-  /** Angular radius, degrees. */
+  body: OrbitId;
+  /** Angular radius at a typical distance (degrees); the real distance scales it within readable bounds. */
   sizeDeg: number;
 }
 
@@ -90,7 +91,9 @@ export interface SkyPlanetPalette {
   atmosphere: number;
 }
 
-export const SKY_PLANET_PALETTES: Record<BodyId, SkyPlanetPalette> = {
+export const SKY_PLANET_PALETTES: Record<OrbitId, SkyPlanetPalette> = {
+  // Arcadia's moon (#6): grey highlands and darker seas; no air, so no halo (additive black).
+  lumen: { land: 0xc9c4ba, sea: 0x6c6862, atmosphere: 0x000000 },
   portus: { land: 0xe8cfa0, sea: 0xd9b48a, atmosphere: 0xffd8b0 },
   arcadia: { land: 0x4caf50, sea: 0x26c6da, atmosphere: 0x8fe8ff },
   hollowmere: { land: 0x5b4a7a, sea: 0x1f2a48, atmosphere: 0xc78dff },
@@ -111,9 +114,10 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     night: { zenith: 0x14204a, mid: 0x26386a, horizon: 0x5a4a6a, ground: 0x3a3048, moon: 0xa8bcff, moonIntensity: 0.7, hemiSky: 0x5a6aa8, hemiGround: 0x2a2228, hemiIntensity: 1.0, exposure: 1.35 },
     scatter: { rayleigh: [1, 1, 1], mie: 1.0, mix: 0.7 },
     skyPlanets: [
-      { body: "arcadia", elevDeg: 28, azDeg: 35, sizeDeg: 7 },
-      { body: "hollowmere", elevDeg: 16, azDeg: 150, sizeDeg: 5.5 },
-      { body: "meridian", elevDeg: 40, azDeg: 250, sizeDeg: 8 },
+      { body: "arcadia", sizeDeg: 7 },
+      { body: "hollowmere", sizeDeg: 5.5 },
+      { body: "meridian", sizeDeg: 8 },
+      { body: "lumen", sizeDeg: 2.2 },
     ],
   },
   arcadia: {
@@ -129,9 +133,10 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     night: { zenith: 0x0b1636, mid: 0x15284f, horizon: 0x2a3f6a, ground: 0x1c2a44, moon: 0x9fb6ff, moonIntensity: 0.8, hemiSky: 0x3a5a9a, hemiGround: 0x141c26, hemiIntensity: 1.0, exposure: 1.45 },
     scatter: { rayleigh: [0.92, 1.0, 1.05], mie: 1.0, mix: 0.7 },
     skyPlanets: [
-      { body: "portus", elevDeg: 22, azDeg: 300, sizeDeg: 3 },
-      { body: "hollowmere", elevDeg: 35, azDeg: 120, sizeDeg: 6 },
-      { body: "meridian", elevDeg: 12, azDeg: 210, sizeDeg: 9 },
+      { body: "portus", sizeDeg: 3 },
+      { body: "hollowmere", sizeDeg: 6 },
+      { body: "meridian", sizeDeg: 9 },
+      { body: "lumen", sizeDeg: 4.5 },
     ],
   },
   hollowmere: {
@@ -147,9 +152,10 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     night: { zenith: 0x0d0920, mid: 0x1c1238, horizon: 0x3a2456, ground: 0x24183a, moon: 0xb59fff, moonIntensity: 0.75, hemiSky: 0x4a3a8a, hemiGround: 0x14101c, hemiIntensity: 1.0, exposure: 1.45 },
     scatter: { rayleigh: [1.35, 0.85, 1.2], mie: 1.7, mix: 0.75 },
     skyPlanets: [
-      { body: "portus", elevDeg: 30, azDeg: 40, sizeDeg: 3 },
-      { body: "arcadia", elevDeg: 20, azDeg: 300, sizeDeg: 10 },
-      { body: "meridian", elevDeg: 45, azDeg: 180, sizeDeg: 7 },
+      { body: "portus", sizeDeg: 3 },
+      { body: "arcadia", sizeDeg: 10 },
+      { body: "meridian", sizeDeg: 7 },
+      { body: "lumen", sizeDeg: 2.6 },
     ],
   },
   meridian: {
@@ -165,9 +171,31 @@ export const LOOKS: Record<BodyId, BodyLook> = {
     night: { zenith: 0x0a1430, mid: 0x16254a, horizon: 0x3a3446, ground: 0x2a2230, moon: 0xaabfff, moonIntensity: 0.85, hemiSky: 0x405a8a, hemiGround: 0x24140e, hemiIntensity: 1.0, exposure: 1.4 },
     scatter: { rayleigh: [1.0, 1.0, 1.0], mie: 2.2, mix: 0.7 },
     skyPlanets: [
-      { body: "portus", elevDeg: 18, azDeg: 80, sizeDeg: 2.5 },
-      { body: "arcadia", elevDeg: 30, azDeg: 200, sizeDeg: 8 },
-      { body: "hollowmere", elevDeg: 50, azDeg: 320, sizeDeg: 6.5 },
+      { body: "portus", sizeDeg: 2.5 },
+      { body: "arcadia", sizeDeg: 8 },
+      { body: "hollowmere", sizeDeg: 6.5 },
+      { body: "lumen", sizeDeg: 2.0 },
+    ],
+  },
+  // Lumen (#6): an airless moon. A black sky even by day with a hard white sun, no haze, and
+  // Arcadia hanging huge and still over it (its phases come from the sun moving round).
+  lumen: {
+    zenith: 0x03050c, mid: 0x070b18, horizon: 0x141a2a, ground: 0x2a2c30, glow: 0xfff4e0, glowStrength: 0.12, mie: 0.15,
+    sun: 0xffffff, sunIntensity: 4.2, sunDisc: 30, sunSizeDeg: 1.0, sunElev: 0.6, sunAz: 2.6,
+    hemiSky: 0x5a6a90, hemiGround: 0x3a3a3c, hemiIntensity: 0.9,
+    fogDensity: 0.0002, fogFalloff: 0.02, fogStart: 200, haze: 0.00005, inscatter: 0.05,
+    waterShallow: 0x5fd8d0, waterDeep: 0x1a6a88, foam: 0xf4fffc,
+    grassRoot: 0x5a5852, grassTip: 0x8a8880, grassHeight: 0.1,
+    exposure: 1.0, bloomThreshold: 1.3, bloomStrength: 0.3,
+    grade: { slope: [1.0, 1.0, 1.04], offset: [0, 0, 0.01], power: [1.02, 1.02, 1], saturation: 0.9, hue: 0 },
+    mote: 0xd8e4ff,
+    night: { zenith: 0x020308, mid: 0x050812, horizon: 0x0c1220, ground: 0x1e2026, moon: 0xb8e0ff, moonIntensity: 1.0, hemiSky: 0x3a5a8a, hemiGround: 0x18181c, hemiIntensity: 0.9, exposure: 1.35 },
+    scatter: { rayleigh: [1, 1, 1], mie: 0, mix: 0 },
+    skyPlanets: [
+      { body: "arcadia", sizeDeg: 10 },
+      { body: "portus", sizeDeg: 2.2 },
+      { body: "hollowmere", sizeDeg: 4 },
+      { body: "meridian", sizeDeg: 4.5 },
     ],
   },
 };
