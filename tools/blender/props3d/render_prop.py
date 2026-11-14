@@ -34,7 +34,7 @@ import render as R  # noqa: E402
 from preview_prop import stitch  # noqa: E402
 
 TODAY_JSON = "/tmp/fl-props/ref/today_weapons.json"
-TODAY_VIEW = {"longbow": {"up": "y", "side": "z"}}  # today's bow runs its limbs along weapon +Y
+TODAY_VIEW: dict = {}  # per id, when a code-built model runs along another axis than its sculpt (none since #56)
 
 
 GLOW = {"studio": 1.0, "game": 2.2}  # the studio light (AgX) washes a 2.2x glow out to white
