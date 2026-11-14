@@ -5,8 +5,8 @@ import { buildChunk } from "./chunk.ts";
 import { chunkOf, type Face } from "./cubesphere.ts";
 import { chordMetres, padDirs } from "./pads.ts";
 import {
-  chunkProps, packProps, PORTUS_PLAZA_CLEAR, PROP_JITTER_MIN, PROP_KINDS, PROP_MIN_FLATNESS, PROP_PAD_CLEARANCE, PROP_STRIDE, PROPS_VERSION,
-  PROP_DEFS, PROP_STYLES, surfaceAtGrid, type PropInstance, type SurfacePoint,
+  chunkProps, packProps, solidChunkProps, SOLID_KINDS, PORTUS_PLAZA_CLEAR, PROP_JITTER_MIN, PROP_KINDS, PROP_MIN_FLATNESS, PROP_PAD_CLEARANCE, PROP_STRIDE, PROPS_VERSION,
+  PROP_DEFS, PROP_STYLES, surfaceAtGrid, type PropInstance, type PropRule, type SurfacePoint,
 } from "./props.ts";
 import { bodyBreakables } from "./breakables.ts";
 import { bossArena } from "../content/arenas.ts";
@@ -48,6 +48,19 @@ function meshFlatness(positions: Float32Array, indices: Uint32Array, x: number, 
   }
   return null;
 }
+
+/** Run `fn` with only the rules `keep` passes in every body's list, then put them all back. */
+function withRules<T>(keep: (r: PropRule) => boolean, fn: () => T): T {
+  const saved = BODY_IDS.map((id) => [id, PROP_STYLES[id]] as const);
+  try {
+    for (const id of BODY_IDS) PROP_STYLES[id] = PROP_STYLES[id].filter(keep);
+    return fn();
+  } finally {
+    for (const [id, rules] of saved) PROP_STYLES[id] = rules;
+  }
+}
+/** Without the region rules (#7). */
+const withoutRegionRules = <T,>(fn: () => T): T => withRules((r) => !r.regions, fn);
 
 describe("props", () => {
   const terrains = Object.fromEntries(BODY_IDS.map((id) => [id, createTerrain(id)])) as Record<BodyId, Terrain>;
@@ -172,26 +185,55 @@ describe("props", () => {
       for (const s of seams) {
         const l = Math.hypot(...s);
         const d: [number, number, number] = [s[0] / l, s[1] / l, s[2] / l];
-        const props = chunksAround(terrain, d, 40).flatMap(([f, cx, cy]) => chunkProps(terrain, f, cx, cy));
-        for (const rule of PROP_STYLES[id]) {
-          const same = props.filter((p) => p.kind === rule.kind);
-          const minDist = 2 * PROP_JITTER_MIN * rule.every * minQuad * 0.98;
-          for (let a = 0; a < same.length; a++) {
-            for (let b = a + 1; b < same.length; b++) {
-              const pa = same[a]!, pb = same[b]!;
-              expect(Math.hypot(pa.x - pb.x, pa.y - pb.y, pa.z - pb.z)).toBeGreaterThan(minDist);
+        // The body's older rules and its region rules (#7) each have one rule per kind: test each set alone.
+        for (const regional of [false, true]) {
+          withRules((r) => !!r.regions === regional, () => {
+            const props = chunksAround(terrain, d, 40).flatMap(([f, cx, cy]) => chunkProps(terrain, f, cx, cy));
+            for (const rule of PROP_STYLES[id]) {
+              const same = props.filter((p) => p.kind === rule.kind);
+              const minDist = 2 * PROP_JITTER_MIN * rule.every * minQuad * 0.98;
+              for (let a = 0; a < same.length; a++) {
+                for (let b = a + 1; b < same.length; b++) {
+                  const pa = same[a]!, pb = same[b]!;
+                  expect(Math.hypot(pa.x - pb.x, pa.y - pb.y, pa.z - pb.z)).toBeGreaterThan(minDist);
+                }
+              }
             }
-          }
+          });
         }
       }
     }
     expect(PROPS_VERSION).toBe(7);
   });
 
+
+  it("region rules (#7) are cosmetic: walk-through kinds, appended last, and no solid prop moves", () => {
+    for (const id of BODY_IDS) {
+      const rules = PROP_STYLES[id];
+      const first = rules.findIndex((r) => r.regions);
+      if (first < 0) continue;
+      expect(rules.slice(first).every((r) => r.regions && !SOLID_KINDS.has(r.kind)), id).toBe(true);
+      // Only kinds the body drew already: a region adds instances, never a draw call.
+      const older = new Set(rules.slice(0, first).map((r) => r.kind));
+      expect(rules.slice(first).every((r) => older.has(r.kind)), id).toBe(true);
+    }
+    for (const id of ["arcadia", "hollowmere", "meridian"] as const) {
+      const chunks = sampleChunks(id, 40, 7);
+      const now = chunks.map(([f, cx, cy]) => solidChunkProps(terrains[id], f, cx, cy));
+      const before = withoutRegionRules(() => chunks.map(([f, cx, cy]) => solidChunkProps(terrains[id], f, cx, cy)));
+      expect(now, id).toEqual(before);
+      // And the region rules do add ground cover.
+      const all = chunks.reduce((n, [f, cx, cy]) => n + chunkProps(terrains[id], f, cx, cy).length, 0);
+      const old = withoutRegionRules(() => chunks.reduce((n, [f, cx, cy]) => n + chunkProps(terrains[id], f, cx, cy).length, 0));
+      expect(all, id).toBeGreaterThan(old);
+    }
+  });
+
   it("grows forest undergrowth close to trees and keeps the original collider dimensions", () => {
     let plants = 0, nearTrees = 0;
     for (const [face, cx, cy] of sampleChunks("arcadia", 100, 42)) {
-      const props = chunkProps(terrains.arcadia, face, cx, cy);
+      // The forest's own undergrowth: the region rules (#7) put ferns and flowers in open regions too.
+      const props = withoutRegionRules(() => chunkProps(terrains.arcadia, face, cx, cy));
       const trees = props.filter((p) => p.kind === "oak" || p.kind === "pine");
       for (const p of props.filter((p) => ["fern", "flower", "mushroom"].includes(p.kind))) {
         plants++;

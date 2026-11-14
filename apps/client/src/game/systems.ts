@@ -24,6 +24,7 @@ import { createControlsClient } from "./controls.ts";
 import { createMomentsClient } from "./MomentsClient.ts";
 import { createNextSteps } from "./NextStepsClient.ts";
 import { createTreeClient } from "./TreeClient.ts";
+import { createRegionCards } from "./regionCard.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -74,3 +75,5 @@ CLIENT_SYSTEMS.push(createMissionObjects);
 CLIENT_SYSTEMS.push(createSiteCompass);
 // Progress lane (#81): the build tree panel (U, the pause menu), the level-up point toast and refusals.
 CLIENT_SYSTEMS.push(createTreeClient);
+// Wild lane (#7): the region card when you walk from one named region into another.
+CLIENT_SYSTEMS.push(createRegionCards);

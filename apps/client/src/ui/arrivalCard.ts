@@ -14,6 +14,8 @@ export interface ArrivalCard {
   line: string;
   /** "Levels 1–7", "Safe · Lv 1–2". */
   levels: string;
+  /** A region inside the world (#7): the smaller card, no level chip. */
+  region?: boolean;
 }
 
 export function arrivalCard(body: BodyId): ArrivalCard {

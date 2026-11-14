@@ -135,15 +135,17 @@ export class MomentsHud {
     window.clearTimeout(this.arriveTimer);
     const box = this.arriveBox;
     box.replaceChildren();
-    box.className = "fl-arrive";
+    box.className = card.region ? "fl-arrive is-region" : "fl-arrive";
     box.dataset.body = card.body;
     box.hidden = false;
     el("div", "fl-arrive__k", box, card.kicker);
     el("div", "fl-arrive__name fl-wordmark", box, card.name).setAttribute("role", "heading");
     const sub = el("div", "fl-arrive__sub", box);
     el("span", "", sub, card.line);
-    el("i", "", sub).setAttribute("aria-hidden", "true");
-    el("b", "", sub, card.levels);
+    if (card.levels) {
+      el("i", "", sub).setAttribute("aria-hidden", "true");
+      el("b", "", sub, card.levels);
+    }
     this.arriveTimer = window.setTimeout(() => {
       box.classList.add("is-out");
       this.arriveTimer = window.setTimeout(() => {

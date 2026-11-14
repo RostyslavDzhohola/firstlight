@@ -1,6 +1,6 @@
 // Regions inside a planet (#7): the noise both the ground colour and the grass read.
 import { describe, expect, it } from "vitest";
-import { BODIES } from "@firstlight/shared";
+import { BODIES } from "../index.ts";
 import { regionAt, valueNoise } from "./regionNoise.ts";
 
 describe("region noise", () => {

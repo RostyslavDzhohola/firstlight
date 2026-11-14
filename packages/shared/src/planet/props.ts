@@ -20,6 +20,7 @@ import { siteAnchor, siteCoords, townCoords, type SiteAnchor } from "./townFrame
 import { townPropClear } from "./townGround.ts";
 import { OUTPOST_GROUND_HALF, outpostPropClear } from "./outpostGround.ts";
 import { wildSiteClearings } from "./wildSites.ts";
+import { REGION_KINDS, regionHit, type RegionHit } from "./regions.ts";
 
 const townAt: [number, number] = [0, 0];
 const outpostAt: [number, number] = [0, 0];
@@ -114,6 +115,11 @@ export interface PropRule {
   minH: number;
   maxH: number;
   scale: [number, number];
+  /**
+   * Only inside these region kinds (regions.ts ids, #7). Region rules are cosmetic (walk-through
+   * kinds only: tests hold it) and appended after a body's older rules, so no collider moves.
+   */
+  regions?: readonly string[];
 }
 
 /** No prop is ever placed on slopes steeper than this (dot(n, up) < 0.75 ≈ 41°). */
@@ -144,6 +150,13 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
     { kind: "fern", every: 2, chance: 0.18, maskScale: 140, maskMin: 0.08, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.7, 1.3] },
     { kind: "flower", every: 3, chance: 0.10, maskScale: 140, maskMin: 0.08, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.7, 1.2] },
     { kind: "mushroom", every: 3, chance: 0.12, maskScale: 140, maskMin: 0.08, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 50, scale: [0.7, 1.2] },
+    // Regions (#7): each named region's own undergrowth, only in kinds the planet already draws (no
+    // new draw calls): the wood's ferns and toadstools, the meadow's flowers, the heath's gorse. The
+    // marsh is its wet ground colour and the open water's edge.
+    { kind: "fern", every: 2, chance: 0.34, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.8, 1.45], regions: ["wood"] },
+    { kind: "mushroom", every: 3, chance: 0.22, minFlat: 0.82, minH: 0.6, maxH: 60, scale: [0.8, 1.3], regions: ["wood"] },
+    { kind: "flower", every: 2, chance: 0.2, minFlat: 0.84, minH: 0.8, maxH: 60, scale: [0.8, 1.3], regions: ["meadow"] },
+    { kind: "bush", every: 3, chance: 0.24, minFlat: 0.82, minH: 0.6, maxH: 70, scale: [0.55, 1.05], regions: ["heath"] },
   ],
   hollowmere: [
     { kind: "deadtree", every: 2, chance: 0.3, maskScale: 120, maskMin: 0.02, minFlat: 0.8, minH: 0.8, maxH: 70, scale: [0.8, 1.45] },
@@ -153,12 +166,18 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
     { kind: "oak", every: 3, chance: 0.28, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.8, minH: 1, maxH: 70, scale: [0.8, 1.3] },
     { kind: "fern", every: 2, chance: 0.12, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 40, scale: [0.7, 1.2] },
     { kind: "mushroom", every: 3, chance: 0.14, maskScale: 120, maskMin: 0.02, maskSeed: 0, minFlat: 0.82, minH: 0.6, maxH: 40, scale: [0.7, 1.2] },
+    // Regions (#7): the fen's reeds, the mire's ferns, the hollow's glowcaps; the ash barrens stay bare.
+    { kind: "reed", every: 2, chance: 0.36, minFlat: 0.84, minH: 0.05, maxH: 8, scale: [0.8, 1.35], regions: ["fen"] },
+    { kind: "fern", every: 2, chance: 0.3, minFlat: 0.82, minH: 0.4, maxH: 50, scale: [0.8, 1.3], regions: ["mire"] },
+    { kind: "mushroom", every: 2, chance: 0.36, minFlat: 0.82, minH: 0.5, maxH: 50, scale: [0.9, 1.6], regions: ["glowcap"] },
   ],
   meridian: [
     { kind: "scrub", every: 2, chance: 0.13, minFlat: 0.8, minH: 0.5, maxH: 90, scale: [0.7, 1.4] },
     { kind: "spire", every: 8, chance: 0.35, maskScale: 220, maskMin: 0.0, minFlat: 0.8, minH: 2, maxH: 999, scale: [0.7, 1.6] },
     { kind: "rock", every: 3, chance: 0.08, minFlat: 0.76, minH: 0.2, maxH: 999, scale: [0.6, 1.5] },
     { kind: "boulder", every: 5, chance: 0.09, minFlat: 0.78, minH: 0.5, maxH: 999, scale: [0.7, 1.5] },
+    // Regions (#7): the dunes and the salt pan stay bare; that is their look.
+    { kind: "scrub", every: 2, chance: 0.3, minFlat: 0.8, minH: 0.5, maxH: 90, scale: [0.8, 1.5], regions: ["rust"] },
   ],
   // Lumen: bare regolith, rocks and boulders only (heights are above its far-down water level).
   lumen: [
@@ -246,6 +265,8 @@ export function surfaceAtGrid(terrain: Terrain, face: Face, gx: number, gy: numb
   return out;
 }
 
+const propHit: RegionHit = { cell: 0, kind: 0, other: 0, edge: 0 };
+const regionDir: [number, number, number] = [0, 0, 0];
 const maskNoise = new Map<string, Noise3>();
 function maskFor(body: BodyDef, rule: number): Noise3 {
   const key = `${body.id}:${rule}`;
@@ -285,9 +306,11 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
   const outpost: SiteAnchor | null = hub ? null : siteAnchor(pads[0]!);
   const outpostReach = (OUTPOST_GROUND_HALF * 1.45) / R; // chord (unit sphere) that covers the mask's corners
 
+  const regionIds = REGION_KINDS[body.id].map((k) => k.id);
   for (let r = 0; r < rules.length; r++) {
     const rule = rules[r]!;
     if (only && !only.has(rule.kind)) continue;
+    const inRegions = rule.regions ? rule.regions.map((id) => regionIds.indexOf(id)) : null;
     const kindIndex = PROP_KINDS.indexOf(rule.kind);
     const E = rule.every;
     const minFlat = Math.max(PROP_MIN_FLATNESS, rule.minFlat);
@@ -308,6 +331,11 @@ export function naturalChunkProps(terrain: Terrain, face: Face, cx: number, cy: 
         // the same margin there (no near-duplicates across a cube-face seam).
         if (gx > n - PROP_JITTER_MIN * E || gy > n - PROP_JITTER_MIN * E) continue;
         if (hash01(hseed, 3) >= rule.chance) continue;
+        // Region rules (#7): the region of the candidate's grid direction, before the costlier surface sample.
+        if (inRegions) {
+          gridDir(face, gx, gy, n, regionDir);
+          if (!inRegions.includes(regionHit(body.id, regionDir[0], regionDir[1], regionDir[2], propHit)?.kind ?? -1)) continue;
+        }
         surfaceAtGrid(terrain, face, gx, gy, sp);
         const hw = sp.h - body.waterLevel;
         if (hw < minH || hw > rule.maxH) continue;

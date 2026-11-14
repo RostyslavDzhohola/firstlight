@@ -4,7 +4,7 @@ import { OUTPOSTS } from "@firstlight/shared/content/padOutposts";
 import { PAD_APRON_RADIUS } from "@firstlight/shared/planet/outpostGround";
 import { outpostAnchor, siteDir } from "@firstlight/shared/planet/sites";
 import { padGrassMask, PALETTES, terrainColor } from "./palette.ts";
-import type { Region } from "../render/regionNoise.ts";
+import type { Region } from "@firstlight/shared/planet/regionNoise";
 import { siteGrassMask } from "./siteGrass.ts";
 
 describe("grass around landing pads (live smoke test: blades grew through Dawnpad)", () => {

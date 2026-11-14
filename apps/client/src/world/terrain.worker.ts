@@ -10,7 +10,7 @@ import {
 import { LOOKS } from "../render/looks.ts";
 import { skyDir, type V3 } from "../render/sunFrame.ts";
 import { grassWeight, padGrassMask, PALETTES, terrainColor } from "./palette.ts";
-import { regionAt, type Region } from "../render/regionNoise.ts";
+import { newRegionLook, regionLook } from "@firstlight/shared/planet/regions";
 import { siteGrassMask } from "./siteGrass.ts";
 
 const siteMasks = new Map<BodyId, ((x: number, y: number, z: number) => number) | null>();
@@ -203,11 +203,11 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
       }
     }
   }
-  const region: Region = { dry: 0, deep: 0, patch: 0 };
+  const region = newRegionLook();
   for (let v = 0; v < count; v++) {
     const x = g.positions[v * 3]!, y = g.positions[v * 3 + 1]!, z = g.positions[v * 3 + 2]!;
     const nz = hash01(Math.floor(x * 0.7), Math.floor(y * 0.7), Math.floor(z * 0.7)) * 2 - 1;
-    terrainColor(pal, g.heights[v]!, water, g.flatness[v]!, nz * 0.6, colors, v * 3, hub ? null : regionAt(x, y, z, region), v < gridCount ? wear[v]! : 0);
+    terrainColor(pal, g.heights[v]!, water, g.flatness[v]!, nz * 0.6, colors, v * 3, hub ? null : regionLook(body.id, x, y, z, region), v < gridCount ? wear[v]! : 0);
   }
   const bake = computeBake(terrain, req.face, req.cx, req.cy, req.bakeSun, g.heights);
 

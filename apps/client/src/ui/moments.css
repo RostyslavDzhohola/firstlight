@@ -88,6 +88,11 @@
 .fl-arrive__sub i { width: 5px; height: 5px; transform: rotate(45deg); background: var(--c); box-shadow: 0 0 0 1px rgba(0, 0, 0, .45); }
 .fl-arrive__sub b { padding: calc(.3 * var(--u)) calc(.6 * var(--u)) calc(.3 * var(--u)) calc(.78 * var(--u)); border: 1px solid color-mix(in srgb, var(--c) 60%, transparent); border-radius: var(--r-1); background: rgba(4, 7, 11, .6); font: 600 var(--t-xs)/1 var(--font-display); letter-spacing: .18em; text-transform: uppercase; color: #fff; text-shadow: none; }
 
+/* A region inside the world (#7, game/regionCard.ts): the same card, smaller and higher, briefer. */
+.fl-arrive.is-region { top: 11%; gap: calc(.4 * var(--u)); padding: calc(1.2 * var(--u)) calc(4 * var(--u)); }
+.fl-arrive.is-region .fl-arrive__name { --wm-size: clamp(calc(1.6 * var(--u)), 3vw, calc(2.8 * var(--u))); }
+.fl-arrive.is-region .fl-arrive__sub { font-size: var(--t-sm); font-style: italic; }
+
 /* ---------------------------------------------------------------- event feed (right column, under the minimap) */
 /* Lines may run wider than the column (there is only sky to their left); they never push the column itself. */
 .fl-feed { align-self: flex-end; width: max-content; max-width: calc(30 * var(--u)); display: flex; flex-direction: column; align-items: flex-end; gap: calc(.25 * var(--u)); }

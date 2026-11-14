@@ -17,7 +17,8 @@ import {
 import type { BodyId } from "@firstlight/shared";
 import { atmo } from "./atmosphere.ts";
 import { coverScaleNode } from "./occluderFade.ts";
-import { regionLow, smooth01, valueNoise } from "./regionNoise.ts";
+import { smooth01, valueNoise } from "@firstlight/shared/planet/regionNoise";
+import { newRegionLook, regionLook } from "@firstlight/shared/planet/regions";
 import { WORLD_LOOKS, type MeadowLook } from "./worldLooks.ts";
 
 const color = (hex = 0xffffff) => uniform(new THREE.Color(hex)).setGroup(renderGroup);
@@ -36,11 +37,14 @@ export const meadowUniforms = {
 
 /** What the CPU side needs per clump (flower drifts, dryness): the current body's. */
 let cpuLook: MeadowLook = WORLD_LOOKS.arcadia.meadow;
+/** The live body: its named regions (regions.ts) set the grass's dryness and flower drifts. */
+let cpuBody: BodyId = "arcadia";
 
 /** Load a body's ground cover into the shared uniforms (one body is live at a time). */
 export function applyMeadowLook(body: BodyId) {
   const m = WORLD_LOOKS[body].meadow;
   cpuLook = m;
+  cpuBody = body;
   const u = meadowUniforms;
   u.head0.value.setHex(m.heads[0]);
   u.head1.value.setHex(m.heads[1]);
@@ -160,15 +164,17 @@ export function meadowClumpGeometry(lite: boolean): THREE.BufferGeometry {
  * corners, so the fields run across cell edges without a seam.
  */
 export type CellFields = Float32Array;
-const low = { dry: 0, deep: 0 };
+const low = newRegionLook();
 
 /** Fill `out` (12 floats) from the cell's corner points (planet space), in corner order. */
 export function meadowCellFields(corners: readonly number[], out: CellFields): CellFields {
   for (let i = 0; i < 4; i++) {
     const x = corners[i * 3]!, y = corners[i * 3 + 1]!, z = corners[i * 3 + 2]!;
-    out[i * 3] = regionLow(x, y, z, low).dry;
+    regionLook(cpuBody, x, y, z, low, false);
+    out[i * 3] = low.dry;
     out[i * 3 + 1] = valueNoise(x * 0.035 + 3.3, y * 0.035 + 8.8, z * 0.035 + 1.1);
-    out[i * 3 + 2] = smooth01(0.42, 0.75, valueNoise(x * 0.09 + 17.3, y * 0.09 + 4.1, z * 0.09 + 9.7));
+    // Drift thickness, scaled by the region's bloom (a meadow carpet, a wood with almost none).
+    out[i * 3 + 2] = Math.min(1, smooth01(0.42, 0.75, valueNoise(x * 0.09 + 17.3, y * 0.09 + 4.1, z * 0.09 + 9.7)) * low.bloom);
   }
   return out;
 }

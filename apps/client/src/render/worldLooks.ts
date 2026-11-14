@@ -29,7 +29,7 @@ export interface MeadowLook {
   dryTip: number;
   /** How far the look's own grassRoot/grassTip are pulled toward the lush colours (0..1). */
   pull: number;
-  /** Added to the region's dryness (regionNoise.ts): Meridian is dry everywhere. */
+  /** Added to the region's dryness (shared planet/regionNoise.ts): Meridian is dry everywhere. */
   dryBias: number;
   /** Clump height factor over the look's grassHeight. */
   height: number;

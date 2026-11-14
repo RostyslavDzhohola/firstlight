@@ -3,7 +3,8 @@
 
 import { chordMetres, type BodyId, type Dir } from "@firstlight/shared";
 import { PAD_APRON_RADIUS } from "@firstlight/shared/planet/outpostGround";
-import type { Region } from "../render/regionNoise.ts";
+import type { Region } from "@firstlight/shared/planet/regionNoise";
+import type { RegionLook } from "@firstlight/shared/planet/regions";
 
 type RGB = [number, number, number];
 
@@ -89,7 +90,7 @@ function smooth(e0: number, e1: number, x: number) {
  * so a field is never one flat colour and a walk crosses visibly different ground (#7); without it
  * (the map) the ground is the plain two-tone mix. `wear` 0..1 turns the ground to worn earth.
  */
-export function terrainColor(p: TerrainPalette, height: number, water: number, flatness: number, n: number, out: Float32Array, o: number, region: Region | null = null, wear = 0) {
+export function terrainColor(p: TerrainPalette, height: number, water: number, flatness: number, n: number, out: Float32Array, o: number, region: Region | RegionLook | null = null, wear = 0) {
   const h = height - water;
   let rock = mix(p.rock, p.rock2, 0.5 + 0.5 * n);
   if (p.bands && p.bandHeight) {
@@ -104,6 +105,8 @@ export function terrainColor(p: TerrainPalette, height: number, water: number, f
     // Patches a few metres across: a little lighter or darker than the field round them.
     const k = 1 + region.patch * 0.14;
     grass = [grass[0] * k, grass[1] * k, grass[2] * k];
+    // The named region's own ground (regions.ts): marsh teal, heath straw, salt white.
+    if ("gAmt" in region && region.gAmt > 0) grass = mix(grass, [region.gr * k, region.gg * k, region.gb * k], region.gAmt);
   }
   const rockiness = 1 - smooth(0.72, 0.9, flatness);
   // Worn earth where the turf thins on steepening ground, and wherever feet wore it away.
