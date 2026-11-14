@@ -4,6 +4,59 @@
 **Resume protocol:** SPEC §0. Read this file, check running tasks, continue at the first unchecked item.
 **Paused 2026-10-14 20:10 CDT by the owner:** their open requests (blinking, weapons, creeps, dodge delay, email-first sign-in, voice/radio removal, 3D characters, ElevenLabs SFX, pad outposts) are in the workspace handoff `../HANDOFF.md` (outside the repo). Start there.
 
+**The 2026-11-13 run (pull request #89, protocol 7, props 7, migrations 11–14; NOT deployed):** one
+overnight run in lanes, each built by Claude Opus 5.5, reviewed by GPT-6.1 Sol (`docs/reviews/2026-11-13-*`,
+a fixes table per finding; the three new public surfaces were reviewed three times), fixed by a second
+Opus pass and merged by Claude Fable 5.2. What it adds:
+- **First-person view:** V, scroll all the way in, hold R3, a touch button; the eye follows the head, the
+  head is cut away, the body, hands, weapon and shadow stay; melee and E follow the crosshair; death pulls
+  the camera out; journey J8.1 on both renderers (D-view-*, D-fix-view-*). Camera out of walls and the
+  head (#34), the jump after a Skipstep (#78), the Kappa's block stance (#76), long weapons carried clear
+  of the head (#63).
+- **Places:** nine Blender-built wild sites, three per planet (watchtowers you climb, ruins, a shrine, a
+  cave, a landmark each), with a guardian, a pack in a level band, a chest and a once-per-life discovery
+  (#72; content §3.7, D-world-*). **Lumen**, Arcadia's moon: a fifth body with a quarter of the gravity,
+  reached by a portal on Dawnpad, its own creatures, guide and mission; sky bodies now orbit (#5, #6;
+  content §3.8, D-sky-*).
+- **Weapons:** the models-as-code tools on main (#55); sculpted Emberglass Staff, Bearded Axe and Yew
+  Longbow in game with rendered icons (#56, #61, #62); three new families: Winged Boarspear, Windlass
+  Crossbow, Shepherd's Lantern (D-weapons-*).
+- **A build tree** (#81): a point per level across five branches, any mix, respec for coins in a safe
+  zone, lost on death; decided and saved on the server; the **Traveller**, a plain starter listed first
+  (#80, the careful version) (D-progress-*).
+- **The owner's play-test list:** a relaxed tutorial with a one-click attack step and no portal step
+  (#68); one tracked mission and a collapsible panel on L / Shift+L (#69); compass markers for the
+  tracked mission, home and the safe edge (#70); creature level and name tags (#73); slow regeneration
+  out of combat, held in boss and trial fights (#77); spell numbers at your level (#79); mission objects
+  that say what they are (#86); the right mouse's action under the hotbar (#76); the local-dev sign-in
+  code on the card (#84); sky trails removed (#75) (D-play-*).
+- **Agents:** a hosted gateway on the game server: remote MCP at `/mcp` and an HTTP API at
+  `/api/agent/*`, so an agent joins with one URL and nothing installed; residents you can talk to, with
+  authored lines, a scripted brain and an optional model brain under an hourly budget (#82)
+  (`docs/agents/playing.md`, D-agents-*, D-sec2-*). Off in production unless `AGENTS_ENABLED=1`.
+- **Voices and writing:** rewritten dialogue, 247 spoken lines made with a free local model (Kokoro,
+  Apache-2.0; `tools/voice`), positional audio with subtitles and a Voices slider, a better soundtrack.
+- **Measuring:** `docs/metrics.md` (every number with an id, unit, direction, noise and one command;
+  "Where to climb first"), `pnpm metrics` with `--compare`, a baseline (D-metrics-*); a launch funnel
+  measured by our own server with the #85 KPI table in `/stats` (D-ship-*, D-sec2-*); tree detail levels
+  cross-fade (#74); nine failure-path journeys (Jfail); client error reports; `docs/launch.md`.
+- **Checked on the merged branch:** `pnpm typecheck` clean; `pnpm balance` 860/860 in band; `pnpm test`
+  3,239 passed and 12 failed at `334cdfde` under machine load (the real ones, from the sixth starter and a
+  write inside the admin sandbox, are being fixed; see the pull request for the final run). The deploy
+  gate was reconciled with the new tutorial and gained J8.1 and Jfail.1–9; its final full run is in the
+  pull request.
+- **Not measured:** frame times. The machine ran at load 60–770 all night (other projects shared it), so
+  every timing in the baseline is marked busy and `--compare` will not call it better or worse. Owed on a
+  quiet machine: `pnpm metrics --all --repeat 3`, the GTAO sweep (#66), the allocation profile.
+- **Before a deploy:** client first, then the server; back up `game.db` (migrations 11–14 run on boot);
+  upload `assets-dev/sites/`, `assets-dev/weapons/` and the voice recordings with the client; decide
+  `AGENTS_ENABLED` and `FUNNEL_ENABLED`; run `pnpm e2e:gate`, then `pnpm e2e:prod`.
+- **Open:** the owner's portfolio link for the credit (#11: one constant, `config.ownerPortfolio`); the
+  launch day; agents on the live server; real-device checks for touch and gamepad; the map redesign
+  (#71); GTAO's cost (#66); an eclipse and moons for the other planets; the residents' model brain
+  choosing actions as well as lines (#82); a first-person fight and a ride filmed in real time (the clips
+  are stop-motion: the machine was too loaded to film at speed).
+
 **The 2026-11-12 run (pull request #67, protocol 6; NOT deployed):** one overnight run in lanes, each
 reviewed by Codex gpt-6.1-sol (`docs/reviews/2026-11-12-*`, a fixes table per finding), play-tested by
 Sonnet 5.5. What it adds:
