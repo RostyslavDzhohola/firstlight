@@ -477,3 +477,51 @@ points at, cheapest first:
 3. **Fonts shipped twice**: `dist.font.files` 20 = 10 `.woff2` plus 10 legacy `.woff` that no
    supported browser fetches (`dist.font.bytes` 475 KB). Dropping the `.woff` halves deploy bytes for
    fonts. No player-facing gain, so it ranks last.
+
+## Climbed on 2026-11-14 (lane perf)
+
+The first climb, on the rows that load can't move: bytes, request and pipeline counts. Each change
+was measured alone, before and after, with the narrowest group that covers it; `--compare` exited 0
+with the timing rows skipped (`--skip '\.ms$|gap_max|gaps_over250|longtasks|\.heap$'`: the machine sat
+at load 90–280 all session, so every time row is the machine). The one exception is marked.
+
+| metric | before | after | change | commit |
+|---|---:|---:|---|---|
+| `dist.model.bytes` | 9,627 KB | 9,049 KB | the clips file ships only the channels the client plays (D-perf-1) | `eaf6df67` |
+| `load.webgpu.cold.world.transfer` | 13,083 KB | 12,222 KB | same | `eaf6df67` |
+| `dist.model.bytes` | 9,049 KB | 7,923 KB | vegetation atlases as lossless WebP, every pixel checked (D-perf-2) | `69d9aa9d` |
+| `load.webgpu.cold.world.transfer` | 12,222 KB | 11,097 KB | same | `69d9aa9d` |
+| `dist.model.bytes` | 7,923 KB | 7,060 KB | wild sites' GLBs meshopt-compressed (D-perf-3); **exit 1**: `chunk.game.js.br` +0.16 KB for the decoder hookup, kept as a trade | `3156fc0d` |
+| `load.webgpu.cold.warmup.stages` | 190 | 152 | instanced and skinned meshes share their programs (D-perf-4); measured with `--only load`, so its code cost (`chunk.renderer.js.br` +0.10 KB) only showed in the closing run | `14270033` |
+| `frame.webgpu.medium.portus.programs` | 132 | 129 | portal vortex and pad beam colours and sizes as uniforms (D-perf-5) | `8773ddba` |
+
+Over the whole climb (`--compare` of the session's first baseline with the closing one):
+`load.webgpu.cold.world.transfer` 13,083 → 11,097 KB (−15 %), `dist.model.bytes` 9,627 → 7,060 KB
+(−27 %), `load.webgpu.cold.warmup.stages` 190 → 149 (−22 %), `load.webgpu.warm.world.requests` 192 → 184.
+Paid for with code: `firstvisit.world.br` 685.6 → 685.9 KB (+0.31 KB: the sites' decoder hookup and
+dequantising, the shared-programs switch), so that comparison exits 1 on the JS rows. Draws, triangles and GPU
+memory did not move (none of these changes draws anything differently). Byte and count rows are
+exact or within ±2 %; the transfer row also carries the menu's own variance (which loading stills and
+hero portraits had arrived), about ±100 KB. Side-by-side stills for every change that could alter the
+picture are in the run's `shots/perf-*.png`.
+
+New baseline: `docs/metrics/baseline-2026-11-14-perf.json` (static, health, load, frame on Hollowmere and
+Portus, at the climb's head).
+
+Measured and not taken (the next climb):
+
+- **Per-frame garbage** (`--heapprof`, Hollowmere): the top site in our code is the grass system:
+  `GrassSystem.fill` (30 MB per 20 s on Hollowmere, 64 MB on Portus; it allocates no objects, so this
+  is most likely boxed doubles from code V8 has not optimised), `GrassSystem.update` (14 MB: five
+  corner arrays per cell on every 250 ms re-scan, plus a key string per cell) and the outpost grass
+  mask closure in `world/siteGrass.ts` (18 MB on Hollowmere). `heap.growth` moved 11 → 29 MB between two
+  runs of one tree tonight, so no change to it could be shown as better: climb it with `--repeat 3` on
+  a quiet machine.
+- **Draws on Hollowmere** (161): a one-frame draw census (main pass 187 draws in the live view) puts
+  47 terrain chunks, 41 water patches (one per chunk that dips below the water line) and 26 grass
+  cells first. Merging the water patches of the streamed chunks is the largest single cut.
+- **Bytes**: the six sculpted weapons' 512² textures (800 KB, all fetched before the world, only the
+  held one is seen at arrival), the 66 SFX sample requests fired at Game construction (ZzFX covers
+  until they land), and two loading stills fetched twice on a cold visit.
+- **Programs**: two vegetation kinds (blossom, bush) differ only by a baked leaf tint; Bloom's five
+  passes compile five vertex stages that differ only by a variable's number (three internal).

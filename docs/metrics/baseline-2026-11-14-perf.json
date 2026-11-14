@@ -1,0 +1,1450 @@
+{
+ "v": 2,
+ "when": "2026-11-14T18:22:22.508Z",
+ "commit": "8773ddba7e768354f8babb67f4b88a17af806c99",
+ "dirty": false,
+ "tree": "",
+ "branch": "night/perf",
+ "machine": {
+  "os": "Darwin 27.0.0 arm64",
+  "cpu": "Apple M1",
+  "cores": 8,
+  "memGB": 16,
+  "node": "v24.19.0",
+  "busy": true,
+  "load1": 30.32
+ },
+ "groups": [
+  "static",
+  "health",
+  "load",
+  "frame"
+ ],
+ "status": {
+  "static": {
+   "ok": true,
+   "errors": [],
+   "missing": [],
+   "repeat": 1,
+   "when": "2026-11-14T18:20:03.760Z",
+   "commit": "8773ddba7e768354f8babb67f4b88a17af806c99",
+   "dirty": false,
+   "tree": "",
+   "busy": true,
+   "load1": 29.54
+  },
+  "health": {
+   "ok": true,
+   "errors": [],
+   "missing": [],
+   "repeat": 1,
+   "when": "2026-11-14T18:20:19.852Z",
+   "commit": "8773ddba7e768354f8babb67f4b88a17af806c99",
+   "dirty": false,
+   "tree": "",
+   "busy": true,
+   "load1": 24.06
+  },
+  "load": {
+   "ok": true,
+   "errors": [],
+   "missing": [],
+   "repeat": 1,
+   "when": "2026-11-14T18:20:20.857Z",
+   "commit": "8773ddba7e768354f8babb67f4b88a17af806c99",
+   "dirty": false,
+   "tree": "",
+   "busy": true,
+   "load1": 30.32
+  },
+  "frame": {
+   "ok": true,
+   "errors": [],
+   "missing": [],
+   "repeat": 1,
+   "when": "2026-11-14T18:21:04.011Z",
+   "commit": "8773ddba7e768354f8babb67f4b88a17af806c99",
+   "dirty": false,
+   "tree": "",
+   "busy": true,
+   "load1": 30.32
+  }
+ },
+ "repeat": 1,
+ "metrics": [
+  {
+   "id": "build.client.ms",
+   "value": 2447.379,
+   "unit": "ms",
+   "better": "lower",
+   "group": "static",
+   "noise": 0.15
+  },
+  {
+   "id": "bundle.js.count",
+   "value": 36,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "bundle.js.raw",
+   "value": 3048.31,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "bundle.js.gzip",
+   "value": 979.038,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "bundle.js.br",
+   "value": 814.973,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "bundle.css.raw",
+   "value": 211.248,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "bundle.css.br",
+   "value": 35.718,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.three.tsl.js.raw",
+   "value": 966.831,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.three.tsl.js.gzip",
+   "value": 262.224,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.three.tsl.js.br",
+   "value": 210.226,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.game.js.raw",
+   "value": 830.393,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.game.js.gzip",
+   "value": 300.055,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.game.js.br",
+   "value": 247.313,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.fracture.worker.js.raw",
+   "value": 274.087,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.fracture.worker.js.gzip",
+   "value": 78.675,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.fracture.worker.js.br",
+   "value": 65.653,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.renderer.js.raw",
+   "value": 226.859,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.renderer.js.gzip",
+   "value": 75.705,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.renderer.js.br",
+   "value": 66.03,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.terrain.worker.js.raw",
+   "value": 140.802,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.terrain.worker.js.gzip",
+   "value": 46.899,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.terrain.worker.js.br",
+   "value": 37.851,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.game.css.raw",
+   "value": 123.765,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.game.css.gzip",
+   "value": 22.272,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.game.css.br",
+   "value": 18.921,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.mapatlas.worker.js.raw",
+   "value": 101.017,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.mapatlas.worker.js.gzip",
+   "value": 33.561,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.mapatlas.worker.js.br",
+   "value": 27.613,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.schema.js.raw",
+   "value": 90.823,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.schema.js.gzip",
+   "value": 26.82,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.schema.js.br",
+   "value": 23.598,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.index.css.raw",
+   "value": 74.098,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.index.css.gzip",
+   "value": 15.064,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.index.css.br",
+   "value": 13.207,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.wildsites.2.js.raw",
+   "value": 59.551,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.wildsites.2.js.gzip",
+   "value": 21.376,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.wildsites.2.js.br",
+   "value": 18.34,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.home.js.raw",
+   "value": 36.88,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.home.js.gzip",
+   "value": 14.416,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.home.js.br",
+   "value": 12.97,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.auth.js.raw",
+   "value": 36.741,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.auth.js.gzip",
+   "value": 13.819,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.auth.js.br",
+   "value": 12.366,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.homemodel.js.raw",
+   "value": 36.511,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.homemodel.js.gzip",
+   "value": 12.202,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.homemodel.js.br",
+   "value": 10.516,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.index.js.raw",
+   "value": 35.681,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.index.js.gzip",
+   "value": 14.614,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.index.js.br",
+   "value": 13.031,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.npcs.js.raw",
+   "value": 30.02,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.npcs.js.gzip",
+   "value": 7.877,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.npcs.js.br",
+   "value": 6.772,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.e2ehook.js.raw",
+   "value": 28.329,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.e2ehook.js.gzip",
+   "value": 11.684,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.e2ehook.js.br",
+   "value": 10.556,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.src.js.raw",
+   "value": 27.625,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.src.js.gzip",
+   "value": 11.413,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.src.js.br",
+   "value": 10.164,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.padoutposts.js.raw",
+   "value": 22.488,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.padoutposts.js.gzip",
+   "value": 7.831,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.padoutposts.js.br",
+   "value": 6.477,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.audio.bytes",
+   "value": 3117.699,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.audio.files",
+   "value": 247,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.css.bytes",
+   "value": 211.248,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.css.files",
+   "value": 6,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.data.bytes",
+   "value": 60.99,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.data.files",
+   "value": 13,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.font.bytes",
+   "value": 474.547,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.font.files",
+   "value": 20,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.image.bytes",
+   "value": 7161.278,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.image.files",
+   "value": 124,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.js.bytes",
+   "value": 3048.31,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.js.files",
+   "value": 36,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.model.bytes",
+   "value": 7059.57,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.model.files",
+   "value": 23,
+   "unit": "files",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "dist.total.bytes",
+   "value": 21133.643,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "firstvisit.home.requests",
+   "value": 3,
+   "unit": "requests",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "firstvisit.home.br",
+   "value": 29.168,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "firstvisit.home.raw",
+   "value": 121.421,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "firstvisit.world.requests",
+   "value": 29,
+   "unit": "requests",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "firstvisit.world.br",
+   "value": 685.916,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "firstvisit.world.raw",
+   "value": 2645.912,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "typecheck.ms",
+   "value": 5358.134,
+   "unit": "ms",
+   "better": "lower",
+   "group": "static",
+   "noise": 0.15
+  },
+  {
+   "id": "typecheck.errors",
+   "value": 0,
+   "unit": "errors",
+   "better": "lower",
+   "group": "static",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "balance.checks.failed",
+   "value": 0,
+   "unit": "checks",
+   "better": "lower",
+   "group": "health",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "balance.checks.total",
+   "value": 860,
+   "unit": "checks",
+   "better": "higher",
+   "group": "health",
+   "noise": 0
+  },
+  {
+   "id": "load.webgpu.cold.fcp.ms",
+   "value": 284,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.25
+  },
+  {
+   "id": "load.webgpu.cold.menu.ms",
+   "value": 816,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.25
+  },
+  {
+   "id": "load.webgpu.cold.play_to_world.ms",
+   "value": 6851,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.2
+  },
+  {
+   "id": "load.webgpu.cold.nav_to_world.ms",
+   "value": 7704,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.2
+  },
+  {
+   "id": "load.webgpu.cold.menu.requests",
+   "value": 44,
+   "unit": "requests",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.cold.menu.transfer",
+   "value": 765.1,
+   "unit": "KB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02
+  },
+  {
+   "id": "load.webgpu.cold.world.requests",
+   "value": 206,
+   "unit": "requests",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.cold.world.transfer",
+   "value": 11096.9,
+   "unit": "KB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02
+  },
+  {
+   "id": "load.webgpu.cold.world.decoded",
+   "value": 13373.9,
+   "unit": "KB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02
+  },
+  {
+   "id": "load.webgpu.cold.shaders_after_warmup",
+   "value": 0,
+   "unit": "builds",
+   "better": "lower",
+   "group": "load",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "load.webgpu.cold.heap",
+   "value": 177,
+   "unit": "MB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.1
+  },
+  {
+   "id": "load.webgpu.cold.warmup.ms",
+   "value": 3444.6,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.25
+  },
+  {
+   "id": "load.webgpu.cold.warmup.builds",
+   "value": 295,
+   "unit": "builds",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.cold.warmup.stages",
+   "value": 149,
+   "unit": "programs",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.cold.warmup.gap_max.ms",
+   "value": 154.1,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.4
+  },
+  {
+   "id": "load.webgpu.cold.warmup.gaps_over250",
+   "value": 0,
+   "unit": "gaps",
+   "better": "lower",
+   "group": "load",
+   "noise": 0,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.cold.warmup.longtasks",
+   "value": 7,
+   "unit": "tasks",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.3,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.warm.fcp.ms",
+   "value": 368,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.25
+  },
+  {
+   "id": "load.webgpu.warm.menu.ms",
+   "value": 1625,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.25
+  },
+  {
+   "id": "load.webgpu.warm.play_to_world.ms",
+   "value": 12820,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.2
+  },
+  {
+   "id": "load.webgpu.warm.nav_to_world.ms",
+   "value": 14618,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.2
+  },
+  {
+   "id": "load.webgpu.warm.menu.requests",
+   "value": 46,
+   "unit": "requests",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.warm.menu.transfer",
+   "value": 767.5,
+   "unit": "KB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02
+  },
+  {
+   "id": "load.webgpu.warm.world.requests",
+   "value": 184,
+   "unit": "requests",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.warm.world.transfer",
+   "value": 10827.8,
+   "unit": "KB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02
+  },
+  {
+   "id": "load.webgpu.warm.world.decoded",
+   "value": 13110.5,
+   "unit": "KB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02
+  },
+  {
+   "id": "load.webgpu.warm.shaders_after_warmup",
+   "value": 0,
+   "unit": "builds",
+   "better": "lower",
+   "group": "load",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "load.webgpu.warm.heap",
+   "value": 160,
+   "unit": "MB",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.1
+  },
+  {
+   "id": "load.webgpu.warm.warmup.ms",
+   "value": 4979.7,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.25
+  },
+  {
+   "id": "load.webgpu.warm.warmup.builds",
+   "value": 295,
+   "unit": "builds",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.warm.warmup.stages",
+   "value": 149,
+   "unit": "programs",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.02,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.warm.warmup.gap_max.ms",
+   "value": 192.8,
+   "unit": "ms",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.4
+  },
+  {
+   "id": "load.webgpu.warm.warmup.gaps_over250",
+   "value": 0,
+   "unit": "gaps",
+   "better": "lower",
+   "group": "load",
+   "noise": 0,
+   "floor": 2
+  },
+  {
+   "id": "load.webgpu.warm.warmup.longtasks",
+   "value": 10,
+   "unit": "tasks",
+   "better": "lower",
+   "group": "load",
+   "noise": 0.3,
+   "floor": 2
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.fps",
+   "value": 60,
+   "unit": "fps",
+   "better": "higher",
+   "group": "frame",
+   "noise": 0.05
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.frame.p50",
+   "value": 16.6,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.05
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.frame.p95",
+   "value": 18.2,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.15
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.frame.p99",
+   "value": 18.5,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.3
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.frame.max",
+   "value": 18.7,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.6
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.cpu.p50",
+   "value": 5.5,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.15
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.cpu.p95",
+   "value": 7.6,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.25
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.draws",
+   "value": 161.32,
+   "unit": "calls",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.triangles",
+   "value": 436.898,
+   "unit": "ktris",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.shader_builds",
+   "value": 0,
+   "unit": "builds",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.pixel_ratio",
+   "value": 0.85,
+   "unit": "ratio",
+   "better": "higher",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.canvas_mpx",
+   "value": 0.666,
+   "unit": "Mpx",
+   "better": "higher",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.over33",
+   "value": 0,
+   "unit": "frames",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 3
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.over50",
+   "value": 0,
+   "unit": "frames",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 2
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.over100",
+   "value": 0,
+   "unit": "frames",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 1
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.gpu_busy.p50",
+   "value": 3.74,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.1
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.gpu_busy.p95",
+   "value": 9.91,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.2
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.heap.end",
+   "value": 204.66,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.1
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.heap.growth",
+   "value": 39.8,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 5
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.gpu_mem.total",
+   "value": 285.32,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.gpu_mem.textures",
+   "value": 174.73,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.geometries",
+   "value": 680,
+   "unit": "count",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.textures",
+   "value": 68,
+   "unit": "count",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.hollowmere.programs",
+   "value": 147,
+   "unit": "count",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.fps",
+   "value": 60,
+   "unit": "fps",
+   "better": "higher",
+   "group": "frame",
+   "noise": 0.05
+  },
+  {
+   "id": "frame.webgpu.medium.portus.frame.p50",
+   "value": 16.6,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.05
+  },
+  {
+   "id": "frame.webgpu.medium.portus.frame.p95",
+   "value": 18.4,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.15
+  },
+  {
+   "id": "frame.webgpu.medium.portus.frame.p99",
+   "value": 18.6,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.3
+  },
+  {
+   "id": "frame.webgpu.medium.portus.frame.max",
+   "value": 19.7,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.6
+  },
+  {
+   "id": "frame.webgpu.medium.portus.cpu.p50",
+   "value": 3.3,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.15
+  },
+  {
+   "id": "frame.webgpu.medium.portus.cpu.p95",
+   "value": 4.6,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.25
+  },
+  {
+   "id": "frame.webgpu.medium.portus.draws",
+   "value": 81.05,
+   "unit": "calls",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.triangles",
+   "value": 507.078,
+   "unit": "ktris",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.shader_builds",
+   "value": 0,
+   "unit": "builds",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "frame.webgpu.medium.portus.pixel_ratio",
+   "value": 0.85,
+   "unit": "ratio",
+   "better": "higher",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.canvas_mpx",
+   "value": 0.666,
+   "unit": "Mpx",
+   "better": "higher",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.over33",
+   "value": 0,
+   "unit": "frames",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 3
+  },
+  {
+   "id": "frame.webgpu.medium.portus.over50",
+   "value": 0,
+   "unit": "frames",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 2
+  },
+  {
+   "id": "frame.webgpu.medium.portus.over100",
+   "value": 0,
+   "unit": "frames",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 1
+  },
+  {
+   "id": "frame.webgpu.medium.portus.gpu_busy.p50",
+   "value": 3.85,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.1
+  },
+  {
+   "id": "frame.webgpu.medium.portus.gpu_busy.p95",
+   "value": 8.47,
+   "unit": "ms",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.2
+  },
+  {
+   "id": "frame.webgpu.medium.portus.heap.end",
+   "value": 323.47,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.1
+  },
+  {
+   "id": "frame.webgpu.medium.portus.heap.growth",
+   "value": 34.39,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.5,
+   "floor": 5
+  },
+  {
+   "id": "frame.webgpu.medium.portus.gpu_mem.total",
+   "value": 253.12,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.gpu_mem.textures",
+   "value": 177.84,
+   "unit": "MB",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.geometries",
+   "value": 452,
+   "unit": "count",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.textures",
+   "value": 69,
+   "unit": "count",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  },
+  {
+   "id": "frame.webgpu.medium.portus.programs",
+   "value": 129,
+   "unit": "count",
+   "better": "lower",
+   "group": "frame",
+   "noise": 0.02
+  }
+ ],
+ "notes": [
+  "raw load report: tools/bench/results/raw-load-webgpu-2026-11-14T18-21-04-009Z.json",
+  "raw frame report: tools/bench/results/raw-frame-webgpu-2026-11-14T18-22-22-452Z.json"
+ ]
+}
