@@ -37,8 +37,8 @@ export function toolContent(r: Record<string, unknown>): { content: { type: "tex
   return { content: [{ type: "text", text: text || JSON.stringify(rest) }], isError: r.ok === false };
 }
 
-/** Answer one JSON-RPC message (null for notifications). Exported for the tests. */
-export async function handleRpc(session: Session, msg: Rpc): Promise<Record<string, unknown> | null> {
+/** Answer one JSON-RPC message (null for notifications). `signal` cancels a tool call. Exported for the tests. */
+export async function handleRpc(session: Session, msg: Rpc, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
   const id = msg.id;
   const reply = (result: unknown) => (id === undefined ? null : { jsonrpc: "2.0", id, result });
   const fail = (code: number, message: string) => (id === undefined ? null : { jsonrpc: "2.0", id, error: { code, message } });
@@ -59,7 +59,7 @@ export async function handleRpc(session: Session, msg: Rpc): Promise<Record<stri
       return reply({ tools: toolList([...session.tools.values()]) });
     case "tools/call": {
       const name = String(msg.params?.name ?? "");
-      return reply(toolContent(await session.call(name, msg.params?.arguments)));
+      return reply(toolContent(await session.call(name, msg.params?.arguments, { signal })));
     }
     case "resources/list":
       return reply({ resources: [] });
@@ -69,6 +69,78 @@ export async function handleRpc(session: Session, msg: Rpc): Promise<Record<stri
       if (msg.method.startsWith("notifications/")) return null;
       return fail(-32601, `unknown method ${msg.method}`);
   }
+}
+
+/** A JSON-RPC id as a map key (1 and "1" are different requests). */
+export const rpcKey = (id: unknown): string | null => (typeof id === "string" || typeof id === "number" ? `${typeof id}:${id}` : null);
+
+/**
+ * Requests still being answered, by id, so `notifications/cancelled` can stop one (MCP 2025-11-25,
+ * basic/utilities/cancellation: the receiver SHOULD stop processing the request, free its resources
+ * and not send a response; unknown or finished ids are ignored). The HTTP endpoint keeps one per session.
+ */
+export class InFlight {
+  private readonly byId = new Map<string, Set<AbortController>>();
+
+  /** Track a request; `done` untracks it. Returns its signal, whether it was cancelled, and its own abort. */
+  open(id: unknown): { signal: AbortSignal; cancelled: () => boolean; abort: () => void; done: () => void } {
+    const ac = new AbortController();
+    const key = rpcKey(id);
+    if (key) {
+      const set = this.byId.get(key) ?? new Set();
+      set.add(ac);
+      this.byId.set(key, set);
+    }
+    return {
+      signal: ac.signal,
+      cancelled: () => ac.signal.aborted,
+      abort: () => ac.abort(),
+      done: () => {
+        if (!key) return;
+        const set = this.byId.get(key);
+        set?.delete(ac);
+        if (set && !set.size) this.byId.delete(key);
+      },
+    };
+  }
+
+  /** A `notifications/cancelled`: abort the request it names, if it is still running. */
+  cancel(params: unknown): boolean {
+    const key = rpcKey((params as { requestId?: unknown } | null | undefined)?.requestId);
+    const set = key ? this.byId.get(key) : undefined;
+    if (!set) return false;
+    for (const ac of set) ac.abort();
+    return true;
+  }
+
+  get size(): number {
+    return this.byId.size;
+  }
+}
+
+/**
+ * The stdio server's dispatcher: answers a message, honours `notifications/cancelled` for tool calls
+ * in progress, and drops the reply of a request that was cancelled. Exported for the tests.
+ */
+export function rpcServer(session: Session): { handle(msg: Rpc): Promise<Record<string, unknown> | null>; inFlight: InFlight } {
+  const inFlight = new InFlight();
+  return {
+    inFlight,
+    async handle(msg) {
+      if (msg.method === "notifications/cancelled") {
+        inFlight.cancel(msg.params);
+        return null;
+      }
+      if (msg.method !== "tools/call" || msg.id === undefined) return handleRpc(session, msg);
+      const t = inFlight.open(msg.id);
+      try {
+        const r = await handleRpc(session, msg, t.signal);
+        return t.cancelled() ? null : r;
+      } finally {
+        t.done();
+      }
+    },
+  };
 }
 
 /**
@@ -92,6 +164,7 @@ async function main() {
   // reports its reconnects with console.log) goes to stderr.
   console.log = console.info = console.debug = (...args: unknown[]) => console.error(...args);
   const session = new Session((line) => process.stderr.write(`[firstlight] ${line}\n`));
+  const server = rpcServer(session);
   const out = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
   // Tool calls run one at a time, in order (Session.call); the rest answer at once.
@@ -103,7 +176,7 @@ async function main() {
       return;
     }
     const msg = parsed.msg;
-    void handleRpc(session, msg)
+    void server.handle(msg)
       .catch((e: unknown) => ({ jsonrpc: "2.0", id: msg.id ?? null, error: { code: -32603, message: (e as Error).message } }))
       .then((r) => r && out(r));
   });

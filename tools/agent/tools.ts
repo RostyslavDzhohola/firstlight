@@ -67,37 +67,99 @@ export function checkArgs(schema: Schema, args: unknown): string | null {
   return null;
 }
 
+/** How many calls a session holds at once, the running one included (the gateway sets its own). */
+export const SESSION_MAX_PENDING = 8;
+
+/** The answer to a call whose caller went away (hung up, or sent a cancellation) before it ran. */
+export const CANCELLED = { ok: false, reason: "cancelled", hint: "the caller cancelled this call" } as const;
+
+interface Pending {
+  start(): void;
+}
+
 /** One character: per process locally, per seat on the server's gateway. */
 export class Session {
   agent: FirstlightAgent | null = null;
   readonly log: (line: string) => void;
   /** The tools this session answers to (the gateway swaps in its own join). */
   tools: ReadonlyMap<string, ToolDef> = TOOL_BY_NAME;
-  /** Calls in flight or queued (the gateway's idle timer doesn't run while one is). */
-  busy = 0;
-  private chain: Promise<unknown> = Promise.resolve();
+  /** Calls held at once, the running one included; past it a call is refused ("queue full"), not queued. */
+  maxPending = SESSION_MAX_PENDING;
+  private readonly waiting: Pending[] = [];
+  private running = false;
+  private stops = 0;
 
   constructor(log: (line: string) => void = () => {}) {
     this.log = log;
   }
 
+  /** Calls running or waiting, stops included (the gateway's idle timer doesn't run while one is). */
+  get busy(): number {
+    return this.waiting.length + (this.running ? 1 : 0) + this.stops;
+  }
+
+  /** Calls running or waiting their turn (what `maxPending` bounds). */
+  get pending(): number {
+    return this.waiting.length + (this.running ? 1 : 0);
+  }
+
   /**
    * Run a tool, one at a time and in order: a character does one thing at a time. `firstlight_stop`
    * jumps the queue, so it can interrupt the walk or the fight in progress.
+   *
+   * Bounded: with `maxPending` calls already held, the call is refused at once ("queue full"). When
+   * `signal` aborts (the caller hung up, or cancelled the request), a call still waiting leaves the
+   * queue and answers CANCELLED without running; the call that is running is stopped.
    */
-  call(name: string, args: unknown): Promise<Record<string, unknown>> {
-    const run = async () => {
-      this.busy++;
-      try {
-        return await callTool(this, name, args);
-      } finally {
-        this.busy--;
-      }
-    };
-    if (name === "firstlight_stop") return run();
-    const next = this.chain.then(run, run);
-    this.chain = next.catch(() => {});
-    return next;
+  call(name: string, args: unknown, opts: { signal?: AbortSignal } = {}): Promise<Record<string, unknown>> {
+    const { signal } = opts;
+    if (name === "firstlight_stop") return this.stop(args);
+    if (signal?.aborted) return Promise.resolve({ ...CANCELLED });
+    if (this.pending >= this.maxPending) {
+      return Promise.resolve({ ok: false, reason: "queue full", hint: `${this.pending} calls are already running or waiting for this character (at most ${this.maxPending}); wait for one to answer, or call firstlight_stop` });
+    }
+    return new Promise((resolve) => {
+      const job: Pending = {
+        start: () => {
+          signal?.removeEventListener("abort", leave);
+          this.running = true;
+          // The caller goes away while it runs: stop the walk or the fight it was waiting on.
+          const interrupt = () => void this.stop({});
+          signal?.addEventListener("abort", interrupt, { once: true });
+          void callTool(this, name, args)
+            .catch((e: unknown) => ({ ok: false, reason: "error", hint: (e as Error).message }))
+            .then((r) => {
+              signal?.removeEventListener("abort", interrupt);
+              this.running = false;
+              resolve(r);
+              this.next();
+            });
+        },
+      };
+      // The caller goes away while it waits: out of the queue, never run.
+      const leave = () => {
+        const i = this.waiting.indexOf(job);
+        if (i >= 0) this.waiting.splice(i, 1);
+        resolve({ ...CANCELLED });
+      };
+      signal?.addEventListener("abort", leave, { once: true });
+      this.waiting.push(job);
+      this.next();
+    });
+  }
+
+  private next(): void {
+    if (this.running) return;
+    this.waiting.shift()?.start();
+  }
+
+  private async stop(args: unknown): Promise<Record<string, unknown>> {
+    this.stops++;
+    try {
+      return await callTool(this, "firstlight_stop", args);
+    } finally {
+      this.stops--;
+    }
   }
 
   /** The status line and fresh events every action result carries. */
