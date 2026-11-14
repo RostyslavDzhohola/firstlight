@@ -109,20 +109,26 @@ interface Subject {
  */
 function eachSubject(db: Db, fn: (s: Subject) => void): void {
   const tests = new Set(hasTable(db, "test_account") ? (q(db, "SELECT user_id AS id FROM test_account").all() as { id: string }[]).map((r) => r.id) : []);
-  const rows = q(db, `SELECT subject, step, at, value, detail, kind, ${hasFolded(db) ? "folded" : "0"} AS folded FROM funnel_step ORDER BY subject`).iterate() as IterableIterator<{ subject: string; step: string; at: number; value: number | null; detail: string | null; kind: string; folded: number }>;
+  // Rows as arrays (raw): a few million of them, so no object per row.
+  const read = q(db, `SELECT subject, step, at, value, detail, kind, ${hasFolded(db) ? "folded" : "0"} AS folded FROM funnel_step ORDER BY subject`);
+  const rows = read.raw(true).iterate() as IterableIterator<[string, string, number, number | null, string | null, string, number]>;
   let cur = null as Subject | null;
-  for (const r of rows) {
-    if (cur?.subject !== r.subject) {
-      if (cur) fn(cur);
-      cur = { subject: r.subject, steps: new Map(), first: r.at, kind: r.subject.startsWith("u:") && tests.has(r.subject.slice(2)) ? "test" : "person", rows: 0, folded: false, unfolded: false };
+  try {
+    for (const [subject, step, at, value, detail, kind, folded] of rows) {
+      if (cur?.subject !== subject) {
+        if (cur) fn(cur);
+        cur = { subject, steps: new Map(), first: at, kind: subject.startsWith("u:") && tests.has(subject.slice(2)) ? "test" : "person", rows: 0, folded: false, unfolded: false };
+      }
+      cur.steps.set(step, { at, value, detail });
+      cur.rows++;
+      if (at < cur.first) cur.first = at;
+      if (kind === "test") cur.kind = "test";
+      else if (kind === "agent" && cur.kind === "person") cur.kind = "agent";
+      if (folded) cur.folded = true;
+      else cur.unfolded = true;
     }
-    cur.steps.set(r.step, { at: r.at, value: r.value, detail: r.detail });
-    cur.rows++;
-    if (r.at < cur.first) cur.first = r.at;
-    if (r.kind === "test") cur.kind = "test";
-    else if (r.kind === "agent" && cur.kind === "person") cur.kind = "agent";
-    if (r.folded) cur.folded = true;
-    else cur.unfolded = true;
+  } finally {
+    read.raw(false);
   }
   if (cur) fn(cur);
 }
@@ -288,12 +294,37 @@ export function todayCounts(db: Db, now = Date.now()): { day: number; visits: nu
 export interface SliceOpts {
   sliceRows?: number;
   pauseMs?: number;
+  /** Filled in: the most CPU time and wall time one write transaction held the lock (ms), and how many there were. */
+  stats?: { maxHoldMs: number; maxHoldWallMs: number; slices: number };
 }
+
+const cpuMs = () => {
+  const u = process.threadCpuUsage();
+  return (u.user + u.system) / 1000;
+};
 
 const sleeper = new Int32Array(new SharedArrayBuffer(4));
 /** A synchronous pause (the worker has nothing else to do; never used on the game's thread: pauseMs is 0 there). */
 function pause(ms: number | undefined): void {
   if (ms && ms > 0) Atomics.wait(sleeper, 0, 0, ms);
+}
+
+/**
+ * One write transaction (IMMEDIATE: it takes the lock up front, or waits for it here in the worker),
+ * then a pause of at least four times as long as it held the lock, so a game write that finds the
+ * lock taken gets it on its next try.
+ */
+function writeSlice(db: Db, fn: () => void, opts: SliceOpts): void {
+  const t0 = performance.now();
+  const c0 = cpuMs();
+  db.transaction(fn).immediate();
+  const held = performance.now() - t0;
+  if (opts.stats) {
+    opts.stats.maxHoldMs = Math.max(opts.stats.maxHoldMs, cpuMs() - c0);
+    opts.stats.maxHoldWallMs = Math.max(opts.stats.maxHoldWallMs, held);
+    opts.stats.slices++;
+  }
+  if (opts.pauseMs && opts.pauseMs > 0) pause(Math.max(opts.pauseMs, 4 * held));
 }
 
 /**
@@ -309,11 +340,14 @@ function sliced<T>(db: Db, items: readonly (readonly [T, number])[], fn: (item: 
     const start = i;
     let rows = 0;
     while (i < items.length && (i === start || rows + items[i]![1] <= max)) rows += items[i++]![1];
-    db.transaction(() => {
-      for (let k = start; k < i; k++) fn(items[k]![0]);
-    }).immediate();
+    writeSlice(
+      db,
+      () => {
+        for (let k = start; k < i; k++) fn(items[k]![0]);
+      },
+      opts,
+    );
     if (++slices % 25 === 0) db.pragma("wal_checkpoint(PASSIVE)");
-    pause(opts.pauseMs);
   }
   return i;
 }
@@ -362,7 +396,7 @@ export function foldFunnel(db: Db, now = Date.now(), opts: SliceOpts & { retenti
     const acc = days.get(d)!;
     const r = finish(acc);
     const key = dayKey(d);
-    db.transaction(() => {
+    writeSlice(db, () => {
       // Under the write lock: another folder (a tool, a test) may have folded this day since the read.
       if (foldedThrough(db) >= d) return;
       folded.push(d);
@@ -375,8 +409,7 @@ export function foldFunnel(db: Db, now = Date.now(), opts: SliceOpts & { retenti
       if (r.apart.test) put.run(key, "apart:test", r.apart.test, 0, null);
       if (r.apart.agent) put.run(key, "apart:agent", r.apart.agent, 0, null);
       put.run(key, "meta:folded", acc.subjects, 0, null); // the watermark: this day is folded
-    }).immediate();
-    pause(opts.pauseMs);
+    }, opts);
   }
   // Clean-up: a folded visit's rows go; a folded account's are marked, and go once the account is gone.
   const del = q(db, "DELETE FROM funnel_step WHERE subject = ?");

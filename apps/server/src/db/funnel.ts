@@ -338,10 +338,12 @@ export async function closeFunnel(db: Db, deadlineMs = FUNNEL_LIMITS.closeDeadli
   const mine = () => pending.some((p) => p.db === db);
   let written = 0;
   while (mine() && db.open) {
-    written += flushFunnel(db, { final: true });
+    const n = flushFunnel(db, { final: true });
+    written += n;
     const left = end - performance.now();
     if (!mine() || left <= 0) break;
-    await new Promise((ok) => setTimeout(ok, Math.min(20, left)));
+    // Progress: let the event loop turn and go on; a lock (or a failure): try again a little later.
+    await new Promise((ok) => (n > 0 ? setImmediate(ok) : setTimeout(ok, Math.min(20, left))));
   }
   const left = pending.filter((p) => p.db === db);
   if (left.length) {

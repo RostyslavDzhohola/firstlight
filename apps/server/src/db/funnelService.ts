@@ -7,7 +7,9 @@
 // is dropped); a worker that dies is started again on the next job.
 //
 // Started by auth/accounts.ts when the funnel is on (FUNNEL_ENABLED, default on) and game.db is a
-// file; /stats finds it by its database (funnelServiceFor).
+// file; /stats finds it by its database (funnelServiceFor). While it runs, the worker checkpoints the
+// WAL and the game's connection doesn't (wal_autocheckpoint 0): a commit on the game's thread never
+// copies megabytes the worker's housekeeping wrote. A worker that stops unasked is started again.
 
 import { Worker } from "node:worker_threads";
 import type { Db } from "./game-db.ts";
@@ -39,10 +41,14 @@ export class FunnelService {
   private readonly running = new Map<Op, Promise<unknown>>();
   /** How long the last job of each kind took in the worker (ms), for /stats and the benchmark. */
   readonly lastJobMs: Partial<Record<Op, number>> = {};
+  private readonly autoCheckpoint: number;
 
   constructor(db: Db, path: string) {
     this.db = db;
     this.path = path;
+    this.autoCheckpoint = db.pragma("wal_autocheckpoint", { simple: true }) as number;
+    this.spawn();
+    db.pragma("wal_autocheckpoint = 0"); // the worker checkpoints (funnelWorker.ts)
   }
 
   private spawn(): Worker {
@@ -63,7 +69,11 @@ export class FunnelService {
       this.waiting.clear();
     };
     w.on("error", fail);
-    w.on("exit", (code) => fail(new Error(`funnel worker stopped (${code})`)));
+    w.on("exit", (code) => {
+      fail(new Error(`funnel worker stopped (${code})`));
+      // It keeps the WAL short: start it again (not in a loop: once a second at most).
+      if (!this.closed) setTimeout(() => this.closed || this.spawn(), 1_000).unref();
+    });
     this.worker = w;
     return w;
   }
@@ -102,7 +112,7 @@ export class FunnelService {
   }
 
   /** The daily housekeeping: old error reports pruned, old cohort days folded (in small transactions, in the worker). */
-  housekeep(now = Date.now(), timeoutMs = 60 * 60_000): Promise<{ pruned: number; folded: number }> {
+  housekeep(now = Date.now(), timeoutMs = 60 * 60_000): Promise<{ pruned: number; folded: number; maxHoldMs: number; maxHoldWallMs: number; slices: number }> {
     flushFunnel(this.db);
     const l = FUNNEL_LIMITS;
     return this.call({ op: "housekeep", now, limits: { retentionDays: l.retentionDays, errorRetentionDays: l.errorRetentionDays, sliceRows: l.workerSliceRows, pauseMs: l.workerPauseMs, busyMs: l.workerBusyMs } }, timeoutMs);
@@ -119,6 +129,7 @@ export class FunnelService {
     for (const h of this.waiting.values()) h.no(new Error("funnel worker closed"));
     this.waiting.clear();
     await w?.terminate();
+    if (this.db.open) this.db.pragma(`wal_autocheckpoint = ${this.autoCheckpoint}`);
   }
 }
 

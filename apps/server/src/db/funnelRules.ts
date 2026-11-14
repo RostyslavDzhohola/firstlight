@@ -94,9 +94,9 @@ export const FUNNEL_LIMITS = {
   closeDeadlineMs: 2_000,
   /** How long /stats waits for the worker's report before it says so (the worker keeps going). */
   reportTimeoutMs: 60_000,
-  /** The worker's write transactions (housekeeping): at most this many rows each, a pause after each, and how long one may wait for the lock. */
-  workerSliceRows: 400,
-  workerPauseMs: 4,
+  /** The worker's write transactions (housekeeping): at most this many rows each, a pause after each (at least 4× the time it held the lock), and how long one may wait for the lock. */
+  workerSliceRows: 200,
+  workerPauseMs: 10,
   workerBusyMs: 5_000,
 };
 
