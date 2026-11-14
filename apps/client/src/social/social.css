@@ -35,6 +35,9 @@
 .fl-compass .mk.guide { z-index: 2; }
 .fl-compass .mk.guide i { width: calc(1.05 * var(--u)); height: calc(1.05 * var(--u)); clip-path: polygon(50% 100%, 0 0, 50% 28%, 100% 0); border-radius: 0; box-shadow: none; }
 .fl-compass .mk.guide span { color: var(--photon); }
+/* An undiscovered wild site (game/siteCompass.ts): a bronze "?" and its distance. */
+.fl-compass .mk.site i { width: calc(0.8 * var(--u)); height: calc(0.8 * var(--u)); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border-radius: 0; box-shadow: none; }
+.fl-compass .mk.site span { color: #f5d6a8; font-weight: 700; }
 
 /* ---------------------------------------------------------------- player list (Tab) */
 .fl-plist { z-index: 45; }

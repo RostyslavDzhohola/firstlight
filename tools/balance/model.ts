@@ -6,13 +6,15 @@
 // - creatures: apps/server/src/world/npc (attack pick = first ready attack in def order, cooldown from
 //   the start, busy for telegraph + recovery) and the AI clamps in NpcSystem.hitPlayer (single hit ≤ 35%
 //   of the target's max HP, bosses 60%, any sequence ≤ 80% within 1.5 s);
-// - progression and coins: content/progression.ts, missions.ts, the spawn areas in npcs.ts.
+// - progression and coins: content/progression.ts, missions.ts, the spawn areas in npcs.ts, the wild
+//   sites in wildSites.ts (discovery XP, the guardian and its pack, the chest; review 2026-11-13).
 // Simplifications are named where they happen. Times are seconds.
 
 import { WEAPONS, STARTERS, type WeaponDef, type TierStats } from "../../packages/shared/src/content/weapons.ts";
 import { damageMult, killCoins, killXp, LEVEL_CAP, maxHp, ONBOARDING_XP, REGEN, xpToNext } from "../../packages/shared/src/content/progression.ts";
 import { AI_CAPS, aiHitCap, attackDamage, BOSS_DEFS, NPC_AREAS, NPC_DEFS, npcCoins, npcDef, npcMaxHp, npcShieldHp, type AttackDef, type NpcDef } from "../../packages/shared/src/content/npcs.ts";
 import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
+import { siteDiscoveryXp, WILD_SITES, type WildSiteDef } from "../../packages/shared/src/content/wildSites.ts";
 import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
 import { FROSTBLOOM, SPELL_BY_ID, spellDamage, wardShell, WISHFALL } from "../../packages/shared/src/content/spells.ts";
 
@@ -761,6 +763,40 @@ export const MISSION_LEVEL: Record<string, number> = { A1: 3, A2: 4, A3: 5, H1: 
 /** Camps cleared once on the way (chest coins at the camp's top level). */
 export const CAMP_LEVEL: Record<string, number> = { blockyard_camp: 7, ossuary_camp: 13, checkpoint_seven: 17 };
 
+/**
+ * A wild site on the route (content §3.7), done once at the band's lower level, the first level it is
+ * open to: the discovery XP (once per life), one clear of the guardian and its pack (each kill at the
+ * member's own level: XP and the dealer's coins) and the chest's coins (weapons and tonics are not
+ * counted, like the camps'). The members are killed one after another with no search between them
+ * (they stand together); SITE_TRIP_S covers the walk out, the climb and opening the chest.
+ */
+export const SITE_TRIP_S = 90;
+
+export const siteVisitLevel = (site: Pick<WildSiteDef, "levels">) => site.levels[0];
+
+export interface SiteVisit {
+  id: string;
+  level: number;
+  discoveryXp: number;
+  fightXp: number;
+  coins: number;
+  minutes: number;
+}
+
+export function siteVisit(site: WildSiteDef, L = siteVisitLevel(site)): SiteVisit {
+  const members = [{ kind: site.guardian.kind, level: site.guardian.level, count: 1 }, ...site.pack];
+  let xp = 0, coins = site.chest.coins, time = SITE_TRIP_S;
+  for (const m of members) {
+    const def = npcDef(m.kind);
+    xp += m.count * killXp(def.tier, m.level, L);
+    coins += m.count * npcCoins(def, m.level);
+    time += m.count * playerKillsCreature(def, m.level, L).median;
+  }
+  return { id: site.id, level: L, discoveryXp: siteDiscoveryXp(site), fightXp: xp, coins, minutes: time / 60 };
+}
+
+export const siteVisits = (): SiteVisit[] => WILD_SITES.map((s) => siteVisit(s));
+
 export interface LevelRow {
   level: number;
   area: string;
@@ -795,15 +831,21 @@ export function areaRate(areaId: string, L: number): { xpPerMin: number; coinsPe
   return { xpPerMin: (xp / total) / (time / total / 60), coinsPerMin: (coins / total) / (time / total / 60) };
 }
 
-/** The intended route: at each level, the best-paying named area whose range holds the level. */
+/**
+ * The intended route: at each level, the missions and wild sites usually done there, then the
+ * best-paying named area whose range holds the level for the rest.
+ */
 export function progression(): LevelRow[] {
   const rows: LevelRow[] = [];
   let reached = 0;
   let coins = 0;
+  const sites = siteVisits();
   for (let L = 1; L < LEVEL_CAP; L++) {
     const need = L === 1 ? xpToNext(1) - ONBOARDING_XP : xpToNext(L);
-    const missionXp = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.xp, 0);
-    const missionCoins = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.coins, 0);
+    const here = sites.filter((v) => v.level === L);
+    const missionXp = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.xp, 0) + here.reduce((s, v) => s + v.discoveryXp + v.fightXp, 0);
+    const missionCoins = MISSIONS.filter((m) => MISSION_LEVEL[m.id] === L).reduce((s, m) => s + m.reward.coins, 0) + here.reduce((s, v) => s + v.coins, 0);
+    const siteMinutes = here.reduce((s, v) => s + v.minutes, 0);
     const chest = NPC_AREAS.filter((a) => CAMP_LEVEL[a.id] === L).reduce((s, a) => s + (a.camp?.chest?.coins ?? 0), 0);
     const candidates = NPC_AREAS.filter((a) => a.groups.length + (a.camp ? 1 : 0) > 0 && a.levels[0] <= L && L <= a.levels[1]);
     let best = { area: "-", xpPerMin: 0, coinsPerMin: 0 };
@@ -812,7 +854,7 @@ export function progression(): LevelRow[] {
       if (r.xpPerMin > best.xpPerMin) best = { area: a.id, ...r };
     }
     const grind = Math.max(0, need - missionXp);
-    const minutes = (L === 1 ? 1 : 0) + grind / best.xpPerMin; // L1: the ~60 s tutorial pays 50 XP
+    const minutes = (L === 1 ? 1 : 0) + siteMinutes + grind / best.xpPerMin; // L1: the ~60 s tutorial pays 50 XP
     rows.push({ level: L, area: best.area, xpPerMin: best.xpPerMin, coinsPerMin: best.coinsPerMin, minutes, reachedAt: reached, coinsAtStart: coins });
     coins += best.coinsPerMin * (grind / best.xpPerMin) + missionCoins + chest;
     reached += minutes;

@@ -231,35 +231,41 @@ class Kit:
         self.guards.append([round(x, 3), round(-y, 3)])
 
 # ------------------------------------------------------------------------------------------ shared parts
-def wrap_stairs(k, half, top, width, step_col, rise=0.3, tread=0.45, solid_base=-2.0, start_side="S"):
+def wrap_stairs(k, half, top, width, step_col, gap, rise=0.3, tread=0.45, solid_base=-2.0):
     """Steps climbing round a square core (half size `half`) from the ground to `top`: along the south
     face going east, a landing at the SE corner, up the east face going north, the NE landing, then
-    westward along the north face until the last step is one rise below the top (the player steps
-    south onto the core). Each step is a box down to the ground and its own collider."""
-    n = 0
-    z = 0.0
+    westward along the north face. Once a step is one rise below the top the rest stay at that height:
+    a walkway along the north face that runs past the deck rail's gap (`gap` = (x0, x1) on the north
+    face, west end first), where the player steps south onto the core (review 2026-11-13, finding 1:
+    the old last tread met the rail or a corner post). Each step is a box down to the ground and its
+    own collider; the walkway is one."""
     run = int(round(2 * half / tread))
     t = 2 * half / run
     c = half + width / 2
+    head = top - rise
+    slots = [(-half + t * (i + 0.5), -c, t, width) for i in range(run)]  # south face, west -> east
+    slots.append((c, -c, width, width))  # SE landing
+    slots += [(c, -half + t * (j + 0.5), width, t) for j in range(run)]  # east face, south -> north
+    slots.append((c, c, width, width))  # NE landing
+    slots += [(half - t * (i + 0.5), c, t, width) for i in range(run)]  # north face, east -> west
     steps = []
-    for i in range(run):  # south face, west -> east
-        z += rise
-        steps.append((-half + t * (i + 0.5), -c, t, width, z))
-    z += rise
-    steps.append((c, -c, width, width, z))  # SE landing
-    for j in range(run):  # east face, south -> north
-        if z + rise > top - rise + 1e-6:
+    z = 0.0
+    for (x, y, sx, sy) in slots:
+        z = min(z + rise, head)
+        steps.append((x, y, sx, sy, z))
+        # Done once the walkway at the head height reaches past the gap's west end.
+        if z >= head - 1e-6 and y == c and sx < sy and x - sx / 2 <= gap[0] + 1e-6:
             break
-        z += rise
-        steps.append((c, -half + t * (j + 0.5), width, t, z))
-    if z + rise <= top - rise + 1e-6:
-        z += rise
-        steps.append((c, c, width, width, z))  # NE landing
-        i = 0
-        while z + rise <= top - rise + 1e-6 and i < run:
-            z += rise
-            steps.append((half - t * (i + 0.5), c, t, width, z))
-            i += 1
+    assert steps[-1][4] >= head - 1e-6 and steps[-1][1] == c, "stair does not reach the deck"
+    # The walkway (the north-face run at the head height) is one slab: one box, one collider.
+    n = len(steps)
+    while n > 0 and steps[n - 1][1] == c and steps[n - 1][4] >= head - 1e-6:
+        n -= 1
+    walk = steps[n:]
+    if len(walk) > 1:
+        x0 = min(x - sx / 2 for (x, _, sx, _, _) in walk)
+        x1 = max(x + sx / 2 for (x, _, sx, _, _) in walk)
+        steps = steps[:n] + [((x0 + x1) / 2, c, x1 - x0, width, head)]
     for (x, y, sx, sy, zt) in steps:
         k.box((x, y, (zt + solid_base) / 2), (sx - 0.02, sy - 0.02, zt - solid_base), step_col)
         k.sbox(x, y, sx / 2, sy / 2, solid_base, zt)
@@ -281,11 +287,12 @@ def a_watchtower():
     k.box((-half - 0.05, 0, 1.2), (0.12, 1.2, 2.2), "oak_dk", wear=False)
     k.cyl((-half - 0.05, 0, 2.3), 0.6, 0.12, "lime_dk", segs=10, ry=90)
     k.sbox(0, 0, half, half, -2.0, top)
-    wrap_stairs(k, half, top, 1.1, "lime_dk")
-    # Lookout deck: plank floor overhang, parapet rails with a gap at the stair head (NE).
+    gap = (-0.2, 1.1)  # clear of the NE corner post: 1.3 m for a 0.76 m body
+    wrap_stairs(k, half, top, 1.1, "lime_dk", gap)
+    # Lookout deck: plank floor overhang, parapet rails with a gap at the stair head (north face).
     k.box((0, 0, top + 0.06), (2 * half + 0.5, 2 * half + 0.5, 0.14), "oak", wear=False)
     rail_h = 1.0
-    for (x0, y0, x1, y1) in ((-half, -half, half, -half), (half, -half, half, half), (-half, half, half - 0.9, half), (-half, -half, -half, half)):
+    for (x0, y0, x1, y1) in ((-half, -half, half, -half), (half, -half, half, half), (-half, half, gap[0], half), (gap[1], half, half, half), (-half, -half, -half, half)):
         L = math.hypot(x1 - x0, y1 - y0)
         ang = math.degrees(math.atan2(y1 - y0, x1 - x0))
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
@@ -636,12 +643,13 @@ def m_relay():
     k.box((-half - 0.04, 0, 1.2), (0.1, 1.4, 2.4), "steel_dk", wear=False)
     k.box((-half - 0.08, 0, 2.55), (0.12, 1.6, 0.18), "hazard", wear=False)
     k.sbox(0, 0, half, half, -2.0, top)
-    steps = wrap_stairs(k, half, top, 1.1, "steel_dk")
+    gap = (-1.25, 0.45)  # between the mast's north legs (x 0.8 and -1.6, 0.4 m in from the rail)
+    steps = wrap_stairs(k, half, top, 1.1, "steel_dk", gap)
     # Stair rails (steel) along the outer edge.
     for (x, y, sx, sy, zt) in steps:
         k.box((x + (0.53 if sx < sy else 0), y - (0.53 if sx >= sy else 0), zt + 0.5), (0.05, 0.05, 1.0), "steel", wear=False)
-    # Deck rails with a gap at the stair head (NE), like the watchtower.
-    for (x0, y0, x1, y1) in ((-half, -half, half, -half), (half, -half, half, half), (-half, half, half - 0.9, half), (-half, -half, -half, half)):
+    # Deck rails with a gap at the stair head (north face), like the watchtower.
+    for (x0, y0, x1, y1) in ((-half, -half, half, -half), (half, -half, half, half), (-half, half, gap[0], half), (gap[1], half, half, half), (-half, -half, -half, half)):
         L = math.hypot(x1 - x0, y1 - y0)
         ang = math.degrees(math.atan2(y1 - y0, x1 - x0))
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
@@ -658,6 +666,8 @@ def m_relay():
     for sx in (-1, 1):
         for sy in (-1, 1):
             k.limb(leg(0, sx, sy), leg(1, sx, sy), 0.07, 0.05, "steel", segs=5, wear=False)
+            b = leg(0, sx, sy)
+            k.scyl(b.x, b.y, 0.12, top, top + 2.0)  # the legs block on the deck, not only the core
     for i in range(7):
         t0, t1 = i / 7, (i + 1) / 7
         for (ax, ay, bx, by) in ((-1, -1, 1, -1), (1, -1, 1, 1), (1, 1, -1, 1), (-1, 1, -1, -1)):
@@ -684,7 +694,7 @@ def m_relay():
     k.chest_at(-3.2, 1.0, rz=90, pal=("steel_dk", "hazard"))
     for (x, y) in ((-6.0, -1.0), (6.5, -1.5), (0.0, -7.0), (2.0, 6.5), (-5.0, 6.0)):
         k.guard(x, y)
-    k.lookout = [0.0, 0.0, top]
+    k.lookout = [1.2, 0.6, top]  # on the deck, clear of the mast core and its legs
     return k
 
 def m_depot():

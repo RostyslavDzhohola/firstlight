@@ -17,6 +17,7 @@ import type { Identity } from "../auth/identity.ts";
 import { actorPos, adminSwitch, inSaddle, pushHistory, staleAfterServerMove, type Actor, type NpcActor, type PlayerActor } from "./actors.ts";
 import { characterRepo, withTx } from "./characters.ts";
 import { SWIM_FLOAT } from "@firstlight/shared/planet/water";
+import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import { structureCollider, type StructureCollider } from "@firstlight/shared/planet/town";
 import { CLOSE, hub, type HubRoom } from "./hub.ts";
 import { releaseAgentSlot, useAgentSeat } from "./agents.ts";
@@ -330,7 +331,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
     // Load-test copies neither show nor touch the public world's piles (piles belong to a body, not a copy).
     const listPiles = !options.loadtest;
-    if (listPiles) for (const p of pileStore.current.list(options.body)) this.addPileToState(p);
+    // A pile a solid added since it was left (a wild site's hull or tower: review 2026-11-13 world
+    // sites, finding 2) moves out to clear ground, saved, before anyone sees it.
+    if (listPiles) for (const p of pileStore.current.list(options.body)) this.addPileToState(this.unburyPile(p));
     this.portals = portalSpots(this.bodyDef, this.terrain);
     this.unsubscribePiles = onPileEvent((e) => {
       if (!listPiles) return;
@@ -1012,7 +1015,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
    */
   createPile(owner: PlayerActor, items: InvItem[], coins: number, at: V3, deferred?: (() => void)[], opts: { kind?: PileKind; ttlMs?: number } = {}): PileData | null {
     if (owner.identity.loadtest || this.metadata?.loadtest) return null;
-    const g = this.snapToGround(at);
+    // On the ground under `at`: under a lookout or a wall top that is inside the solid, so out to clear ground.
+    const under = this.snapToGround(at);
+    const g = this.pileOutOfSolids(under) ?? under;
     const { pile, evicted } = pileStore.current.add({
       body: this.bodyDef.id,
       x: g[0],
@@ -1035,6 +1040,28 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     return pile;
   }
 
+  /**
+   * Where a pile on the ground at `g` must go, or null if it can stay: inside a structure or a
+   * natural solid (a wreck's hull, a tower's core, a boulder: hidden, and maybe beyond pickup reach
+   * of anywhere a player stands), the nearest clear ground, found the way a player is placed
+   * (clearOfStructures). A pile merely beside a wall or a tree stays put.
+   */
+  private pileOutOfSolids(g: V3): V3 | null {
+    const step = PLAYER_BODY.step;
+    if (!this.structures?.footing(g[0], g[1], g[2], step).inside && !this.nature.footing(g[0], g[1], g[2], step).inside) return null;
+    return this.clearOfStructures(g);
+  }
+
+  /** `p` moved out of a solid it lies in (pileOutOfSolids) and the move saved; else `p`. */
+  private unburyPile(p: PileData): PileData {
+    const q = this.pileOutOfSolids([p.x, p.y, p.z]);
+    if (!q) return p;
+    const moved = pileStore.current.move(p.id, q[0], q[1], q[2]);
+    if (!moved) return p;
+    emitPileEvent({ kind: "update", pile: moved }); // the body's other copy, if it is up
+    return moved;
+  }
+
   private addPileToState(p: PileData) {
     this.piles.set(p.id, p);
     const s = new PileState();
@@ -1052,6 +1079,9 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     this.piles.set(p.id, p);
     const s = this.state.piles.get(p.id);
     if (!s) return this.addPileToState(p);
+    s.x = p.x; // moved out of a solid (unburyPile)
+    s.y = p.y;
+    s.z = p.z;
     s.items = Math.min(255, p.items.length);
     s.coins = p.coins;
   }

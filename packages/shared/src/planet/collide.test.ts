@@ -87,12 +87,23 @@ describe("player vs one breakable", () => {
     expect(c.floor).toBeCloseTo(Math.hypot(0.2, R + 1, 0.1), 9);
   });
 
-  it("shoves a player off the top edge when their centre isn't over the footprint", () => {
-    const p = feet(0.75, 0.9, 0); // feet near the top but hanging 0.25 m past the edge
+  it("stands a body that overlaps the top's edge on it, and steps up onto a riser within a step (review 2026-11-13 world sites, 1)", () => {
+    // Feet near the top, the centre 0.25 m past the edge (the body still over it): on the top, no shove.
+    const edge = feet(0.75, 0.9, 0);
     const c = emptyContact();
-    expect(pushOutOfBreakable(crate, p, r, H, step, c)).toBe(true);
+    expect(pushOutOfBreakable(crate, edge, r, H, step, c)).toBe(false);
+    expect(edge).toEqual(feet(0.75, 0.9, 0));
+    expect(c.floor).toBeGreaterThan(0);
+    // Walking into a 0.3 m tread from the side: the body's edge just over it is a floor, not a wall.
+    const tread = prop({ shape: 0, hx: 0.5, hz: 0.5, h: 0.3 });
+    const c2 = emptyContact();
+    expect(pushOutOfBreakable(tread, feet(0.5 + r - 0.02, 0, 0), r, H, step, c2)).toBe(false);
+    expect(c2.floor).toBeCloseTo(Math.hypot(0.5 + r - 0.02, R + 0.3, 0), 9);
+    // A riser higher than a step still blocks, and a body clear of the edge doesn't touch it.
+    const p = feet(0.75, 0.6, 0);
+    expect(pushOutOfBreakable(crate, p, r, H, step, emptyContact())).toBe(true);
     expect(p.x).toBeCloseTo(0.5 + r, 9);
-    expect(c.floor).toBe(0);
+    expect(pushOutOfBreakable(crate, feet(0.5 + r + 0.01, 0.9, 0), r, H, step, emptyContact())).toBe(false);
   });
 
   it("blocks a player whose head is under a tall prop's base too (any vertical overlap)", () => {
@@ -207,7 +218,11 @@ describe("real placement", () => {
         z: b.pz + b.rz * lx + b.uz * ly + b.fz * lz,
       };
       expect(pushOutOfBreakable(b, p, r, H, step, emptyContact()), b.id).toBe(true);
-      expect(distanceToBreakable(b, p.x, p.y, p.z), b.id).toBeCloseTo(r, 6);
+      // Settled: clear of every solid, or standing on a low part it overlaps (a step up, not a wall).
+      const again = emptyContact(), q = { ...p };
+      pushOutOfBreakable(b, q, r, H, step, again);
+      expect(Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z), b.id).toBeLessThan(1e-6);
+      if (again.floor === 0) expect(distanceToBreakable(b, p.x, p.y, p.z), b.id).toBeCloseTo(r, 6);
     }
   });
 

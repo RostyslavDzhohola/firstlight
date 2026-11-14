@@ -617,19 +617,40 @@ Sixers' black-and-grey "6" look, IOI branding and Sorrento-like leaders [12].
 
 ### 3.7 Wild sites (new, 2026-11-13, lane world, issue #72; code `packages/shared/src/content/wildSites.ts`)
 
-Built places out in the wilds, three per planet, each with a level band, a guardian and its pack (member 0, the guardian, holds the chest's key: the chest's loot lands on the chest when it falls, rolled like a camp chest at the guardian's level), and a discovery: feet within the site's footprint + 10 m pay XP once per life (30 % of `xpToNext(band low)`, rounded to 5) and add it to the map and the journal's Sites tab. Camp respawn (300 s). From each planet's easy site its landmark is in sight (under 300 m).
+Built places out in the wilds, three per planet, each with a level band, a guardian and its pack (member 0, the guardian, holds the chest's key: the chest's loot lands on the chest when it falls, rolled like a camp chest at the guardian's level), and a discovery: feet within the site's footprint + 10 m pay XP once per life (10 % of `xpToNext(band low)`, rounded to 5; 30 % in the first cut, see below) and add it to the map and the journal's Sites tab. Camp respawn (300 s). From each planet's easy site its landmark is in sight (under 300 m).
 
 | Site | Planet | Kind | Band | Guardian | Pack | Chest (coins · weapons · tonics · cosmetic) | Discovery XP |
 |---|---|---|---|---|---|---|---|
-| Bellwether Watch | Arcadia | watchtower (climb to the lookout, 6 m) | 2–3 | Linewyrm L3 | 4 Hopbit L2, 1 Sparkfly L3 | 25 · 0 · 1 | 40 |
-| Emberfall Keep | Arcadia | ruin | 4–5 | Pixel Lancer L5 | 2 Bomblet L4, 3 Hopbit L4, 1 Linewyrm L5 | 45 · 1 · 1 | 120 |
-| Skyhook Arch | Arcadia | landmark (24 m rock arch) | 6–7 | Cabinet Golem L7 | 2 Pixel Lancer L6, 2 Sparkfly L6, 1 Bomblet L7 | 80 · 1 · 2 · Voxel Visor 1/12 | 220 |
-| The Lantern Shrine | Hollowmere | shrine | 7–8 | Cantor L8 | 3 Bonewalker L7, 2 Marsh Wisp L7 | 70 · 0 · 1 | 280 |
-| The Sunken Barrow | Hollowmere | cave you walk into | 9–11 | Crypt Sentinel L11 | 3 Bonewalker L10, 2 Bone Archer L9 | 120 · 1 · 2 | 405 |
-| The Hollow Elm | Hollowmere | landmark (37 m dead tree) | 12–13 | Crypt Sentinel L13 | 1 Cantor L12, 2 Bone Archer L12, 3 Gnawer L12 | 200 · 1 · 2 · Crowbeak Mask 1/12 | 625 |
-| Relay Mast Four | Meridian | watchtower (climb to the deck, 6 m) | 13–14 | Enforcer L14 | 3 Associate L13, 1 Collector L13 | 150 · 1 · 1 | 705 |
-| The Foreclosed Depot | Meridian | ruin | 15–17 | Compliance Officer L17 | 2 Enforcer L16, 3 Associate L15, 1 Auditor L16 | 260 · 1 · 2 | 870 |
-| The Long Haul wreck | Meridian | landmark (40 m freighter hull) | 19–20 | Compliance Officer L20 | 2 Enforcer L19, 2 Auditor L19, 1 Collector L20 | 420 · 2 · 2 | 1,240 |
+| Bellwether Watch | Arcadia | watchtower (climb to the lookout, 6 m) | 2–3 | Linewyrm L3 | 2 Hopbit L2, 1 Sparkfly L3 | 25 · 0 · 1 | 15 |
+| Emberfall Keep | Arcadia | ruin | 4–5 | Pixel Lancer L5 | 1 Bomblet L4, 1 Hopbit L4, 1 Linewyrm L5 | 45 · 1 · 1 | 40 |
+| Skyhook Arch | Arcadia | landmark (24 m rock arch) | 6–7 | Cabinet Golem L7 | 2 Pixel Lancer L6, 2 Sparkfly L6, 1 Bomblet L7 | 80 · 1 · 2 · Voxel Visor 1/12 | 75 |
+| The Lantern Shrine | Hollowmere | shrine | 7–8 | Cantor L8 | 3 Bonewalker L7, 2 Marsh Wisp L7 | 70 · 0 · 1 | 95 |
+| The Sunken Barrow | Hollowmere | cave you walk into | 9–11 | Crypt Sentinel L11 | 3 Bonewalker L10, 2 Bone Archer L9 | 120 · 1 · 2 | 135 |
+| The Hollow Elm | Hollowmere | landmark (37 m dead tree) | 12–13 | Crypt Sentinel L13 | 1 Cantor L12, 2 Bone Archer L12, 3 Gnawer L12 | 200 · 1 · 2 · Crowbeak Mask 1/12 | 210 |
+| Relay Mast Four | Meridian | watchtower (climb to the deck, 6 m) | 13–14 | Enforcer L14 | 3 Associate L13, 1 Collector L13 | 150 · 1 · 1 | 235 |
+| The Foreclosed Depot | Meridian | ruin | 15–17 | Compliance Officer L17 | 2 Enforcer L16, 3 Associate L15, 1 Auditor L16 | 260 · 1 · 2 | 290 |
+| The Long Haul wreck | Meridian | landmark (40 m freighter hull) | 19–20 | Compliance Officer L20 | 2 Enforcer L19, 2 Auditor L19, 1 Collector L20 | 420 · 2 · 2 | 415 |
+
+**On the route (`pnpm balance`, review 2026-11-13 finding 3).** The balance model's route does each site
+once at its band's lower level: the discovery, one clear of the guardian and its pack (each kill at the
+member's own level, no search between them) and the chest's coins (weapons and tonics not counted, like
+the camps'), plus 90 s for the trip. With them level 5 comes at 7.8 min and the cap at 78 min (86 without
+the sites); every check is in band. The first cut (discovery 30 % of a level, Bellwether with 4 Hopbits,
+Emberfall with 2 Bomblets and 3 Hopbits) put level 5 at 6.4 min (band 7–13) and level 11 at 2.3 times
+its neighbours (band ≤ 2): discovery is now a token on top of the fight, and the two easy Arcadia packs
+are smaller.
+
+| Site | Done at L | Discovery XP | Fight XP | Coins (chest + kills) | Minutes |
+|---|---:|---:|---:|---:|---:|
+| Bellwether Watch | 2 | 15 | 90 | 41 | 1.6 |
+| Emberfall Keep | 4 | 40 | 165 | 73 | 1.6 |
+| Skyhook Arch | 6 | 75 | 465 | 168 | 1.7 |
+| The Lantern Shrine | 7 | 95 | 275 | 110 | 1.6 |
+| The Sunken Barrow | 9 | 135 | 550 | 222 | 1.7 |
+| The Hollow Elm | 12 | 210 | 720 | 334 | 1.7 |
+| Relay Mast Four | 13 | 235 | 460 | 224 | 1.6 |
+| The Foreclosed Depot | 15 | 290 | 1,085 | 455 | 1.8 |
+| The Long Haul wreck | 19 | 415 | 1,180 | 630 | 1.8 |
 
 ---
 
