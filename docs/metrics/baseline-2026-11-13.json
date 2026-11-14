@@ -1,9 +1,10 @@
 {
- "v": 1,
- "when": "2026-11-14T04:25:24.673Z",
- "commit": "f9fd7ff0e41dfe30d594fd8e0ece30be5d372391",
- "branch": "night/metrics",
+ "v": 2,
+ "when": "2026-11-14T09:29:24.310Z",
+ "commit": "mixed",
+ "branch": "mixed",
  "dirty": true,
+ "tree": "mixed",
  "machine": {
   "os": "Darwin 27.0.0 arm64",
   "cpu": "Apple M1",
@@ -11,28 +12,156 @@
   "memGB": 16,
   "node": "v24.19.0",
   "busy": true,
-  "load1": 58.02
+  "load1": 249.2
  },
  "groups": [
   "static",
   "health",
+  "tests",
   "frame",
-  "server",
-  "load"
+  "load",
+  "server"
  ],
+ "status": {
+  "static": {
+   "ok": true,
+   "errors": [],
+   "missing": [],
+   "repeat": 1,
+   "when": "2026-11-14T08:33:20.202Z",
+   "commit": "bc65969e250b0a79701f44261f1f2148b06d0cfb",
+   "dirty": false,
+   "tree": "",
+   "busy": true,
+   "load1": 182.21
+  },
+  "health": {
+   "ok": true,
+   "errors": [],
+   "missing": [],
+   "repeat": 1,
+   "when": "2026-11-14T08:34:47.994Z",
+   "commit": "bc65969e250b0a79701f44261f1f2148b06d0cfb",
+   "dirty": false,
+   "tree": "",
+   "busy": true,
+   "load1": 182.21
+  },
+  "tests": {
+   "ok": false,
+   "errors": [
+    "taken at load 180-440 while other lanes ran: the 26 failures are load timeouts (shared rerun alone at load 180-240: all 10 failures were 5 s timeouts or the groundHeight speed test), so the failed counts are not a gate baseline; the test counts are exact"
+   ],
+   "missing": [],
+   "repeat": 1,
+   "when": "2026-11-14T08:34:51.551Z",
+   "commit": "bc65969e250b0a79701f44261f1f2148b06d0cfb",
+   "dirty": false,
+   "tree": "",
+   "busy": true,
+   "load1": 249.2
+  },
+  "frame": {
+   "ok": false,
+   "errors": [
+    "taken on a busy machine (load average 60–350) by schema v1 on 2026-11-13: reference only, re-measure in your own session; before the collector recorded pixel_ratio and canvas_mpx"
+   ],
+   "missing": [
+    "frame.webgpu.medium.portus.pixel_ratio",
+    "frame.webgpu.medium.portus.canvas_mpx",
+    "frame.webgpu.medium.arcadia.pixel_ratio",
+    "frame.webgpu.medium.arcadia.canvas_mpx",
+    "frame.webgpu.medium.hollowmere.pixel_ratio",
+    "frame.webgpu.medium.hollowmere.canvas_mpx",
+    "frame.webgpu.medium.meridian.pixel_ratio",
+    "frame.webgpu.medium.meridian.canvas_mpx"
+   ],
+   "when": "2026-11-14T04:25:24.673Z",
+   "commit": "f9fd7ff0e41dfe30d594fd8e0ece30be5d372391",
+   "dirty": true,
+   "tree": "unknown",
+   "busy": true,
+   "load1": 58.02,
+   "repeat": 1
+  },
+  "load": {
+   "ok": false,
+   "errors": [
+    "taken on a busy machine (load average 60–350) by schema v1 on 2026-11-13: reference only, re-measure in your own session; one cold visit at load ≈ 50, the warm visit hit a harness timeout (fixed since)"
+   ],
+   "missing": [
+    "load.webgpu.warm.fcp.ms",
+    "load.webgpu.warm.menu.ms",
+    "load.webgpu.warm.play_to_world.ms",
+    "load.webgpu.warm.nav_to_world.ms",
+    "load.webgpu.warm.menu.requests",
+    "load.webgpu.warm.menu.transfer",
+    "load.webgpu.warm.world.requests",
+    "load.webgpu.warm.world.transfer",
+    "load.webgpu.warm.world.decoded",
+    "load.webgpu.warm.shaders_after_warmup",
+    "load.webgpu.warm.warmup.ms",
+    "load.webgpu.warm.warmup.builds",
+    "load.webgpu.warm.warmup.stages",
+    "load.webgpu.warm.warmup.gap_max.ms",
+    "load.webgpu.warm.warmup.gaps_over250",
+    "load.webgpu.warm.warmup.longtasks"
+   ],
+   "when": "2026-11-14T04:25:24.673Z",
+   "commit": "f9fd7ff0e41dfe30d594fd8e0ece30be5d372391",
+   "dirty": true,
+   "tree": "unknown",
+   "busy": true,
+   "load1": 58.02,
+   "repeat": 1
+  },
+  "server": {
+   "ok": false,
+   "errors": [
+    "taken on a busy machine (load average 60–350) by schema v1 on 2026-11-13: reference only, re-measure in your own session; levels 1, 25 and 50 only (80 and the population check came later)"
+   ],
+   "missing": [
+    "server.bots1.population",
+    "server.bots25.population",
+    "server.bots50.population",
+    "server.bots80.joined",
+    "server.bots80.population",
+    "server.bots80.rooms",
+    "server.bots80.tick.p50",
+    "server.bots80.tick.p95",
+    "server.bots80.tick.p99",
+    "server.bots80.cpu",
+    "server.bots80.rss",
+    "server.bots80.heap",
+    "server.bots80.rx_per_client",
+    "server.bots80.msgs_per_client",
+    "server.bots80.patch_bytes",
+    "server.bots80.join.p50",
+    "server.bots80.join.p95",
+    "server.bots80.npcs"
+   ],
+   "when": "2026-11-14T04:25:24.673Z",
+   "commit": "f9fd7ff0e41dfe30d594fd8e0ece30be5d372391",
+   "dirty": true,
+   "tree": "unknown",
+   "busy": true,
+   "load1": 58.02,
+   "repeat": 1
+  }
+ },
  "repeat": 1,
  "metrics": [
   {
    "id": "build.client.ms",
-   "value": 3177.753,
+   "value": 6819.653,
    "unit": "ms",
    "better": "lower",
    "group": "static",
-   "noise": 0.7486
+   "noise": 0.15
   },
   {
    "id": "bundle.js.count",
-   "value": 36,
+   "value": 35,
    "unit": "files",
    "better": "lower",
    "group": "static",
@@ -40,7 +169,7 @@
   },
   {
    "id": "bundle.js.raw",
-   "value": 2863.861,
+   "value": 2939.624,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -48,7 +177,7 @@
   },
   {
    "id": "bundle.js.gzip",
-   "value": 915.218,
+   "value": 941.288,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -56,7 +185,7 @@
   },
   {
    "id": "bundle.js.br",
-   "value": 763.172,
+   "value": 783.657,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -64,7 +193,7 @@
   },
   {
    "id": "bundle.css.raw",
-   "value": 203.571,
+   "value": 207.995,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -72,7 +201,7 @@
   },
   {
    "id": "bundle.css.br",
-   "value": 34.698,
+   "value": 35.311,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -80,7 +209,7 @@
   },
   {
    "id": "chunk.three.tsl.js.raw",
-   "value": 961.2,
+   "value": 966.831,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -88,7 +217,7 @@
   },
   {
    "id": "chunk.three.tsl.js.gzip",
-   "value": 260.425,
+   "value": 262.224,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -96,7 +225,7 @@
   },
   {
    "id": "chunk.three.tsl.js.br",
-   "value": 209.015,
+   "value": 210.226,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -104,7 +233,7 @@
   },
   {
    "id": "chunk.game.js.raw",
-   "value": 741.027,
+   "value": 762.781,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -112,7 +241,7 @@
   },
   {
    "id": "chunk.game.js.gzip",
-   "value": 267.444,
+   "value": 275.321,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -120,7 +249,7 @@
   },
   {
    "id": "chunk.game.js.br",
-   "value": 221.081,
+   "value": 227.231,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -128,7 +257,7 @@
   },
   {
    "id": "chunk.fracture.worker.js.raw",
-   "value": 260.06,
+   "value": 269.655,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -136,7 +265,7 @@
   },
   {
    "id": "chunk.fracture.worker.js.gzip",
-   "value": 74.325,
+   "value": 77.493,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -144,7 +273,7 @@
   },
   {
    "id": "chunk.fracture.worker.js.br",
-   "value": 62.182,
+   "value": 64.777,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -152,7 +281,7 @@
   },
   {
    "id": "chunk.renderer.js.raw",
-   "value": 220.64,
+   "value": 222.389,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -160,7 +289,7 @@
   },
   {
    "id": "chunk.renderer.js.gzip",
-   "value": 73.625,
+   "value": 74.211,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -168,7 +297,7 @@
   },
   {
    "id": "chunk.renderer.js.br",
-   "value": 64.16,
+   "value": 64.709,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -176,7 +305,7 @@
   },
   {
    "id": "chunk.terrain.worker.js.raw",
-   "value": 122.266,
+   "value": 135.401,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -184,7 +313,7 @@
   },
   {
    "id": "chunk.terrain.worker.js.gzip",
-   "value": 40.856,
+   "value": 45.555,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -192,7 +321,7 @@
   },
   {
    "id": "chunk.terrain.worker.js.br",
-   "value": 33.224,
+   "value": 36.819,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -200,7 +329,7 @@
   },
   {
    "id": "chunk.game.css.raw",
-   "value": 117.218,
+   "value": 120.649,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -208,7 +337,7 @@
   },
   {
    "id": "chunk.game.css.gzip",
-   "value": 21.26,
+   "value": 21.796,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -216,7 +345,31 @@
   },
   {
    "id": "chunk.game.css.br",
-   "value": 18.037,
+   "value": 18.52,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.mapatlas.worker.js.raw",
+   "value": 96.078,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.mapatlas.worker.js.gzip",
+   "value": 32.282,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.mapatlas.worker.js.br",
+   "value": 26.561,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -247,32 +400,8 @@
    "noise": 0
   },
   {
-   "id": "chunk.mapatlas.worker.js.raw",
-   "value": 86.482,
-   "unit": "KB",
-   "better": "lower",
-   "group": "static",
-   "noise": 0
-  },
-  {
-   "id": "chunk.mapatlas.worker.js.gzip",
-   "value": 29.109,
-   "unit": "KB",
-   "better": "lower",
-   "group": "static",
-   "noise": 0
-  },
-  {
-   "id": "chunk.mapatlas.worker.js.br",
-   "value": 24.085,
-   "unit": "KB",
-   "better": "lower",
-   "group": "static",
-   "noise": 0
-  },
-  {
    "id": "chunk.index.css.raw",
-   "value": 72.968,
+   "value": 73.96,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -280,7 +409,7 @@
   },
   {
    "id": "chunk.index.css.gzip",
-   "value": 14.847,
+   "value": 15.027,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -288,55 +417,31 @@
   },
   {
    "id": "chunk.index.css.br",
-   "value": 13.071,
+   "value": 13.201,
    "unit": "KB",
    "better": "lower",
    "group": "static",
    "noise": 0
   },
   {
-   "id": "chunk.collide.js.raw",
-   "value": 44.791,
+   "id": "chunk.wildsites.js.raw",
+   "value": 62.646,
    "unit": "KB",
    "better": "lower",
    "group": "static",
    "noise": 0
   },
   {
-   "id": "chunk.collide.js.gzip",
-   "value": 15.926,
+   "id": "chunk.wildsites.js.gzip",
+   "value": 22.528,
    "unit": "KB",
    "better": "lower",
    "group": "static",
    "noise": 0
   },
   {
-   "id": "chunk.collide.js.br",
-   "value": 13.732,
-   "unit": "KB",
-   "better": "lower",
-   "group": "static",
-   "noise": 0
-  },
-  {
-   "id": "chunk.auth.js.raw",
-   "value": 36.691,
-   "unit": "KB",
-   "better": "lower",
-   "group": "static",
-   "noise": 0
-  },
-  {
-   "id": "chunk.auth.js.gzip",
-   "value": 13.802,
-   "unit": "KB",
-   "better": "lower",
-   "group": "static",
-   "noise": 0
-  },
-  {
-   "id": "chunk.auth.js.br",
-   "value": 12.349,
+   "id": "chunk.wildsites.js.br",
+   "value": 19.205,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -344,7 +449,7 @@
   },
   {
    "id": "chunk.home.js.raw",
-   "value": 36.13,
+   "value": 36.825,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -352,7 +457,7 @@
   },
   {
    "id": "chunk.home.js.gzip",
-   "value": 14.163,
+   "value": 14.393,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -360,7 +465,31 @@
   },
   {
    "id": "chunk.home.js.br",
-   "value": 12.737,
+   "value": 12.963,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.auth.js.raw",
+   "value": 36.741,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.auth.js.gzip",
+   "value": 13.818,
+   "unit": "KB",
+   "better": "lower",
+   "group": "static",
+   "noise": 0
+  },
+  {
+   "id": "chunk.auth.js.br",
+   "value": 12.381,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -368,7 +497,7 @@
   },
   {
    "id": "chunk.homemodel.js.raw",
-   "value": 33.103,
+   "value": 34.006,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -376,7 +505,7 @@
   },
   {
    "id": "chunk.homemodel.js.gzip",
-   "value": 10.895,
+   "value": 11.325,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -384,7 +513,7 @@
   },
   {
    "id": "chunk.homemodel.js.br",
-   "value": 9.385,
+   "value": 9.743,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -392,7 +521,7 @@
   },
   {
    "id": "chunk.e2ehook.js.raw",
-   "value": 28.309,
+   "value": 28.352,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -400,7 +529,7 @@
   },
   {
    "id": "chunk.e2ehook.js.gzip",
-   "value": 11.671,
+   "value": 11.679,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -408,7 +537,7 @@
   },
   {
    "id": "chunk.e2ehook.js.br",
-   "value": 10.544,
+   "value": 10.565,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -440,7 +569,7 @@
   },
   {
    "id": "chunk.src.js.raw",
-   "value": 25.313,
+   "value": 25.331,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -448,7 +577,7 @@
   },
   {
    "id": "chunk.src.js.gzip",
-   "value": 10.523,
+   "value": 10.522,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -456,7 +585,7 @@
   },
   {
    "id": "chunk.src.js.br",
-   "value": 9.342,
+   "value": 9.344,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -464,7 +593,7 @@
   },
   {
    "id": "chunk.index.js.raw",
-   "value": 24.912,
+   "value": 24.885,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -472,7 +601,7 @@
   },
   {
    "id": "chunk.index.js.gzip",
-   "value": 10.317,
+   "value": 10.303,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -480,7 +609,7 @@
   },
   {
    "id": "chunk.index.js.br",
-   "value": 9.196,
+   "value": 9.201,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -512,7 +641,7 @@
   },
   {
    "id": "dist.css.bytes",
-   "value": 203.571,
+   "value": 207.995,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -528,7 +657,7 @@
   },
   {
    "id": "dist.data.bytes",
-   "value": 59.06,
+   "value": 60.86,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -576,7 +705,7 @@
   },
   {
    "id": "dist.js.bytes",
-   "value": 2863.861,
+   "value": 2939.624,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -584,7 +713,7 @@
   },
   {
    "id": "dist.js.files",
-   "value": 36,
+   "value": 35,
    "unit": "files",
    "better": "lower",
    "group": "static",
@@ -592,7 +721,7 @@
   },
   {
    "id": "dist.model.bytes",
-   "value": 8004.934,
+   "value": 9460.57,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -600,7 +729,7 @@
   },
   {
    "id": "dist.model.files",
-   "value": 14,
+   "value": 17,
    "unit": "files",
    "better": "lower",
    "group": "static",
@@ -608,7 +737,7 @@
   },
   {
    "id": "dist.total.bytes",
-   "value": 17659.342,
+   "value": 19196.966,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -624,7 +753,7 @@
   },
   {
    "id": "firstvisit.home.br",
-   "value": 25.034,
+   "value": 25.319,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -632,7 +761,7 @@
   },
   {
    "id": "firstvisit.home.raw",
-   "value": 108.909,
+   "value": 110.357,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -640,7 +769,7 @@
   },
   {
    "id": "firstvisit.world.requests",
-   "value": 29,
+   "value": 28,
    "unit": "requests",
    "better": "lower",
    "group": "static",
@@ -648,7 +777,7 @@
   },
   {
    "id": "firstvisit.world.br",
-   "value": 644.904,
+   "value": 657.144,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -656,7 +785,7 @@
   },
   {
    "id": "firstvisit.world.raw",
-   "value": 2501.367,
+   "value": 2548.646,
    "unit": "KB",
    "better": "lower",
    "group": "static",
@@ -664,11 +793,11 @@
   },
   {
    "id": "typecheck.ms",
-   "value": 4356.275,
+   "value": 26278.934,
    "unit": "ms",
    "better": "lower",
    "group": "static",
-   "noise": 1.3577
+   "noise": 0.15
   },
   {
    "id": "typecheck.errors",
@@ -676,7 +805,8 @@
    "unit": "errors",
    "better": "lower",
    "group": "static",
-   "noise": 0
+   "noise": 0,
+   "gate": true
   },
   {
    "id": "balance.checks.failed",
@@ -684,15 +814,91 @@
    "unit": "checks",
    "better": "lower",
    "group": "health",
-   "noise": 0
+   "noise": 0,
+   "gate": true
   },
   {
    "id": "balance.checks.total",
-   "value": 650,
+   "value": 653,
    "unit": "checks",
    "better": "higher",
    "group": "health",
    "noise": 0
+  },
+  {
+   "id": "tests.shared.count",
+   "value": 247,
+   "unit": "tests",
+   "better": "higher",
+   "group": "tests",
+   "noise": 0
+  },
+  {
+   "id": "tests.shared.failed",
+   "value": 5,
+   "unit": "tests",
+   "better": "lower",
+   "group": "tests",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "tests.shared.ms",
+   "value": 61295.493,
+   "unit": "ms",
+   "better": "lower",
+   "group": "tests",
+   "noise": 0.2
+  },
+  {
+   "id": "tests.client.count",
+   "value": 1495,
+   "unit": "tests",
+   "better": "higher",
+   "group": "tests",
+   "noise": 0
+  },
+  {
+   "id": "tests.client.failed",
+   "value": 5,
+   "unit": "tests",
+   "better": "lower",
+   "group": "tests",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "tests.client.ms",
+   "value": 2518475.734,
+   "unit": "ms",
+   "better": "lower",
+   "group": "tests",
+   "noise": 0.2
+  },
+  {
+   "id": "tests.server.count",
+   "value": 1081,
+   "unit": "tests",
+   "better": "higher",
+   "group": "tests",
+   "noise": 0
+  },
+  {
+   "id": "tests.server.failed",
+   "value": 16,
+   "unit": "tests",
+   "better": "lower",
+   "group": "tests",
+   "noise": 0,
+   "gate": true
+  },
+  {
+   "id": "tests.server.ms",
+   "value": 690115.376,
+   "unit": "ms",
+   "better": "lower",
+   "group": "tests",
+   "noise": 0.2
   },
   {
    "id": "frame.webgpu.medium.portus.fps",
@@ -773,7 +979,7 @@
    "better": "lower",
    "group": "frame",
    "noise": 0,
-   "floor": 1
+   "gate": true
   },
   {
    "id": "frame.webgpu.medium.portus.over33",
@@ -954,7 +1160,7 @@
    "better": "lower",
    "group": "frame",
    "noise": 0,
-   "floor": 1
+   "gate": true
   },
   {
    "id": "frame.webgpu.medium.arcadia.over33",
@@ -1135,7 +1341,7 @@
    "better": "lower",
    "group": "frame",
    "noise": 0,
-   "floor": 1
+   "gate": true
   },
   {
    "id": "frame.webgpu.medium.hollowmere.over33",
@@ -1316,7 +1522,7 @@
    "better": "lower",
    "group": "frame",
    "noise": 0,
-   "floor": 1
+   "gate": true
   },
   {
    "id": "frame.webgpu.medium.meridian.over33",
@@ -1899,7 +2105,7 @@
    "better": "lower",
    "group": "load",
    "noise": 0,
-   "floor": 1
+   "gate": true
   },
   {
    "id": "load.webgpu.cold.heap",

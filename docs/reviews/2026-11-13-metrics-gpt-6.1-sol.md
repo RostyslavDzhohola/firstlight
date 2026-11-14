@@ -51,12 +51,12 @@ frame-cost claim (unpriced on a quiet machine).
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
-| 4 | | |
-| 5 | | |
-| 6 | | |
-| 7 | | |
-| 8 | | |
-| 9 | | |
+| 1 | Schema v2: per-group `status` (ok, errors, missing) checked by `validateRun` (the probe now fails: "ok with no metrics"); each group promises its ids up front; failed build/typecheck/balance/vitest/browser runs and missing fields are errors, never 0 or stale `dist`; repeats with a short run fail; the run exits 1 when incomplete; `--compare` fails on `missing` ids in measured groups and on incomplete after-groups, killed server levels included. Tests: `schema.test.ts` (validation, compare, repeats), `collect.test.ts` (static, health, tests, settling). | `d833231f` |
+| 2 | `gate: true` metrics (tests failed, type errors, balance failures, shader builds): zero tolerance, repeats fold by the worst run, a run or comparison with a gate above 0 exits 1. | `d833231f` |
+| 3 | Same id with a different unit, direction or group is `incompatible` and exits 1. | `d833231f` |
+| 4 | An invalid passes report prices nothing and fails the group; each cost's floor is `max(0.25, noiseMs)`. | `d833231f` |
+| 5 | A server level is measured only after the full `N/N bots joined`, with N players connected at both samples and `RESULT.bots === N`; `server.bots<N>.population` records the sampled population; short levels publish only `joined` and fail the group. | `d833231f` |
+| 6 | Procedural kinds keep the exclusive split at `fullTo` (`lodRanges`); only kinds whose materials got the dither (per-kind `faded`, set on install) overlap. Test: `PropSystem` before and after the assets install. | `bc65969e` |
+| 7 | `lodShadowKeep()` adds the dither to the shadow mask (after the occluder's keep-all shadow mask), distance from the view camera (`lodUniforms.eye`); the near shadow is gone by the band's end. | `bc65969e` |
+| 8 | Baseline regenerated: static, health and tests with the final collector (tests marked incomplete: taken at load 180–440, its 26 failures are timeouts, so they can't serve as a gate baseline); frame, load and server kept from the busy run as v1 groups marked incomplete with their absent ids listed (eight `pixel_ratio`/`canvas_mpx`, the warm visit, `bots80`, `population`), so a comparison against them exits 3, never 0. Server not re-run: load average 80–460 all session. | @@C8@@ |
+| 9 | Each group keeps its own provenance; `--merge` refuses a group twice or another machine, top-level commit/tree "mixed" when they differ, `file.json:groups` merges part of a run. | `d833231f` |
