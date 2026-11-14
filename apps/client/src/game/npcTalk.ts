@@ -43,6 +43,8 @@ export class NpcTalk {
   private t = 0;
   private readonly preloaded = new Set<CharacterId>();
   private current: { who: CharacterId; at: THREE.Vector3 } | null = null;
+  /** Until when (this.t) each character is still saying its last line: a farewell never cuts in. */
+  private readonly busyUntil = new Map<CharacterId, number>();
 
   constructor(private readonly game: Game) {}
 
@@ -55,8 +57,13 @@ export class NpcTalk {
     const id = pickLine(ids, this.last.get(`${who}.${kind}`));
     if (!id) return null;
     this.last.set(`${who}.${kind}`, id);
-    say(this.game.audio, id, { name: CHARACTERS[who].name, at, key: who });
+    this.speak(who, id, at);
     return id;
+  }
+
+  private speak(who: CharacterId, id: string, at: THREE.Vector3) {
+    const ms = say(this.game.audio, id, { name: CHARACTERS[who].name, at, key: who });
+    this.busyUntil.set(who, this.t + ms / 1000 - 0.9); // the subtitle outlasts the voice by 0.9 s
   }
 
   /** You pressed E at a character: their greeting. Returns the line's id (null: not a speaking character). */
@@ -76,14 +83,15 @@ export class NpcTalk {
   farewell() {
     const c = this.current;
     this.current = null;
-    if (c) this.say(c.who, "farewell", dialogueFor(c.who, "farewell").map((l) => l.id), c.at);
+    // Accepting a mission closes the panel: the offer they're saying plays out instead of a goodbye.
+    if (c && this.t >= (this.busyUntil.get(c.who) ?? 0)) this.say(c.who, "farewell", dialogueFor(c.who, "farewell").map((l) => l.id), c.at);
   }
 
   /** You accepted a mission: its giver says the offer. */
   offer(missionId: string) {
     const who = missionSpeaker(missionId);
     const at = this.current?.at ?? null;
-    if (who && at) say(this.game.audio, spokenId.mission(missionId), { name: CHARACTERS[who].name, at, key: who });
+    if (who && at) this.speak(who, spokenId.mission(missionId), at);
   }
 
   /**
