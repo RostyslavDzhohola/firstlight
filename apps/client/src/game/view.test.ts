@@ -176,23 +176,28 @@ describe("the controller's first-person camera", () => {
     expect(pc.viewBlend).toBe(1);
   });
 
-  it("in first person the body turns to face where the camera looks (the swing goes to the crosshair)", () => {
+  it("in first person the gameplay facing is the camera heading on the very next frame; only the drawn body eases", () => {
     const pc = spawn();
     const cam = camera();
     pc.view = "first";
     settle(pc, cam);
-    // Look 90° to the right (mouse), standing still: the body follows the camera's heading.
+    // Look 90° to the right (mouse), standing still, and swing on this frame (review finding 1: the
+    // facing the server's melee arc uses was eased, 66.8° off the crosshair right after the turn).
     pc.update(1 / 60, input({ mouseDX: -(Math.PI / 2) / 0.002 }), false);
+    expect(pc.facing.dot(pc.camForward)).toBeGreaterThan(0.9999);
+    // The drawn body turns after it, smoothly, and catches up.
+    expect(pc.bodyFacing.dot(pc.camForward)).toBeLessThan(0.9);
     for (let i = 0; i < 30; i++) {
       pc.update(1 / 60, input(), false);
       pc.placeCamera(cam, 1 / 60);
     }
-    expect(pc.facing.dot(pc.camForward)).toBeGreaterThan(0.999);
-    // Third person: facing stays where it was when not moving or aiming.
+    expect(pc.bodyFacing.dot(pc.camForward)).toBeGreaterThan(0.999);
+    // Third person: facing stays where it was when not moving or aiming, and the body is drawn there.
     const tp = spawn();
     tp.update(1 / 60, input({ mouseDX: -(Math.PI / 2) / 0.002 }), false);
     for (let i = 0; i < 30; i++) tp.update(1 / 60, input(), false);
     expect(tp.facing.dot(tp.camForward)).toBeLessThan(0.1);
+    expect(tp.bodyFacing.dot(tp.facing)).toBeGreaterThan(0.9999);
   });
 
   it("scrolling all the way in enters first person and tells the game; scrolling out leaves it", () => {
