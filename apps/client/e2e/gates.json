@@ -32,6 +32,16 @@
     { "id": "J7.2", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Saved player logs out → home shows my progress (6a)" },
     { "id": "J7.3", "projects": ["webgl", "webgpu"], "since": "2026-10-18", "note": "Home page draws no live backdrop blur; ?blur=1 brings it back (D-ui-1, #20)" },
     { "id": "J7.4", "projects": ["webgl", "webgpu"], "since": "2026-10-18", "note": "Home page out of the page under the loader, no polling; back after a failed load, fresh data, no HUD over it (D-home-8, #21)" },
+    { "id": "J8.1", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "V into first person, a melee fight won there (server-confirmed hits, XP), V back out (D-view-1, lane fix-view)" },
+    { "id": "Jfail.1", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "Server down at Play: the loader says so with Retry, and Retry gets in (#85, lane ship)" },
+    { "id": "Jfail.2", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "No WebGL2 and no WebGPU: Graphics didn't start, with what to try (#85)" },
+    { "id": "Jfail.3", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "A full world: the queue card says so and lets the player in by itself (#85)" },
+    { "id": "Jfail.4", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "The connection drops mid-game: Reconnecting, then back in the world (#85)" },
+    { "id": "Jfail.5", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "A deploy mid-session the one reload can't fix: A new version is out, with Reload (#85)" },
+    { "id": "Jfail.6", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "The browser refuses pointer lock: the game says to click, nothing throws (#85)" },
+    { "id": "Jfail.7", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "A phone-sized window: the home page fits and says how to play (#85)" },
+    { "id": "Jfail.8", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "The funnel: the page reports its first-time steps to our own server, once each (#85)" },
+    { "id": "Jfail.9", "projects": ["webgl", "webgpu"], "since": "2026-11-14", "note": "The tab is frozen in the background, then comes back: the world runs on, the connection holds (#85)" },
     { "id": "smoke", "projects": ["webgl", "webgpu"], "since": "2026-10-15", "note": "Guest joins, sees the world, no blinking, no console errors. Frame-time journey: run the gate on a quiet machine" }
   ]
 }
