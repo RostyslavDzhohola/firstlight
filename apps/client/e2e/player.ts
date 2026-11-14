@@ -78,7 +78,7 @@ export interface Snap {
   ui: { visibleE2e: string[]; overlays: string[]; pauseMenuMode: string | null; photo: boolean | null; loggedOutCard: boolean };
   lastDenied: { action: string; reason: string; t: number } | null;
   net?: { roomId: string; sessionId: string } | null;
-  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; name: string | null; starter: number | null; hp: number | null; maxHp?: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
+  player?: { pos: number[]; heading: number; pitch: number; anim: number; clip: string | null; onGround: boolean; swimming: boolean; view?: string | null; viewNow?: string | null; viewBlend?: number | null; name: string | null; starter: number | null; hp: number | null; maxHp?: number | null; level: number | null; flags: number; protected: boolean; inCombat: boolean; dead: boolean };
   zone?: { server: "safe" | "danger" | null; label: string | null; labelText: string | null; chip: boolean; local: "safe" | "danger" | null; kind: "town" | "outpost" | "pad" | "wild" | null; padIndex: number; padDist: number; safeRadius: number; toSafe: number | null };
   /** The nearest pad's centre (Portus: the plaza). */
   pad?: Target | null;
