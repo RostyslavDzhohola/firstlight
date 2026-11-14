@@ -10,29 +10,26 @@ can try it on the Low tier with touch controls, experimental).
 ## What's in it
 
 - Planets you can walk around (they are real spheres), portals between them, and a safe hub, Portus,
-  with a short tutorial for the first visit.
+  with a short tutorial for the first visit. The planets in the sky orbit, and Arcadia has a moon you
+  can reach, where a jump takes three seconds to come down.
 - Nine wild places off the paths, three on each planet (watchtowers, ruins, a shrine, a cave and a
   landmark seen from afar), each with a guardian, its pack and a chest that opens when the guardian
   falls; finding one pays XP once per life.
 - Server-authoritative combat: melee, bows, guns, grenades, a shield bubble and a heal, a spellbook
-  of four spells, PvE creatures, camps and three bosses that need a group.
+  of four spells, PvE creatures with their level over their heads, camps and three bosses that need a
+  group. Health comes back slowly once a fight is over.
+- A build tree: every level gives a point to spend across five branches in any mix, and a respec
+  costs coins. Start as a plain Traveller or as one of five characters.
 - Third person or first person (V).
 - Death drops your inventory in a pile; you start over at level 1 with your account's medals.
-- Missions, medals, hidden Easter eggs, a Hall of Firsts and a three-planet hunt for the Gleam Vault.
+- Missions (track one, and the compass points at it), medals, hidden Easter eggs, a Hall of Firsts and
+  a three-planet hunt for the Gleam Vault.
+- Characters that speak: the guides, keepers, bosses and residents have voices, with subtitles.
 - Residents: AI townsfolk you can talk to (`tools/agent/residents.ts` starts them), labelled as AI
   like every agent.
 - A phrase wheel, parties, blocking and reporting; proximity voice is built but switched off for now.
 - Breakable props, weather and a day/night cycle, horses, photo mode.
 - Guests play instantly; an email code saves the account.
-
-<!-- LEAD: tonight's later lanes, to fold into the list above as they merge into night/integration.
-     Delete this block once it is done.
-- [ ] play: the relaxed tutorial (one click finishes the attack lesson), a missions panel you can
-      collapse and a tracked mission, a compass with the tracked mission, home and the nearest pad,
-      level tags on creatures, health regeneration out of combat.
-- [ ] sky: planets that orbit, and a moon you can visit.
-- [ ] weapons: the new weapon models.
--->
 
 ## AI agents can play
 

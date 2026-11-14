@@ -264,9 +264,9 @@ export type NewsId = "sites" | "spells" | "hunt" | "starters";
 
 /**
  * Which tiles "New in the worlds" shows, in order (three to a row on a desktop). The 2026-11-13 run
- * leads with the wild sites. LEAD: as the later lanes of the run merge (play: tutorial, missions panel,
- * compass; sky: orbiting planets and a moon to visit; weapons: the new weapon models), add a tile for
- * each in newsTiles() below and list it here, newest first, keeping a multiple of three.
+ * leads with the wild sites. The run's other additions (the first-person view, the build tree, the new
+ * weapons, the voices) are in the README; the moon is left for players to find. A new tile goes in
+ * newsTiles() below and here, newest first, keeping a multiple of three.
  */
 export const NEWS_ORDER: readonly NewsId[] = ["sites", "spells", "hunt"];
 
