@@ -177,4 +177,25 @@ export const LOOKS: Record<BodyId, BodyLook> = {
       { body: "lumen", sizeDeg: 2.0 },
     ],
   },
+  // Lumen (#6): an airless moon. A black sky even by day with a hard white sun, no haze, and
+  // Arcadia hanging huge and still over it (its phases come from the sun moving round).
+  lumen: {
+    zenith: 0x03050c, mid: 0x070b18, horizon: 0x141a2a, ground: 0x2a2c30, glow: 0xfff4e0, glowStrength: 0.12, mie: 0.15,
+    sun: 0xffffff, sunIntensity: 4.2, sunDisc: 30, sunSizeDeg: 1.0, sunElev: 0.6, sunAz: 2.6,
+    hemiSky: 0x5a6a90, hemiGround: 0x3a3a3c, hemiIntensity: 0.9,
+    fogDensity: 0.0002, fogFalloff: 0.02, fogStart: 200, haze: 0.00005, inscatter: 0.05,
+    waterShallow: 0x5fd8d0, waterDeep: 0x1a6a88, foam: 0xf4fffc,
+    grassRoot: 0x5a5852, grassTip: 0x8a8880, grassHeight: 0.1,
+    exposure: 1.0, bloomThreshold: 1.3, bloomStrength: 0.3,
+    grade: { slope: [1.0, 1.0, 1.04], offset: [0, 0, 0.01], power: [1.02, 1.02, 1], saturation: 0.9, hue: 0 },
+    mote: 0xd8e4ff,
+    night: { zenith: 0x020308, mid: 0x050812, horizon: 0x0c1220, ground: 0x1e2026, moon: 0xb8e0ff, moonIntensity: 1.0, hemiSky: 0x3a5a8a, hemiGround: 0x18181c, hemiIntensity: 0.9, exposure: 1.35 },
+    scatter: { rayleigh: [1, 1, 1], mie: 0, mix: 0 },
+    skyPlanets: [
+      { body: "arcadia", sizeDeg: 14 },
+      { body: "portus", sizeDeg: 2.2 },
+      { body: "hollowmere", sizeDeg: 4 },
+      { body: "meridian", sizeDeg: 4.5 },
+    ],
+  },
 };

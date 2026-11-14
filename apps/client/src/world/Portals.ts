@@ -27,6 +27,7 @@ export const PORTAL_COLORS: Record<BodyId, number> = {
   arcadia: 0x36f9f6,
   hollowmere: 0xb48cff,
   meridian: 0xff7a4a,
+  lumen: 0xe8eeff, // pearl
 };
 
 /** Portal ring brightness in Portus (the planets' portal homes use 4). */
@@ -44,6 +45,7 @@ export const PORTAL_GATES: Record<BodyId, { style: "arch" | "ring"; base: number
   meridian: { style: "arch", base: 0.2, spring: 5.06, half: 1.93 },
   arcadia: { style: "ring", base: 0, spring: 0, half: 0 },
   hollowmere: { style: "ring", base: 0, spring: 0, half: 0 },
+  lumen: { style: "ring", base: 0, spring: 0, half: 0 },
 };
 
 /** The arched membrane's outline in the portal's frame (x right, y up from the portal's base). */

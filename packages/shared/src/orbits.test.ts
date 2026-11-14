@@ -8,7 +8,7 @@ const vec = (elev: number, az: number) => [Math.cos(elev) * Math.cos(az), Math.c
 const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
 
 /** Where `body` is in `viewer`'s sky at server time `ms` with both clocks running. */
-function at(viewer: Exclude<OrbitId, "lumen">, body: OrbitId, ms: number) {
+function at(viewer: OrbitId, body: OrbitId, ms: number) {
   const sun = sunAngles(viewer, dayT(viewer, ms));
   return { sun, place: skyBodyPlace(viewer, body, sun.elev, sun.az, ms) };
 }

@@ -7,7 +7,8 @@
 // Runs every frame: module scratch vectors, no allocations.
 
 import * as THREE from "three/webgpu";
-import type { Terrain } from "@firstlight/shared";
+import { BASE_GRAVITY, bodyGravity, type Terrain } from "@firstlight/shared";
+import { fallDamageFraction } from "@firstlight/shared/content/progression";
 import { emptyContact, resetContact, type PropContact } from "@firstlight/shared/planet/collide";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
@@ -41,7 +42,8 @@ export const MOVE = {
   run: BASE_MOVE.run,
   sprint: BASE_MOVE.sprint,
   swim: 3,
-  gravity: 18,
+  /** The base pull (m/s²); each body's own comes from bodyGravity (Lumen's is a quarter, #6). */
+  gravity: BASE_GRAVITY,
   jumpSpeed: 6.6,
   dodgeDistance: 4.5,
   dodgeTime: 0.3,
@@ -53,8 +55,6 @@ export const MOVE = {
   accel: 12,
   mountAccel: 5, // a horse has weight: slower to speed up, stop and turn
   airAccel: 3,
-  fallSafe: 8,
-  fallLethal: 20.5,
   /** NPC movement effects (set by world/npcs/NpcRenderer; on foot it rewrites run/sprint instead):
    *  riding reads them through mountedSpeed. */
   slow: 0,
@@ -464,7 +464,7 @@ export class PlayerController {
     } else if (this.swimming) {
       vUpNew = 0;
     } else {
-      vUpNew -= MOVE.gravity * dt;
+      vUpNew -= bodyGravity(this.terrain.body) * dt;
       if (this.onGround && !this.frozen && input.pressed.has("Space")) {
         vUpNew = MOVE.jumpSpeed;
         this.onGround = false;
@@ -540,7 +540,7 @@ export class PlayerController {
       this.pos.copy(newUp).multiplyScalar(groundR);
       if (!wasOnGround) {
         const drop = this.fallStartRadius - groundR;
-        if (drop > MOVE.fallSafe && !this.swimming && !this.adminFly) this.pendingFallDamage += Math.min(1, ((drop - MOVE.fallSafe) * 0.08));
+        if (!this.swimming && !this.adminFly) this.pendingFallDamage += fallDamageFraction(drop, bodyGravity(this.terrain.body));
       }
       this.onGround = true;
       this.swimming = false;

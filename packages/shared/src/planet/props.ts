@@ -159,6 +159,11 @@ export const PROP_STYLES: Record<BodyId, PropRule[]> = {
     { kind: "rock", every: 3, chance: 0.08, minFlat: 0.76, minH: 0.2, maxH: 999, scale: [0.6, 1.5] },
     { kind: "boulder", every: 5, chance: 0.09, minFlat: 0.78, minH: 0.5, maxH: 999, scale: [0.7, 1.5] },
   ],
+  // Lumen: bare regolith, rocks and boulders only (heights are above its far-down water level).
+  lumen: [
+    { kind: "rock", every: 3, chance: 0.1, minFlat: 0.76, minH: 50, maxH: 999, scale: [0.6, 1.5] },
+    { kind: "boulder", every: 6, chance: 0.1, minFlat: 0.78, minH: 50, maxH: 999, scale: [0.7, 1.6] },
+  ],
 };
 
 export interface PropInstance {

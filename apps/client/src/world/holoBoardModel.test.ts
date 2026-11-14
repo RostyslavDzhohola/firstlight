@@ -4,7 +4,7 @@ import { clipName, gleamMarks, HOLO_HUNT_ROWS, HOLO_MEDAL_ROWS, HOLO_NAME_MAX, H
 
 const online = (total: number): HomeData["online"] => ({
   total,
-  bodies: { portus: { players: total, names: [] }, arcadia: { players: 0, names: [] }, hollowmere: { players: 0, names: [] }, meridian: { players: 0, names: [] } },
+  bodies: { portus: { players: total, names: [] }, arcadia: { players: 0, names: [] }, hollowmere: { players: 0, names: [] }, meridian: { players: 0, names: [] }, lumen: { players: 0, names: [] } },
 });
 
 function data(levels: number, medals: number, total = 3): HomeData {

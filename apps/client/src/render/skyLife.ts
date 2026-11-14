@@ -133,6 +133,7 @@ export const AURORA_COLORS: Record<BodyId, [number, number]> = {
   arcadia: [0x5dffb0, 0x6fa8ff],
   hollowmere: [0x9a6bff, 0xff7edb],
   meridian: [0xffb060, 0xff6a8a],
+  lumen: [0x9fd8ff, 0xd0b8ff],
 };
 
 export class SkyLife {

@@ -78,6 +78,7 @@ export const BODY_TONE: Record<BodyId, ToneParams> = {
   arcadia: { contrast: 0.18, split: 0.25 },
   hollowmere: { contrast: 0.12, split: 0.3 },
   meridian: { contrast: 0.2, split: 0.35 },
+  lumen: { contrast: 0.24, split: 0.15 },
 };
 export const NEUTRAL_TONE: ToneParams = { contrast: 0, split: 0 };
 

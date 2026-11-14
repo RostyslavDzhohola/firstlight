@@ -20,6 +20,7 @@ const online: HomeOnline = {
     arcadia: { players: 3, names: ["Mossback"] },
     hollowmere: { players: 0, names: [] },
     meridian: { players: 0, names: [] },
+    lumen: { players: 0, names: [] },
   },
 };
 

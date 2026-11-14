@@ -11,8 +11,8 @@
 import { DAY_MS, SKY_PROFILES } from "./sky.ts";
 import type { BodyId } from "./planet/bodies.ts";
 
-/** Everything that orbits: the worlds and the one moon. */
-export type OrbitId = BodyId | "lumen";
+/** Everything that orbits: every body, the moon included. */
+export type OrbitId = BodyId;
 
 export interface Orbit {
   /** What it circles (null: the star). */
@@ -95,10 +95,10 @@ const PB: [number, number] = [0, 0];
 
 /** The celestial pole of a body's sky: opposite the noon sun, as high as its sun path implies. */
 function poleOf(viewer: OrbitId, out: number[]) {
-  const p = SKY_PROFILES[viewer as BodyId];
+  const p = SKY_PROFILES[viewer];
   // For a sun at declination δ seen from latitude φ: max = 90° − φ + δ, min = φ + δ − 90°.
-  const lat = p ? Math.PI / 2 - (p.maxElev - p.minElev) / 2 : 1.0;
-  const az = (p ? p.noonAz : 0) + Math.PI;
+  const lat = Math.PI / 2 - (p.maxElev - p.minElev) / 2;
+  const az = p.noonAz + Math.PI;
   out[0] = Math.cos(lat) * Math.cos(az);
   out[1] = Math.cos(lat) * Math.sin(az);
   out[2] = Math.sin(lat);

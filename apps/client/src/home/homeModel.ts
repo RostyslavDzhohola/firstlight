@@ -21,6 +21,7 @@ const BLURB: Record<BodyId, string> = {
   arcadia: "Where the Brightbits roam.",
   hollowmere: "The Hollow Court keeps the fen.",
   meridian: "Run by Meridian Oversight.",
+  lumen: "Arcadia's moon: through the moon portal by Dawnpad.",
 };
 /** One line per world: the world cards' headline and the in-game arrival card (ui/arrivalCard.ts). */
 const LINE: Record<BodyId, string> = {
@@ -28,6 +29,7 @@ const LINE: Record<BodyId, string> = {
   arcadia: "Golden meadows round Glasswater Lake",
   hollowmere: "Violet dusk over Mourning Mere",
   meridian: "Red canyons and chrome spires",
+  lumen: "Grey craters under a black sky, Arcadia overhead",
 };
 export const worldLine = (id: BodyId): string => LINE[id];
 /** "Levels 1–7"; Portus: "Safe · Lv 1–2" (the creeps outside its walls). */
@@ -214,7 +216,7 @@ export function namesLine(names: readonly string[], players: number, max = 3): s
  */
 export const HERO_STILLS = ["portus-plaza-dusk", "arcadia-lake", "hollowmere-planet", "meridian-mesa", "portus-portal"] as const;
 /** The still on each world's card. */
-export const WORLD_STILL: Record<BodyId, string> = { portus: "portus-above", arcadia: "arcadia-pond", hollowmere: "hollowmere-fen", meridian: "meridian-waystation" };
+export const WORLD_STILL: Record<BodyId, string> = { portus: "portus-above", arcadia: "arcadia-pond", hollowmere: "hollowmere-fen", meridian: "meridian-waystation", lumen: "arcadia-pond" };
 
 /** How long a hero still holds before the next fades in (ms), and the fade (home.css). */
 export const HERO_HOLD_MS = 7000;

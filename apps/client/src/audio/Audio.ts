@@ -293,6 +293,8 @@ const MOODS: Record<BodyId, Mood> = {
   arcadia: { bpm: 96, root: 62, scale: [0, 2, 4, 7, 9, 12, 14, 16, 19], chords: [[0, 2, 4], [4, 6, 8], [3, 5, 7], [1, 3, 5]], padCutoff: 1800, arpWave: "square", arpDensity: 0.7, kick: false },
   hollowmere: { bpm: 64, root: 50, scale: [0, 2, 3, 7, 8, 12, 14, 15], chords: [[0, 2, 3], [4, 5, 7], [2, 4, 5], [0, 3, 4]], padCutoff: 700, arpWave: "sine", arpDensity: 0.3, kick: false },
   meridian: { bpm: 108, root: 52, scale: [0, 3, 5, 7, 10, 12, 15, 17], chords: [[0, 2, 3], [1, 3, 4], [2, 4, 5], [0, 3, 5]], padCutoff: 1100, arpWave: "sawtooth", arpDensity: 0.6, kick: true },
+  // Lumen: slow, wide and weightless (lydian, sparse sine arps).
+  lumen: { bpm: 58, root: 55, scale: [0, 2, 4, 6, 7, 11, 12, 14, 16], chords: [[0, 2, 4], [1, 3, 5], [4, 6, 8], [0, 3, 5]], padCutoff: 900, arpWave: "sine", arpDensity: 0.25, kick: false },
 };
 
 const midiHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);

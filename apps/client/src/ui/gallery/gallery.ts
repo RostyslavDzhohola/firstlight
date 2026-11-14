@@ -80,6 +80,7 @@ const HOME_MOCK: HomeData = {
       arcadia: { players: 17, names: ["Bramble", "Cinder_7", "Mossback", "Wren_07"] },
       hollowmere: { players: 8, names: ["Lumen_K", "Orbit_9"] },
       meridian: { players: 3, names: ["Vexa_77"] },
+      lumen: { players: 0, names: [] },
     },
   },
   board: {

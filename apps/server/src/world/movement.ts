@@ -16,6 +16,7 @@ import { HORSE, rideSpeed } from "@firstlight/shared/content/horse";
 import { ANIM } from "@firstlight/shared/net/schema";
 import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
+import { BASE_GRAVITY } from "@firstlight/shared/planet/bodies";
 import { starterMove } from "@firstlight/shared/content/starters";
 import { adminSwitch, inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
@@ -42,7 +43,7 @@ export const MOVE = {
   knockbackWindowMs: 1500,
   groundTolerance: 0.5, // feet may be this far below the ground
   groundedAbove: 0.35, // feet within this of the ground count as grounded (client: the same)
-  gravity: 18, // client PlayerController
+  gravity: BASE_GRAVITY, // client PlayerController; the envelope uses each body's (PlayerActor.airG)
   jumpSpeed: 6.6, // client PlayerController (apex ≈ 1.21 m)
   airSlack: 0.5, // metres above the envelope
   airTimeSlackMs: 350, // packet timing slack on the envelope
@@ -126,7 +127,7 @@ function swimmingAt(w: MoveWorld, len: number, ground: number): boolean {
 
 /** Highest radius the body may have right now while airborne (the ballistic envelope). */
 export function airCeiling(a: PlayerActor, now: number): number {
-  const g = MOVE.gravity;
+  const g = a.airG;
   const v0 = a.airLiftV;
   const tApex = v0 / g;
   const apex = (v0 * v0) / (2 * g);
@@ -142,8 +143,8 @@ export function groundMotion(a: PlayerActor, len: number, now: number) {
   a.airLiftV = MOVE.jumpSpeed;
 }
 
-/** Height of a standing jump's apex (the client's jump speed and gravity), about 1.21 m. */
-const JUMP_APEX = (MOVE.jumpSpeed * MOVE.jumpSpeed) / (2 * MOVE.gravity);
+/** Height of a standing jump's apex under pull `g` (the client's jump speed): about 1.21 m at the base pull. */
+const jumpApex = (g: number) => (MOVE.jumpSpeed * MOVE.jumpSpeed) / (2 * g);
 
 /**
  * May a step end standing on a prop top `ground` m up (F12 confirmation Opus SF1)? A top counts as
@@ -158,7 +159,7 @@ function reachesTop(a: PlayerActor, w: MoveWorld, ground: number, len: number, n
   const support = supportAt(w, sx, sy, sz, w.groundAt(sx, sy, sz));
   const standing = from - w.radius - support <= MOVE.groundedAbove;
   if (standing && support >= ground - MOVE.groundedAbove) return true;
-  const ceiling = standing ? Math.max(airCeiling(a, now), from + JUMP_APEX + MOVE.airSlack) : airCeiling(a, now);
+  const ceiling = standing ? Math.max(airCeiling(a, now), from + jumpApex(a.airG) + MOVE.airSlack) : airCeiling(a, now);
   return len <= ceiling;
 }
 
@@ -292,7 +293,7 @@ export function settle(a: PlayerActor, w: MoveWorld, now: number): V3 | null {
 /** Upward speed the envelope still allows the body at `now` (its launch speed less gravity, with the timing slack). */
 function upwardSpeedLeft(a: PlayerActor, now: number): number {
   const t = Math.max(0, (now - a.airStartAt - MOVE.airTimeSlackMs) / 1000);
-  return Math.max(0, a.airLiftV - MOVE.gravity * t);
+  return Math.max(0, a.airLiftV - a.airG * t);
 }
 
 /**
@@ -310,8 +311,8 @@ export function noteKnockback(a: PlayerActor, strength: number, now: number) {
   a.airLiftV = v;
 }
 
-/** Fresh motion state for a body placed at radius `len` (join, teleport). */
-export function motionFields(len: number, now: number) {
+/** Fresh motion state for a body placed at radius `len` (join, teleport) on a body pulling with `gravity`. */
+export function motionFields(len: number, now: number, gravity = MOVE.gravity) {
   return {
     moveBudget: MOVE.budgetCap,
     lastBudgetAt: now,
@@ -326,5 +327,6 @@ export function motionFields(len: number, now: number) {
     airStartAt: now,
     airStartLen: len,
     airLiftV: MOVE.jumpSpeed,
+    airG: gravity,
   };
 }

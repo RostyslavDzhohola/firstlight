@@ -176,7 +176,7 @@ export interface OrreryPlate {
   action: { kind: "dive"; label: string } | { kind: "route"; note: string; go: BodyId; goLabel: string };
 }
 
-const NAME: Record<BodyId, string> = { portus: "Portus", arcadia: "Arcadia", hollowmere: "Hollowmere", meridian: "Meridian" };
+const NAME: Record<BodyId, string> = { portus: "Portus", arcadia: "Arcadia", hollowmere: "Hollowmere", meridian: "Meridian", lumen: "Lumen" };
 /** The colour of each world's portal in the Portus plaza (what a new traveller is told to look for). */
 const PORTAL: Partial<Record<BodyId, string>> = { arcadia: "cyan", hollowmere: "violet", meridian: "amber" };
 

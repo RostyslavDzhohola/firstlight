@@ -123,6 +123,18 @@ export const WILD_SITES: readonly WildSiteDef[] = [
     chest: { coins: 420, weapons: 2, tonics: 2 },
     blurb: "A freighter broken in two in the salt. Its chest sits in the break.",
   },
+
+  // ---------------------------------------------------------------- Lumen (6–9; #6)
+  // Its one landmark reuses the Meridian hauler hull: an Oversight freighter that never made it
+  // home, broken across a crater.
+  {
+    id: "quietfall_wreck", name: "The Quietfall Wreck", body: "lumen", kind: "landmark", prefab: "m_hull",
+    at: { between: [0, 1, 0.5] }, yaw: 140, levels: [8, 9],
+    guardian: { kind: "cratermaw", level: 9 },
+    pack: [{ kind: "glimmerhop", count: 3, level: 8 }, { kind: "dustmoth", count: 2, level: 8 }],
+    chest: { coins: 110, weapons: 1, tonics: 1 },
+    blurb: "A freighter broken across a crater, Arcadia hanging over it. Something nests in the hold.",
+  },
 ];
 
 export const WILD_SITE_BY_ID: ReadonlyMap<string, WildSiteDef> = new Map(WILD_SITES.map((s) => [s.id, s]));
