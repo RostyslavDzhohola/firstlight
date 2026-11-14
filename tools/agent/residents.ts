@@ -45,18 +45,18 @@ export interface CastMember {
 
 /** The residents, in joining order. Original names (checked against docs/content.md §10 and the game's own NPCs). */
 export const CAST: readonly CastMember[] = [
-  { name: "Brindle_Oake", role: "hunter", starter: "ash" , voice: "brindle" },
-  { name: "Tamsin_Hollis", role: "wanderer", starter: "kappa" , voice: "tamsin" },
-  { name: "Marlo_Thistle", role: "trader", starter: "unit7" , voice: "marlo" },
-  { name: "Juniper_Fenn", role: "chaser", starter: "ninja" , voice: "juniper" },
-  { name: "Garnet_Moss", role: "hunter", starter: "unit7" },
-  { name: "Hesper_Dunn", role: "wanderer", starter: "hexwick" },
-  { name: "Sable_Finch", role: "trader", starter: "kappa" },
-  { name: "Corbin_Reed", role: "chaser", starter: "kappa" },
-  { name: "Wendell_Crane", role: "hunter", starter: "ninja" },
-  { name: "Odessa_Larch", role: "wanderer", starter: "ninja" },
-  { name: "Ptolemy_Birch", role: "trader", starter: "hexwick" },
-  { name: "Isla_Thornby", role: "chaser", starter: "unit7" },
+  { name: "Brindle_Oake", role: "hunter", starter: "ash", voice: "brindle" },
+  { name: "Tamsin_Hollis", role: "wanderer", starter: "kappa", voice: "tamsin" },
+  { name: "Marlo_Thistle", role: "trader", starter: "unit7", voice: "marlo" },
+  { name: "Juniper_Fenn", role: "chaser", starter: "ninja", voice: "juniper" },
+  { name: "Garnet_Moss", role: "hunter", starter: "unit7", voice: "garnet" },
+  { name: "Hesper_Dunn", role: "wanderer", starter: "hexwick", voice: "hesper" },
+  { name: "Sable_Finch", role: "trader", starter: "kappa", voice: "sable" },
+  { name: "Corbin_Reed", role: "chaser", starter: "kappa", voice: "corbin" },
+  { name: "Wendell_Crane", role: "hunter", starter: "ninja", voice: "wendell" },
+  { name: "Odessa_Larch", role: "wanderer", starter: "ninja", voice: "odessa" },
+  { name: "Ptolemy_Birch", role: "trader", starter: "hexwick", voice: "ptolemy" },
+  { name: "Isla_Thornby", role: "chaser", starter: "unit7", voice: "isla" },
 ];
 
 export interface ResidentsOptions {

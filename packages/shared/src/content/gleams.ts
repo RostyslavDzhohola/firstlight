@@ -19,11 +19,11 @@ export const GLEAMS = {
   medal: "three_gleams",
   /** Hall of Firsts id (secrets.ts PLAQUES). */
   firsts: "hunt:gleams",
-  greeting: "Three gleams of the first light, one on each world. The vault remembers who brings them home.",
+  greeting: "Three gleams, one on each world. Bring them here and the vault opens. That's the whole of it, and it's plenty.",
   /** Sela's lines (the panel shows the one matching your progress). */
   lines: {
-    none: "Every world kept one gleam when the light was young. Win all three and the vault in front of me opens for you.",
-    some: "The vault hums when you come near. It can feel what you carry. Bring the rest.",
+    none: "Arcadia, Hollowmere, Meridian. Each kept a gleam, and each makes you earn it differently. Win all three and this vault opens for you.",
+    some: "Hear that hum? The vault knows what you're carrying. It's counting. So am I. Bring the rest.",
     all: "All three. Go on, the vault is listening.",
     opened: "The vault knows your face now. Win them again in another life and it will open again.",
   },
