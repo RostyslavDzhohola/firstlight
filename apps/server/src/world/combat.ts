@@ -18,6 +18,15 @@ import { HORSE } from "@firstlight/shared/content/horse";
 export const REWIND_MS = NET.REWIND_MS;
 /** No hit taken or dealt for this long: out of combat (logout, pad travel, and regeneration's start, REGEN.DELAY_S). */
 export const COMBAT_TAG_MS = REGEN.DELAY_S * 1000;
+
+/**
+ * An encounter in REGEN.PAUSED_IN (a boss's fight, a defend attempt) holds `p`'s regeneration while it
+ * lasts and for the usual delay after (D-fixplay-2): their own pauses reach the delay, so the combat
+ * tag alone would let it start mid-encounter. Called every tick the encounter counts the player in.
+ */
+export function holdRegen(p: PlayerActor, kind: (typeof REGEN.PAUSED_IN)[number], now: number) {
+  if (REGEN.PAUSED_IN.includes(kind)) p.noRegenUntil = now + COMBAT_TAG_MS;
+}
 export const ORIGIN_SLACK = 7; // metres the shot origin may be from the shooter's head (camera offset)
 
 export interface CombatHost {
@@ -1022,9 +1031,10 @@ export function stepEffects(host: CombatHost, dt: number) {
         if (p.state.hp < mh) p.state.hp = Math.min(mh, p.state.hp + whole);
       }
     }
-    // Out of combat (no hit taken or dealt for the combat tag, REGEN.DELAY_S): slow regeneration.
+    // Out of combat (no hit taken or dealt for the combat tag, REGEN.DELAY_S, and no boss fight or defend
+    // attempt holding it, holdRegen): slow regeneration.
     const mh = starterMaxHp(p.char.starter, p.char.level);
-    if (p.state.hp > 0 && p.state.hp < mh && now >= p.combatUntil && !p.burn) {
+    if (p.state.hp > 0 && p.state.hp < mh && now >= p.combatUntil && now >= (p.noRegenUntil ?? 0) && !p.burn) {
       const acc = (regenAcc.get(p) ?? 0) + mh * REGEN.PER_SEC * dt;
       const whole = Math.floor(acc + 1e-6);
       regenAcc.set(p, acc - whole);

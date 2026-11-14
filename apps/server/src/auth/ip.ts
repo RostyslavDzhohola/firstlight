@@ -69,3 +69,52 @@ export function directRequestIp(req: IncomingMessage): string | null {
 export function proxiedRequestIp(req: IncomingMessage): string | null {
   return firstForwardedFor(req) ?? directRequestIp(req);
 }
+
+/** Is `ip` a loopback address (127.0.0.0/8, ::1, or either mapped)? */
+export function isLoopback(ip: string | null | undefined): boolean {
+  const n = validIp(ip);
+  return !!n && (n === "::1" || /^127\.\d+\.\d+\.\d+$/.test(n));
+}
+
+function loopbackHost(host: string | undefined): boolean {
+  if (!host) return false;
+  const name = host.trim().toLowerCase().replace(/:\d+$/, "");
+  return name === "localhost" || name === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(name);
+}
+
+/** Every address a forwarding header names (`for=` entries of RFC 7239 Forwarded), unparsed ones as "". */
+function forwardedAddresses(req: IncomingMessage): string[] {
+  const out: string[] = [];
+  for (const name of ["x-forwarded-for", "x-real-ip"]) {
+    const v = header(req, name);
+    if (v !== undefined) out.push(...v.split(",").map((s) => s.trim()));
+  }
+  const fwd = header(req, "forwarded");
+  if (fwd !== undefined) {
+    const fors = fwd.split(/[;,]/).map((p) => p.trim()).filter((p) => /^for=/i.test(p));
+    if (!fors.length) out.push("");
+    for (const f of fors) out.push(f.slice(4).replace(/^"|"$/g, "").replace(/^\[([^\]]+)\](?::\d+)?$/, "$1").replace(/^(\d+\.\d+\.\d+\.\d+):\d+$/, "$1"));
+  }
+  return out;
+}
+
+/**
+ * The person at this machine, for development-only routes that would leak something to anyone else
+ * (#84's sign-in code). Only the TCP socket's own address grants it: it must be loopback. Headers can
+ * only take it away, never give it: a forwarding header naming anyone but loopback (a proxy on this
+ * machine passing on a remote caller, e.g. Vite's xfwd or nginx) refuses, and so does a Host that isn't
+ * a loopback name (a page whose domain was rebound to 127.0.0.1). The `x-forwarded-*` and `x-real-ip`
+ * headers are never read as the caller's address here.
+ */
+export function localDevRequest(req: IncomingMessage): boolean {
+  return loopbackCaller(req) && loopbackHost(header(req, "host")) && header(req, "via") === undefined;
+}
+
+/**
+ * Did this request come from this machine: the socket's own address is loopback and no forwarding
+ * header names anyone else? The development exemptions from per-address limits use it, so a remote
+ * caller can't earn them by sending `X-Real-IP: 127.0.0.1` to a server that isn't production.
+ */
+export function loopbackCaller(req: IncomingMessage): boolean {
+  return isLoopback(req.socket?.remoteAddress) && forwardedAddresses(req).every(isLoopback);
+}

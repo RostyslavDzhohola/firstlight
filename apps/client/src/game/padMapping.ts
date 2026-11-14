@@ -260,3 +260,16 @@ export function padControls(family: PadFamily): { title: string; rows: [string, 
     { title: "Menus", rows: [["D-pad · LS", "Move the focus"], [f.A, "Choose"], [f.B, "Back"]] },
   ];
 }
+
+/**
+ * What a pad or a touch screen has no button for comes from the pause menu: each row taps its key
+ * (game/controls.ts draws them). Two rows per device at most (the menu's list has no room for more):
+ * a pad already has inventory (R3), map (Select) and players (Select held); touch has Map and Bag
+ * buttons on the overlay. The journal's Missions tab is how both track a mission and fold the HUD
+ * missions panel (L / Shift+L on a keyboard; review 2026-11-13 #4).
+ */
+export const MENU_KEY_ROWS: readonly { icon: string; title: string; sub: string; code: string; on: readonly ("pad" | "touch")[] }[] = [
+  { icon: "book", title: "Journal", sub: "Missions (track one, fold the panel), medals, the wardrobe", code: "KeyJ", on: ["pad", "touch"] },
+  { icon: "check", title: "Tutorial checklist", sub: "Show or hide the first-steps list", code: "KeyT", on: ["pad"] },
+  { icon: "users", title: "Players", sub: "Who is here, party invites", code: "Tab", on: ["touch"] },
+];

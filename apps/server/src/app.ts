@@ -6,7 +6,7 @@ import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { TokenVerifier } from "./auth/identity.ts";
-import { banKey, directRequestIp } from "./auth/ip.ts";
+import { banKey, directRequestIp, loopbackCaller } from "./auth/ip.ts";
 import { BodyRoom } from "./world/BodyRoom.ts";
 import { enterSandbox, isBodyId, onlineCount, play, type MatchmakingLimits } from "./world/matchmaking.ts";
 import { identityCheck, storageRecovery, travelRedirect } from "./world/admission.ts";
@@ -44,7 +44,6 @@ export interface GameOptions {
   gateway?: Omit<GatewayOptions, "loopback"> | false;
 }
 
-const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
 
 /** /api/play limits (F12 S2): calls per 10 s and unused seats, per account and per address. */
 export const PLAY_LIMITS = {
@@ -137,7 +136,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
 
   app.post("/api/play", async (req, res) => {
     // Before any verification (D-security-3): the request budgets, then the cheap field checks.
-    if (!playGate.admit(directRequestIp(req))) {
+    if (!playGate.admit(directRequestIp(req), loopbackCaller(req))) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
@@ -181,7 +180,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     // Per-address limits skip load-test bots and loopback (local development and in-process tests;
     // production requests always carry the edge's client address).
     // Production has no loopback exemption (D-security-4); addresses are keyed IPv6 per /64.
-    const perAddress = !identity.loadtest && !(!opts.production && ip !== null && LOOPBACK.has(ip));
+    const perAddress = !identity.loadtest && !(!opts.production && loopbackCaller(req));
     if (!identity.loadtest) {
       const key = ip ? banKey(ip) : "unknown";
       const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);

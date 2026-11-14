@@ -87,4 +87,15 @@ export const SELL_RATE = 0.25;
  * Any hit taken or attack made stops it again, so it never runs inside a fight (`pnpm balance`
  * checks every creature fight keeps the tag up). Slow on purpose: a tonic is the in-fight heal.
  */
-export const REGEN = { DELAY_S: 10, PER_SEC: 0.01 } as const;
+export const REGEN = {
+  DELAY_S: 10,
+  PER_SEC: 0.01,
+  /**
+   * Fights whose own rhythm leaves pauses of DELAY_S or more (a boss's plate window, where it holds its
+   * attacks; a defend trial's gap between waves), so the server holds regeneration for the whole
+   * encounter instead (D-fixplay-2): a boss's fighters while it is engaged, a defend attempt's runner
+   * until it ends. `pnpm balance` measures each encounter's longest pause and fails if one reaches
+   * DELAY_S without being listed here.
+   */
+  PAUSED_IN: ["boss", "defend"] as readonly ("boss" | "defend")[],
+} as const;

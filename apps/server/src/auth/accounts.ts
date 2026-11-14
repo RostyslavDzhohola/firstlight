@@ -24,7 +24,7 @@ import { stmt } from "../db/game-db.ts";
 import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
 import type { Identity, TokenVerifier, VerifyContext } from "./identity.ts";
-import { banKey, CLIENT_IP_HEADER, normalizeIp, proxiedRequestIp } from "./ip.ts";
+import { banKey, CLIENT_IP_HEADER, localDevRequest, normalizeIp, proxiedRequestIp } from "./ip.ts";
 import { accountLinks, type LinkEvents } from "./links.ts";
 import { classifyMailFailure, DevOutbox, disabledMailer, MailHealth, resendMailer, type Mailer } from "./mailer.ts";
 import { identifyRequest, mountAccountRoutes, requireAdminFor } from "./routes.ts";
@@ -56,6 +56,8 @@ export interface AccountsConfig {
   rateLimit?: boolean;
   /** Print dev OTP codes to the console (only when the dev outbox is in use). */
   devMailLog?: boolean;
+  /** #84: mount GET /api/account/dev-code (DEV_SIGNIN_CODES=1). Needs the dev outbox, never in production, loopback callers only. */
+  devCodeRoute?: boolean;
   /** Accepted after the Better Auth verifier (dev guest tokens when ALLOW_DEV_GUESTS=1). */
   fallbackVerifier?: TokenVerifier;
   mailer?: Mailer;
@@ -334,12 +336,19 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     },
     mountAfterJson(app) {
       mountAccountRoutes(app, accounts, cfg);
-      // #84: outside production, with no mail key, no email goes out: the save and sign-in cards ask
-      // here for the code the dev outbox kept and show it. Never mounted in production (no dev
-      // outbox there, and the flag is checked again), so a code can't leak from a live server.
+      // #84: a development server with no mail key sends no email: the save and sign-in cards ask
+      // here for the code the dev outbox kept and show it. It hands out anyone's code, so "not
+      // production" is not enough (an exposed staging box with NODE_ENV unset is not local): it needs
+      // the explicit DEV_SIGNIN_CODES=1 opt-in, is never mounted in production, and answers only the
+      // person at this machine, judged by the socket's own address (localDevRequest).
       const outbox = devOutbox;
-      if (outbox && !cfg.production) {
+      if (outbox && cfg.devCodeRoute && !cfg.production) {
         app.get("/api/account/dev-code", (req, res) => {
+          res.setHeader("Cache-Control", "no-store");
+          if (!localDevRequest(req)) {
+            res.status(404).json({ error: "not found" });
+            return;
+          }
           const email = typeof req.query.email === "string" ? req.query.email.trim() : "";
           res.json({ code: email ? outbox.recentCode(email) : null });
         });
@@ -386,6 +395,7 @@ export function accountsConfigFromEnv(env: {
   otpDailyBudget: number;
   otpPerEmailPerHour: number;
   devMailLog: boolean;
+  devCodeRoute?: boolean;
 }): AccountsConfig {
   return {
     production: env.production,
@@ -403,6 +413,7 @@ export function accountsConfigFromEnv(env: {
     otpDailyBudget: env.otpDailyBudget,
     otpPerEmailPerHour: env.otpPerEmailPerHour,
     devMailLog: env.devMailLog,
+    devCodeRoute: !!env.devCodeRoute && !env.production,
   };
 }
 

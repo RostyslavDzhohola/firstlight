@@ -294,6 +294,8 @@ export type ServerMessages = {
   missionDone: { id: string; xp: number; coins: number };
   /** The tracked hunt mission's NPCs within reach whose kill would count (missions.ts huntCredit): what the mission pointer follows. Sent when the list changes. */
   huntTargets: { id: string; npcs: string[] };
+  /** A `track` was accepted: the hunt targets follow `id` from now on (a throttled one is `denied {action: "track"}`). */
+  tracked: { id: string | null };
   /** Result of buy/sell/wear (a toast carries the human text). */
   shop: { ok: boolean; action: "buy" | "sell" | "wear"; reason?: string };
   /** A personal puzzle light changed state, for its solver only. */

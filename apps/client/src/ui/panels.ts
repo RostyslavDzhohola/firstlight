@@ -11,6 +11,8 @@ import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type Mission
 import { trackerRows } from "./trackerRows.ts";
 import { trialWay } from "../game/nextSteps.ts";
 import { missionTrack } from "../game/missionTrack.ts";
+import { MISSIONS_KEY } from "./missionsPanel.ts";
+import { uiSettings } from "./uiSettings.ts";
 import { spellCost, spellEffect, spellPower } from "../game/spellInfo.ts";
 import { SPELLS } from "@firstlight/shared/content/spells";
 import { LEVEL_CAP } from "@firstlight/shared/content/progression";
@@ -236,6 +238,15 @@ export class JournalPanel extends Panel {
 
   private renderMissions(body: HTMLElement, you: YouPlus | null) {
     const mine = you?.missions ?? [];
+    // Review #4: the HUD missions panel folds here too (L on a keyboard), so a pad and a touch screen,
+    // which reach the journal from the pause menu, can fold it; the focus navigator reaches this button.
+    const folded = uiSettings.get().missionsCollapsed;
+    const fold = el("button", "btn ghost", el("div", "top", body), `${folded ? "Unfold" : "Fold"} the missions panel (${MISSIONS_KEY.cap})`);
+    fold.dataset.e2e = "journal-fold-missions";
+    fold.onclick = () => {
+      uiSettings.set({ missionsCollapsed: !uiSettings.get().missionsCollapsed });
+      this.render();
+    };
     if (!mine.length) el("p", "sub", body, "No missions yet. Each planet's guide waits at its main pad: Lark on Arcadia, Sexton Mabry on Hollowmere, Rook Calder on Meridian. In Portus Plaza, Sela Marchbank gives the three trials of the Three Gleams.");
     for (const m of mine) {
       const def = MISSION_BY_ID.get(m.id);

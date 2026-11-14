@@ -87,3 +87,91 @@ export class MissionTrack {
 
 /** The game's one tracker (survives travel between bodies). */
 export const missionTrack = new MissionTrack();
+
+/**
+ * Gets the tracked choice to the server (review 2026-11-13 #3). `track` shares the server's five-a-second
+ * quest budget, so a send can be refused (`denied {action: "track"}`) or lost; the server acknowledges an
+ * accepted one with `tracked {id}`. One send is in flight at a time; changes meanwhile only update the
+ * latest choice, which goes out when the answer comes. A refusal retries after the window, and a send
+ * with no answer at all is repeated after `ackTimeoutMs`.
+ */
+export class TrackSync {
+  private latest: string | null = null;
+  private inFlight = false;
+  private dirty = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly send: (id: string | null) => void,
+    private readonly opts: { retryMs: number; ackTimeoutMs: number } = { retryMs: 1100, ackTimeoutMs: 3000 },
+  ) {}
+
+  /** Is a choice not yet confirmed by the server? */
+  get pending(): boolean {
+    return this.inFlight || this.dirty;
+  }
+
+  /** The player chose `id`. */
+  want(id: string | null) {
+    this.latest = id;
+    this.dirty = true;
+    if (!this.inFlight && !this.timer) this.flush();
+  }
+
+  /** The server accepted `id`. */
+  acked(id: string | null) {
+    this.inFlight = false;
+    this.clear();
+    if (id !== this.latest) this.dirty = true;
+    if (this.dirty) this.flush();
+  }
+
+  /** The server refused the last send (throttled): retry the latest choice after the window. */
+  denied() {
+    this.inFlight = false;
+    this.dirty = true;
+    this.later(this.opts.retryMs);
+  }
+
+  /** A new room: it knows nothing yet, so send `id` now. */
+  reset(id: string | null) {
+    this.clear();
+    this.inFlight = false;
+    this.want(id);
+  }
+
+  dispose() {
+    this.clear();
+  }
+
+  private flush() {
+    this.clear();
+    this.dirty = false;
+    this.inFlight = true;
+    this.send(this.latest);
+    this.later(this.opts.ackTimeoutMs);
+  }
+
+  private later(ms: number) {
+    this.clear();
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.inFlight = false;
+      this.flush();
+    }, ms);
+  }
+
+  private clear() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+}
+
+/** Shift+L: track the next open mission, once per press (a held key's repeats are ignored). True when it stepped. */
+export function stepTrackKey(track: MissionTrack, missions: readonly TrackMission[], e: { repeat: boolean }): boolean {
+  if (e.repeat) return false;
+  const next = track.nextAfter(missions);
+  if (!next || next.id === track.chosen) return false;
+  track.choose(next.id);
+  return true;
+}

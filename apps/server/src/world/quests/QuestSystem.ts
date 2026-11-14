@@ -182,12 +182,20 @@ export class QuestSystem implements RoomSystem {
     room.onMessage("interact", z.object({ target: z.string().max(40), code: z.string().max(8).optional() }), (c, m) => this.interact(c, m.target, m.code));
     room.onMessage("questSync", z.object({}).passthrough().optional(), (c) => this.sync(c));
     // The mission the player tracks (#69): the hunt pointer's targets follow it. Session-only (the
-    // client keeps the choice and sends it again after each join).
+    // client keeps the choice and sends it again after each join). Shares the quest-op budget: a
+    // throttled change is refused with `denied`, an accepted one acknowledged with `tracked`, so the
+    // client knows to retry its latest choice (review 2026-11-13 #3).
     room.onMessage("track", z.object({ id: z.string().max(8).nullable() }), (c, m) => {
       const a = this.room.playerById(c.sessionId);
-      if (!this.allowOp(a)) return;
+      if (!a) return;
+      const live = !a.dead && !a.superseded;
+      if (!this.allowOp(a)) {
+        if (live) c.send("denied", { action: "track", reason: "slow down" });
+        return;
+      }
       if (m.id) this.tracked.set(a, m.id);
       else this.tracked.delete(a);
+      c.send("tracked", { id: m.id });
     });
     this.unsubs.push(onGameEvent(room, (e) => this.onEvent(e)));
     this.unsubs.push(onNpcEvent((e) => this.onNpcEvent(e)));

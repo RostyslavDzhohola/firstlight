@@ -1,6 +1,7 @@
 // Security pass fixes (docs/reviews/2026-11-12-security-pass-gpt-6.1-sol.md, D-security-1…8): each
 // block drives the real server in-process and fails on the code before its fix.
 
+import { networkInterfaces } from "node:os";
 import type { Room } from "@colyseus/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROTOCOL_VERSION } from "@firstlight/shared/net/protocol";
@@ -257,6 +258,19 @@ describe("finding 4: one trusted-proxy rule for client addresses", () => {
     game = await startServer();
     for (const id of ["dv1", "dv2", "dv3"]) expect(await send(game.port, `dev:${id}:${id}`, {})).toBe(200);
   });
+
+  // Review 2026-11-13 #1 sweep: "not production" is not "this machine". Only the socket's own address
+  // earns the loopback exemption; a header saying 127.0.0.1 from another address does not.
+  const lan = Object.values(networkInterfaces()).flat().find((a) => a && !a.internal && a.family === "IPv4")?.address;
+  it.skipIf(!lan)("does not let a remote caller claim loopback with X-Real-IP in development", async () => {
+    PLAY_LIMITS.ipCalls = 2;
+    game = await startServer();
+    const sendFrom = (id: string) =>
+      fetch(`http://${lan}:${game!.port}/api/play`, { method: "POST", headers: { Authorization: `Bearer dev:${id}:${id}`, "Content-Type": "application/json", "x-real-ip": "127.0.0.1" }, body: JSON.stringify(good) }).then((r) => r.status);
+    expect(await sendFrom("rx1")).toBe(200);
+    expect(await sendFrom("rx2")).toBe(200);
+    expect(await sendFrom("rx3")).toBe(429);
+  }, 90_000);
 });
 
 /** Try to use a reservation; resolves to the room, or null when the server refuses the seat. */
