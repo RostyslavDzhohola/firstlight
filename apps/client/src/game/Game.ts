@@ -52,7 +52,7 @@ import { Input } from "./input.ts";
 import { installControls } from "./controls.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
-import { PlayerController } from "./PlayerController.ts";
+import { CORRECT_KEEP_HEADING_M, PlayerController } from "./PlayerController.ts";
 import { otherView, type ViewMode } from "./view.ts";
 import { uiSettings } from "../ui/uiSettings.ts";
 import { FRAME_MAX_RIDE_S, FRAME_MAX_S, frameClock } from "./frameClock.ts";
@@ -564,7 +564,11 @@ export class Game {
       listenTrials(room, () => Date.now() + this.net.serverOffset); // the same for race / defend / collect attempts, stamped on the server clock (trialState.ts)
       const me = await waitFor(() => (room.state as any).players?.get(room.sessionId), { stage: "waiting for our player", timeoutMs: 15_000, watch: w });
       this.player.teleport(me.x, me.y, me.z);
-      this.net.onCorrect = (x, y, z) => this.player.correct(x, y, z);
+      this.net.onCorrect = (x, y, z) => {
+        // A near placement (a Skipstep, a refused move) is no arrival: the own avatar doesn't rez in (#78).
+        if (Math.hypot(x - this.player.pos.x, y - this.player.pos.y, z - this.player.pos.z) <= CORRECT_KEEP_HEADING_M) this.self?.blinked();
+        this.player.correct(x, y, z);
+      };
       this.systems = CLIENT_SYSTEMS.map((f) => f(this)).filter((x): x is ClientSystem => !!x);
     }
 
