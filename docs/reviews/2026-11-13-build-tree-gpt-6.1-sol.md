@@ -45,9 +45,9 @@ Pad and touch on devices, WebGL2, the films, performance, reconnect, portal and 
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
-| 4 | | |
-| 5 | | |
-| 6 | | |
+| 1 | Merged `night/integration`; the tree's `character_tree` SQL is migration 13 after the funnel's 11 and 12; a test upgrades a database already at `user_version` 12 with the funnel's tables and rows (D-progress-2 updated). | `b17b9158` |
+| 2 | Roll starts are at least `ROLL_GAP_MS` (400 ms, longer than a 300 ms roll) apart on server and client (shared `rollReady`), so a roll's own `DODGE` packets spend one charge. Tests drive the real packet sequence through `validateMove` (six packets 50 ms apart, then a second roll) with and without the node; without it the second roll's steps are refused. The client's prediction holds the same gap. | `5b31ea17` |
+| 3 | Spend and respec run inside the room's `persist` transaction; a throwing save puts the tree and coins back, restores HP, answers `denied` "try again" (the panel says so) and publishes no event. Tested with a throwing save for both. | `a429f438` |
+| 4 | The model holds every build against plain in PvP (each attacker family) and PvE (the level's creatures) on expected effective HP with max HP, roll charges, the guard at each blocking weapon's tier, Last Breath, Tonic Craft's heal and cleanse; a new check per guard weapon tier. Modelled honestly the full Body branch with a guard reached 1.68 at level 20, so node numbers changed (Hardy ×1.06, Tonic Craft ×1.2, Iron Guard +5, Keen Edge / Steady Hands / Attuned ×1.08; content §1.6, D-progress-5). Mutation tests: Iron Guard +90, Tonic Craft ×4, Hardy ×1.5, six roll charges each fail a check. | `bab1db2d` |
+| 5 | `reloadMs` (content/tree.ts) is the one reload formula: the server's empty-magazine and manual reloads, the agent kit and the balance model. Tested on both server paths with and without Quick Hands. | `4397c6ac` |
+| 6 | The Traveller, a sixth starter appended at index 5: base numbers, a Sunbrand I, Brother Ash's body; listed first and picked when nothing is stored; in the balance model (exempt from "leads a role", checked to be base). D-progress-4 revised. | `659f4871` |
