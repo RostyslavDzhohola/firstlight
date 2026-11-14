@@ -23,7 +23,9 @@ export const CAST: Record<SpeakerId, CastVoice> = {
   sela: { voice: "bf_emma", speed: 0.92, note: "calm, exact" },
   juno: { voice: "af_bella", speed: 1.08, note: "brisk shopkeeper" },
   pell: { voice: "am_puck", speed: 1.04, note: "chatty trader" },
-  nell: { voice: "af_nicole", speed: 0.9, note: "close, near a whisper" },
+  // af_nicole breathes under the gate between sentences (0.7–1.3 s pauses, everyone else under 0.6 s):
+  // pauses are cut to about 0.55 s, 0.3 s detected plus 0.25 s kept (tools/voice/check.ts, 2026-11-14).
+  nell: { voice: "af_nicole", speed: 0.9, fx: "silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-45dB:stop_silence=0.25", note: "close, near a whisper" },
   ostrow: { voice: "bm_lewis", speed: 0.95, note: "flat clerk" },
   tidewrath: { voice: "am_onyx", speed: 0.9, fx: "asetrate=19200,aresample=24000,lowpass=f=2200,apad=pad_dur=0.3", note: "pitched down, under water" },
   hollowking: { voice: "bm_fable", speed: 0.88, fx: "asetrate=21600,aresample=24000,apad=pad_dur=0.8,aecho=0.8:0.6:180|360:0.32|0.18", note: "slowed, crypt echo" },

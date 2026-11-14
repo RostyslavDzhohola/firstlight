@@ -1155,10 +1155,12 @@ leads at least one role and none leads all, and that no starter duel is more lop
 | Number | Value |
 | --- | --- |
 | Spoken lines | 247: guides, Sela, four shopkeepers (greet, farewell, idle), 15 mission offers, Sela's 5, 9 boss lines, residents' slot-free lines |
-| Recording | Kokoro-82M v1.0, mono 24 kHz MP3 at 24 kbps, levelled to −17 LUFS under a −1.5 dBFS limiter; about 3.3 MB in all |
+| Recording | Kokoro-82M v1.0, mono 24 kHz MP3 at 24 kbps, levelled to −17 LUFS under a −1.5 dBFS limiter (lowered when the encoder overshoots); about 3.2 MB in all. Measured 2026-11-14 (`tools/voice/check.ts`): 1.9–7.8 s (median 4.1), −18.7 to −17.3 LUFS (median −17.9), peaks −5.0 to −1.0 dBFS, pauses inside at most 1.2 s (Nell's cut to 0.55 s) |
 | Speech is heard | from the speaker's head (1.6 m), full level within 3 m, fading out by 45 m (inverse rolloff 1.4); bosses everywhere |
 | Music under speech | about −6 dB while a line plays, back over 0.5 s |
-| Subtitle time | the recording + 0.9 s, at least 2.5 s + 45 ms per character, at most 9 s |
+| Subtitle time | shown at once for the recording + 0.9 s, at least 2.5 s + 45 ms per character, at most 9 s; held again when the recording starts, for its length + 0.9 s (D-voice-fix-1); text only: the reading time |
+| Decoded speech cache | 32 MiB, least recently used out first, never a line that is playing (D-voice-fix-2) |
+| Music scheduling | 250 ms ahead on a 50 ms timer; a late tick skips what went by, at most 24 sources a tick (D-voice-fix-3) |
 | Idle remarks | the nearest character 3.5–12 m away, not before 6 s on a body, each character at most every 50 s, anyone at most every 18 s, never with a panel open |
 | Voices volume | default 90 % (Settings → Audio); Subtitles on by default |
 | Music combat layer | in when you hit something or something hits you, out 5 s after the last hit (fades over about 1 s) |

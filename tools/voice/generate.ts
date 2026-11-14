@@ -9,29 +9,28 @@
 //   node tools/voice/generate.ts --adopt    # list files recorded by a run that stopped before its manifest
 //                                           # (or by two runs side by side): no recording, current text
 //
-// Setup (once, outside the repo; FL_VOICE_HOME, default ~/.cache/firstlight-voice):
-//   python3 -m venv $FL_VOICE_HOME/venv && $FL_VOICE_HOME/venv/bin/pip install kokoro-onnx==0.6.1 soundfile
-//   curl -L -o $FL_VOICE_HOME/models/kokoro-v1.0.onnx  https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
-//   curl -L -o $FL_VOICE_HOME/models/voices-v1.0.bin   https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+// Setup, once: `node tools/voice/setup.ts` (its header lists the prerequisites: Node 24, Python
+// 3.11–3.13, FFmpeg with libmp3lame). It builds the model environment outside the repo, in
+// FL_VOICE_HOME (default ~/.cache/firstlight-voice), and downloads the model only when it is missing.
 //
 // Each take is run through the cast's effect (bosses) and a gentle compressor, trimmed, levelled to
-// TARGET_LUFS (EBU R128) under a −1.5 dBFS limiter and encoded
+// TARGET_LUFS (EBU R128) under a −1.5 dBFS limiter (lowered when the encoder overshoots) and encoded
 // as a mono 24 kHz MP3 at KBPS, like the sound effects (tools/sfx) but smaller: speech needs less.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SPOKEN_BY_ID, SPOKEN_LINES, textKey } from "../../packages/shared/src/content/dialogue.ts";
 import { decode, RATE, wav } from "../sfx/lib.ts";
 import { CAST, langOf } from "./cast.ts";
-import { PEAK_DBFS, stale, TARGET_LUFS, trimSpeech, type VoiceManifest } from "./lib.ts";
+import { PEAK_DBFS, stale, TARGET_LUFS, trimSpeech, VOICE_BANDS, voiceHome, type VoiceManifest } from "./lib.ts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const FILES = join(ROOT, "apps/client/public/voice");
 const MANIFEST = join(ROOT, "apps/client/src/audio/voiceLines.json");
-const HOME = process.env.FL_VOICE_HOME ?? join(homedir(), ".cache/firstlight-voice");
+const HOME = voiceHome();
 const PY = join(HOME, "venv/bin/python");
 const MODELS = join(HOME, "models");
 const KBPS = 24;
@@ -40,12 +39,13 @@ const CHUNK = 12;
 const COMPRESS = "acompressor=threshold=-24dB:ratio=3:attack=8:release=120:makeup=2";
 const MODEL = "Kokoro-82M v1.0 (kokoro-onnx 0.6.1, kokoro-v1.0.onnx fp32)";
 
-/** EBU R128 integrated loudness of a file (LUFS), as ffmpeg measures it. */
-function ebuLoudness(f: string): number {
-  const r = spawnSync("ffmpeg", ["-hide_banner", "-i", f, "-af", "ebur128", "-f", "null", "-"], { encoding: "utf8" });
-  const m = /I:\s+(-?[\d.]+) LUFS\s+Threshold/.exec(r.stderr.slice(r.stderr.lastIndexOf("Summary:")));
+/** EBU R128 integrated loudness of a file (LUFS) and its sample peak (dBFS), as ffmpeg measures them. */
+function ebu(f: string): { lufs: number; peak: number } {
+  const r = spawnSync("ffmpeg", ["-hide_banner", "-i", f, "-af", "ebur128=peak=sample", "-f", "null", "-"], { encoding: "utf8" });
+  const summary = r.stderr.slice(r.stderr.lastIndexOf("Summary:"));
+  const m = /I:\s+(-?[\d.]+) LUFS\s+Threshold/.exec(summary);
   if (!m) throw new Error(`no loudness for ${f}`);
-  return Number(m[1]);
+  return { lufs: Number(m[1]), peak: Number(/Peak:\s+(-?[\d.]+|-inf) dBFS/.exec(summary)?.[1] ?? -Infinity) };
 }
 
 const arg = (n: string) => {
@@ -81,8 +81,16 @@ function finish(id: string, raw: string, work: string): number {
   const y = trimSpeech(decode(shaped));
   const trimmed = join(work, `${id}.trim.wav`);
   writeFileSync(trimmed, wav(y, RATE));
-  const gain = TARGET_LUFS - ebuLoudness(trimmed);
-  execFileSync("ffmpeg", ["-v", "error", "-y", "-i", trimmed, "-af", `volume=${gain.toFixed(2)}dB,alimiter=limit=${PEAK_DBFS}dB:level=false:attack=2:release=40`, "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame", "-b:a", `${KBPS}k`, "-write_xing", "1", file(id)]);
+  const gain = TARGET_LUFS - ebu(trimmed).lufs;
+  // The MP3 encoder can overshoot the limiter (a sibilant whisper did by 0.9 dB): measure the file and
+  // limit lower by the overshoot until its peak is within VOICE_BANDS.peakMax (twice at most).
+  let limit = PEAK_DBFS;
+  for (let pass = 0; pass < 3; pass++) {
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-i", trimmed, "-af", `volume=${gain.toFixed(2)}dB,alimiter=limit=${limit.toFixed(2)}dB:level=false:attack=2:release=40`, "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame", "-b:a", `${KBPS}k`, "-write_xing", "1", file(id)]);
+    const peak = ebu(file(id)).peak;
+    if (peak <= VOICE_BANDS.peakMax) break;
+    limit -= peak - PEAK_DBFS;
+  }
   rmSync(shaped);
   rmSync(trimmed);
   return Math.round((y.length / RATE) * 1000);
@@ -114,7 +122,7 @@ if (fromWavs) {
 const todo = adopt || fromWavs ? [] : (only ?? (all ? SPOKEN_LINES.map((l) => l.id) : stale(SPOKEN_LINES, current, textKey, (id) => existsSync(file(id)))));
 
 if (todo.length) {
-  if (!existsSync(PY) || !existsSync(join(MODELS, "kokoro-v1.0.onnx"))) throw new Error(`Kokoro is not set up in ${HOME}: see the setup lines at the top of this file`);
+  if (!existsSync(PY) || !existsSync(join(MODELS, "kokoro-v1.0.onnx"))) throw new Error(`Kokoro is not set up in ${HOME}: run node tools/voice/setup.ts`);
   const work = join(tmpdir(), `fl-voice-${process.pid}`);
   mkdirSync(work, { recursive: true });
   console.log(`recording ${todo.length} lines with ${MODEL}`);
