@@ -326,9 +326,10 @@ the `/stats` report, the daily fold and the error pruning run in the funnel's wo
 own connection (`db/funnelWorker.ts`), one linear pass over the raw rows, writing in 200-row
 transactions with pauses; shutdown flushes within one 2 s deadline and counts the rest lost.
 `apps/server/test/funnel-stall.test.ts` measures it at the caps (2.7 M rows): the game thread's
-longest busy stretch stays under 15 ms of CPU during a report, a fold and a shutdown, free or locked,
-where the old synchronous report alone took 15.7 s. `/stats` waits up to a minute for the worker's
-report (at the caps, a few seconds on a quiet machine) and says so if it doesn't come.
+longest busy stretch stayed at 10 ms of CPU or less during a report, a fold and a shutdown, free or
+locked, where the same (now linear) report run on the game's thread takes 4.6 s and the old
+quadratic one was slower still. `/stats` waits up to a minute for the worker's report (at the caps
+about 6 s on a loaded M1) and says so if it doesn't come.
 
 `FUNNEL_ENABLED=0` switches the whole funnel off: the three page endpoints answer 204 and store
 nothing, rooms record nothing, no timer or worker starts, and `/stats` says it is off. Pages already
