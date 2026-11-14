@@ -38,6 +38,6 @@ rebuild equivalence.
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
+| 1 | `preloadSculptedWeapons` resolves after `SCULPTED_PRELOAD_DEADLINE_MS` (15 s) at the latest; items not in keep their code-built models for the visit, and files that land later are dropped, so nothing changes a material after the warm-up. Test with an injected never-settling GLB (fake timers): pending forever before, resolves at the deadline after; a late file leaves the item code-built. | `0a3bb81e` |
+| 2 | `itemSprite` returns the rendered icon only after `installSprites`' one request for it has loaded; until then, or on error, the pixel sprite (inventory, shop, death, pick screens). Test with a stand-in `Image`. | `5bd1f77c` |
+| 3 | A carry grip while running, sprinting and rolling: the block grip's per-weapon turn in the hand socket became two held poses (`HELD_GRIP_DEG` block / carry). Long weapons turn 75–90° about the socket's Y axis (D-fix-moon-3). Clip check on Hexwick and Kappa, sculpted and code-built models: run and sprint go from 5–9 cm into the head to no flag; the roll loses its 8.5–9 cm head flag but keeps 2–6.6 cm into the right thigh and calf (the axe's and bow's 6.3–6.6 cm are at the grip, unchanged by all 18 rotations tried: the roll tucks the fist into the leg; needs a weapon-class roll clip). Aim, cast, attack and walk keep the mount. #63 stays open for the roll and for heavy melee. | `f7a042eb` |

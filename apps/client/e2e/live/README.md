@@ -31,6 +31,8 @@ apps/client/e2e/live/fl.mjs quit       # ends it; so do 20 idle minutes (FL_LIVE
   before the first command to just after the last. Wait for the session process to exit before
   opening it (encoding takes a minute or two). `FL_LIVE_VIDEO=0` turns filming off, for frame-time
   runs that shouldn't pay for it.
+  On a heavily loaded machine ffmpeg can fall behind and the film stops early; `FL_LIVE_FRAMES=1`
+  keeps every screencast frame on disk with its time and encodes the film after `quit` instead.
 - A session is one player. Use `start` (a new guest, the real Play flow) or `dev <body>` (local only:
   an admin guest placed on a planet), not both. Quit and start a new session for another player.
 
