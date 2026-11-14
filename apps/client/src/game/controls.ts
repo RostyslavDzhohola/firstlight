@@ -12,7 +12,7 @@ import { GlyphSync } from "../ui/glyphs.ts";
 import { TouchOverlay, wantsTouch } from "../ui/touchOverlay.ts";
 import { pauseExtras } from "../ui/menu.ts";
 import { uiSettings, type UiSettings } from "../ui/uiSettings.ts";
-import { AIM_SLOWDOWN } from "./padMapping.ts";
+import { AIM_SLOWDOWN, MENU_KEY_ROWS } from "./padMapping.ts";
 import { crosshairQueryOf, crosshairTarget } from "./crosshairTarget.ts";
 
 /** Pad settings from the stored UI settings. */
@@ -71,19 +71,15 @@ export function installControls(game: Game): Controls {
     input.setDevice("touch");
   }
 
-  // What a pad or a touch screen has no button for comes from the pause menu (pauseExtras rows are
-  // drawn each time the menu opens; each key goes out once the menu has handed back to the game).
-  // Two rows per device at most (the menu's list has no room for more): a pad already has inventory
-  // (R3), map (Select) and players (Select held); touch has Map and Bag buttons on the overlay.
-  const row = (icon: string, title: string, sub: string, code: string, on: readonly string[]) => () =>
-    on.includes(input.device) ? { icon, title, sub, onClick: () => queueMicrotask(() => tapKey(code)) } : null;
+  // What a pad or a touch screen has no button for comes from the pause menu (MENU_KEY_ROWS; the
+  // pauseExtras rows are drawn each time the menu opens; each key goes out once the menu has handed
+  // back to the game).
   const tapKey = (code: string) => {
     input.virtualKey(code, true, "menu");
     input.virtualKey(code, false, "menu");
   };
-  pauseExtras.add(row("book", "Journal", "Missions, medals and the wardrobe", "KeyJ", ["pad", "touch"]));
-  pauseExtras.add(row("check", "Tutorial checklist", "Show or hide the first-steps list", "KeyT", ["pad"]));
-  pauseExtras.add(row("users", "Players", "Who is here, party invites", "Tab", ["touch"]));
+  for (const r of MENU_KEY_ROWS)
+    pauseExtras.add(() => ((r.on as readonly string[]).includes(input.device) ? { icon: r.icon, title: r.title, sub: r.sub, onClick: () => queueMicrotask(() => tapKey(r.code)) } : null));
   installed = c;
   return c;
 }

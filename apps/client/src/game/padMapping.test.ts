@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SPELLS } from "@firstlight/shared/content/spells";
 import { BINDINGS } from "./keys.ts";
-import { BTN, hotbarStep, lookFromStick, PAD_LAYOUT, padControls, padFamily, padGlyph, shapeStick, type PadAction } from "./padMapping.ts";
+import { BTN, hotbarStep, lookFromStick, MENU_KEY_ROWS, PAD_LAYOUT, padControls, padFamily, padGlyph, shapeStick, type PadAction } from "./padMapping.ts";
 
 const T = { deadzone: 0.15, curve: 1 };
 
@@ -85,13 +85,16 @@ describe("the pad layout (D-controls-5)", () => {
   it("reaches every play binding that matters, here or from the pause menu", () => {
     // Reached through context actions: E/R (X), Digit1–4 (LB/RB), Shift (LS click), M and Tab (Select).
     const viaContext = ["KeyE", "KeyR", "Digit1", "Digit2", "Digit3", "Digit4", "ShiftLeft", "ShiftRight", "KeyM", "Tab"];
-    // Pause-menu rows for pads and touch (controls.ts): journal, tutorial checklist (and inventory, map, players again).
-    // L / Shift+L (#69): the journal's Track buttons choose the tracked mission, Settings → Missions collapses the panel.
-    const viaMenu = ["KeyJ", "KeyT", "KeyL"];
+    // Pause-menu rows for pads (MENU_KEY_ROWS, drawn by controls.ts): journal, tutorial checklist.
+    const viaMenu = MENU_KEY_ROWS.filter((r) => r.on.includes("pad")).map((r) => r.code);
+    expect(viaMenu).toEqual(expect.arrayContaining(["KeyJ", "KeyT"]));
+    // L / Shift+L (#69): inside the journal (its Missions tab: Track buttons and "Fold the missions
+    // panel"), reached by the pad's focus navigator; ui/missionsReach.test.ts drives both.
+    const viaJournal = ["KeyL"];
     // Keyboard-only by choice: photo, screenshot, perf/admin overlays, the phrase wheel, invites, voice.
     const keyboardOnly = ["KeyP", "Backquote", "KeyG", "KeyY", "KeyN", "KeyK", "KeyB", "KeyW", "KeyA", "KeyS", "KeyD"];
     for (const b of BINDINGS) {
-      const ok = codes.has(b.code) || viaContext.includes(b.code) || viaMenu.includes(b.code) || keyboardOnly.includes(b.code);
+      const ok = codes.has(b.code) || viaContext.includes(b.code) || viaMenu.includes(b.code) || viaJournal.includes(b.code) || keyboardOnly.includes(b.code);
       expect(ok, `${b.code} (${b.what})`).toBe(true);
     }
   });
