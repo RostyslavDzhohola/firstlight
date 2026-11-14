@@ -264,7 +264,7 @@ export const RESIDENT_LINES: readonly ResidentLine[] = [
   ...L("ptolemy", "where", ["{place} lies {dist} metres {dir}. Soon to be a Birch franchise.", "{dist} metres {dir} to {place}. Remember who told you. History will."]),
   ...L("ptolemy", "tip", [
     ["Never sell a tonic you might need. Tonics are cheap right up until they're priceless.", 1, 3],
-    ["A guide gives three missions, and you can carry all three. Do them on one trip. That's called logistics.", 4, 7],
+    ["A guide has more than one mission, and you can carry them all. Do them on one trip. That's called logistics.", 4, 7],
     ["Hollowmere pays better than Arcadia. Hollowmere also kills better than Arcadia. That's the market.", 8, 12],
     ["Meridian's missions pay in the hundreds. Oversight calls that a rounding error. I call it capital.", 13, 40],
   ]),
