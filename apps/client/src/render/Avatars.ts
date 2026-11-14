@@ -129,7 +129,8 @@ export const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.M
 
 /**
  * Block grips (#76, D-fix-view-3): while the guard is held (`block_hold`) these held items turn in the
- * hand, a rotation in the hand socket's axes after the mount (Euler XYZ, degrees). The shared block
+ * hand, a rotation in the hand socket's axes after the mount (degrees, Blender's Euler XYZ: X first,
+ * then Y, then Z about the fixed axes, as prop_check.py --rot reads it; three's order "ZYX"). The shared block
  * clip holds a sword's guard; a staff held its way ran through the Kappa's hat brim and down into the
  * shell. Turned, it lies across the guard. Checked on both Kappa looks with the held-prop clip check
  * (tools/blender/props3d/prop_check.py --rot) and renders from three sides.
@@ -138,7 +139,7 @@ const BLOCK_GRIP_DEG: Readonly<Record<string, readonly [number, number, number]>
   riverstaff: [-135, -5, 12],
 };
 const BLOCK_GRIP = new Map(
-  Object.entries(BLOCK_GRIP_DEG).map(([id, [x, y, z]]) => [id, new THREE.Quaternion().setFromEuler(new THREE.Euler((x * Math.PI) / 180, (y * Math.PI) / 180, (z * Math.PI) / 180, "XYZ"))]),
+  Object.entries(BLOCK_GRIP_DEG).map(([id, [x, y, z]]) => [id, new THREE.Quaternion().setFromEuler(new THREE.Euler((x * Math.PI) / 180, (y * Math.PI) / 180, (z * Math.PI) / 180, "ZYX"))]),
 );
 /** Seconds the held item takes to turn into its block grip and back (about the clip's own blend in). */
 export const BLOCK_GRIP_TIME = 0.15;
