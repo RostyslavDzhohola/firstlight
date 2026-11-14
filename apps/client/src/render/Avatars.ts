@@ -148,6 +148,8 @@ const _m = new THREE.Matrix4();
 const _d = new THREE.Vector3();
 /** The rez light leans from the palette's accent towards this. */
 const _rezTint = new THREE.Color(0xbfefff);
+/** The first-person head cut reaches this far (m) past the crown and the face: hair, ears, a hat's brim. */
+const HEAD_CUT_MARGIN = 0.07;
 /** A move of more than this in one frame is a teleport (m): the fastest horse covers under 1 m. */
 export const TELEPORT_M = 8;
 
@@ -533,6 +535,23 @@ export class AvatarView {
 
   socket(slot: SocketName): THREE.Object3D | undefined {
     return this.sockets.get(slot);
+  }
+
+  /**
+   * First person (D-view-fp-1, game/view.ts): the eye (the face socket: the eye line, at the front of
+   * the face) into `eye`, and a sphere round the whole head (crown, back and face, with a margin for
+   * hair and hats) into `centre`; returns its radius. 0 without the skinned model (capsule, far LOD).
+   */
+  firstPersonHead(eye: THREE.Vector3, centre: THREE.Vector3): number {
+    const face = this.sockets.get("face");
+    const crown = this.sockets.get("head");
+    const bone = crown?.parent;
+    if (!this.model || this.lod === "far" || !face || !crown || !bone) return 0;
+    bone.updateWorldMatrix(true, true);
+    face.getWorldPosition(eye);
+    crown.getWorldPosition(_d);
+    bone.getWorldPosition(centre).add(_d).multiplyScalar(0.5);
+    return Math.max(centre.distanceTo(_d), centre.distanceTo(eye)) + HEAD_CUT_MARGIN;
   }
 
   /** Place at a planet-space position, standing on local up, facing a tangent direction. */

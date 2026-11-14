@@ -16,6 +16,7 @@ import { easeShare, stepsFor } from "./frameClock.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 import { BASE_MOVE, starterMove } from "@firstlight/shared/content/starters";
+import { EyeFollow, smoothBlend, stepBlend, VIEW, viewFor, wheelView, type ViewMode } from "./view.ts";
 
 /** Solid things the player can't walk through (intact breakable props). */
 export interface MoveColliders {
@@ -108,6 +109,12 @@ const _lensMoved = new THREE.Vector3();
 const _lensPush = new THREE.Vector3();
 const _lensSide = new THREE.Vector3();
 const _probeTarget = new THREE.Vector3();
+const _eye = new THREE.Vector3();
+const _eyeTarget = new THREE.Vector3();
+const _eyeBase = new THREE.Vector3();
+const _eyeDir = new THREE.Vector3();
+/** First person: the eye may back off a solid in front of it this far (m) behind the head's centre (the head is cut away). */
+export const EYE_BACKOFF = 0.3;
 /**
  * The camera stops this far (m) short of a structure between the head and where it would be; with
  * the player pressed against a wall (the wall under CAMERA_WALL_GAP × 2 behind the head) it keeps half
@@ -156,6 +163,17 @@ export class PlayerController {
   readonly camForward = new THREE.Vector3(0, 0, 1);
   camPitch = -0.15;
   camDistance = 4.6;
+  /** The view the player chose (game/view.ts); `dead` pulls the camera out to third person meanwhile. */
+  view: ViewMode = "third";
+  dead = false;
+  /** 0 third person … 1 first person: where the camera is on its way between the two. */
+  viewBlend = 0;
+  /** The scroll wheel changed the view (Game stores the choice). */
+  onViewChange: ((v: ViewMode) => void) | null = null;
+  /** The first-person eye (feet-relative, eased) and the head it follows (Game sets it from the avatar each frame). */
+  readonly eye = new EyeFollow();
+  private readonly headPoint = new THREE.Vector3();
+  private hasHead = false;
   /** How far behind the head the camera may sit now (a structure in the way pulls it in). */
   private camReach = Infinity;
   /** Where the lens was put on its line last time (the near-plane check can bring it in further). */
@@ -282,6 +300,26 @@ export class PlayerController {
     this.lensReach = Infinity;
     this.shoulder = this.shoulderGoal = 1;
     this.pinnedT = 0;
+    this.eye.snap();
+  }
+
+  /** The view the camera is heading to now (the choice, unless a state pulls it out: game/view.ts viewFor). */
+  get viewNow(): ViewMode {
+    return viewFor(this.view, { dead: this.dead });
+  }
+
+  /** In first person (or on the way there past half-way): the body faces where the camera looks. */
+  get firstPerson(): boolean {
+    return this.viewNow === "first" && this.viewBlend > 0.5;
+  }
+
+  /**
+   * The avatar's eye point this frame (planet space: its face socket), or null without a skinned model
+   * (the eye then stands at VIEW.eyeHeight). Set before placeCamera.
+   */
+  setHead(p: THREE.Vector3 | null) {
+    this.hasHead = !!p;
+    if (p) this.headPoint.copy(p);
   }
 
   /** A shove (m/s) along `dir` (projected onto the ground plane), with a little lift. */
@@ -332,7 +370,15 @@ export class PlayerController {
       this.camForward.applyAxisAngle(up, yaw).normalize();
       this.camPitch += (input.invertY ? 1 : -1) * input.mouseDY * input.sensitivity + (input.lookPitch || 0);
       this.camPitch = Math.max(-1.25, Math.min(0.9, this.camPitch));
-      if (input.wheel) this.camDistance = Math.max(2.5, Math.min(9, this.camDistance + input.wheel * 0.5));
+      if (input.wheel) {
+        // All the way in goes into first person, and out of it again (game/view.ts wheelView).
+        const w = wheelView(this.view, this.camDistance, input.wheel);
+        this.camDistance = w.distance;
+        if (w.view !== this.view) {
+          this.view = w.view;
+          this.onViewChange?.(w.view);
+        }
+      }
     }
     const right = _right.crossVectors(this.camForward, up).normalize();
 
@@ -510,7 +556,8 @@ export class PlayerController {
 
     // Face movement (or the camera when aiming; a roll keeps facing where it goes).
     const hSpeed = vH.length();
-    if (aiming && this.dodgeT <= 0) this.facing.lerp(this.camForward, easeShare(18, dt)).normalize();
+    // First person on foot faces the camera too, so the swing, the cast and the body go where the crosshair is.
+    if ((aiming || (this.firstPerson && !this.mounted)) && this.dodgeT <= 0) this.facing.lerp(this.camForward, easeShare(18, dt)).normalize();
     else if (hSpeed > 0.5) this.facing.lerp(_dir.copy(vH).normalize(), easeShare(this.mounted ? 6 : 10, dt)).normalize();
 
     this.anim = this.dodgeT > 0 ? ANIM.DODGE
@@ -605,10 +652,60 @@ export class PlayerController {
   /** `dt`: the game time since the last placement (s); the eases move by it, not by a step per placement (review B2). */
   placeCamera(camera: THREE.PerspectiveCamera, dt = 1 / 60) {
     const t = Math.max(0, dt);
-    this.camEaseOut = CAMERA_EASE_OUT_MPS * t;
+    const wantFirst = this.viewNow === "first";
+    const was = this.viewBlend;
+    this.viewBlend = stepBlend(this.viewBlend, wantFirst ? 1 : 0, t);
+    if (was === 0 && this.viewBlend > 0) this.eye.snap();
+    // Leaving first person: the third-person camera grows back out from the head (eased, never through a wall).
+    if (was === 1 && this.viewBlend < 1) this.camReach = this.lensReach = 0;
     const up = _up.copy(this.pos).normalize();
     const right = _right.crossVectors(this.camForward, up).normalize();
     const look = _look.copy(this.camForward).applyAxisAngle(right, this.camPitch);
+    if (this.viewBlend > 0) this.placeEye(camera, up, right, look, t);
+    if (this.viewBlend >= 1) {
+      // All the way in: the eye only, no third-person line to check.
+      camera.position.copy(_eye);
+      camera.up.copy(up);
+      camera.lookAt(_eyeTarget);
+      return;
+    }
+    this.placeThird(camera, up, right, look, t);
+    if (this.viewBlend > 0) {
+      const k = smoothBlend(this.viewBlend);
+      _cam.lerp(_eye, k);
+      _target.lerp(_eyeTarget, k);
+    }
+    camera.position.copy(_cam);
+    camera.up.copy(up);
+    camera.lookAt(_target);
+  }
+
+  /**
+   * The first-person eye into `_eye` and its look target into `_eyeTarget`: the head's height and lean
+   * (eased, no sway or roll: game/view.ts EyeFollow), a little in front of the face. A solid right in
+   * front (pressed against a wall) backs the eye off along the heading until the near plane is clear.
+   */
+  private placeEye(camera: THREE.PerspectiveCamera, up: THREE.Vector3, right: THREE.Vector3, look: THREE.Vector3, t: number) {
+    if (this.hasHead) {
+      const d = _eyeDir.copy(this.headPoint).sub(this.pos);
+      this.eye.follow(d.dot(up), d.dot(this.camForward), d.dot(right), t);
+    } else this.eye.rest(rideCamera(this.rideBlend).lift, t);
+    const base = _eyeBase.copy(this.pos).addScaledVector(up, this.eye.up).addScaledVector(right, this.eye.side);
+    const ahead = this.eye.forward + VIEW.eyeForward;
+    _eye.copy(base).addScaledVector(this.camForward, ahead);
+    _eyeTarget.copy(_eye).addScaledVector(look, 6);
+    if (!this.lensBlocked(camera, _eye, _eyeTarget, up)) return;
+    // In steps back along the heading, down to EYE_BACKOFF behind the head's centre.
+    for (let back = ahead - CAMERA_LENS_STEP; back >= -EYE_BACKOFF - 1e-6; back -= CAMERA_LENS_STEP) {
+      _eye.copy(base).addScaledVector(this.camForward, back);
+      _eyeTarget.copy(_eye).addScaledVector(look, 6);
+      if (!this.lensBlocked(camera, _eye, _eyeTarget, up)) return;
+    }
+  }
+
+  /** The over-the-shoulder camera into `_cam`, its look target into `_target`. */
+  private placeThird(camera: THREE.PerspectiveCamera, up: THREE.Vector3, right: THREE.Vector3, look: THREE.Vector3, t: number) {
+    this.camEaseOut = CAMERA_EASE_OUT_MPS * t;
     const ride = rideCamera(this.rideBlend); // in the saddle: eyes higher, camera further back
     const head = _head.copy(this.pos).addScaledVector(up, 1.65 + ride.lift);
     const back = this.camDistance + ride.back;
@@ -627,9 +724,6 @@ export class PlayerController {
       const other = own < CAMERA_SWAP_REACH ? this.cameraLine(camera, head, look, right, up, back, -this.shoulderGoal, false, _probe, _probeTarget) : 0;
       if (other > own + CAMERA_SWAP_GAIN) this.shoulderGoal = -this.shoulderGoal;
     } else if (settled && this.shoulderGoal < 0 && this.cameraLine(camera, head, look, right, up, back, 1, false, _probe, _probeTarget) >= this.lineFull) this.shoulderGoal = 1;
-    camera.position.copy(_cam);
-    camera.up.copy(up);
-    camera.lookAt(target);
   }
 
   /**

@@ -99,7 +99,7 @@ describe("onboarding steps", () => {
 
   it("voice is optional: V or opting in completes it, else it moves on after 8 s on the card", () => {
     const a = new OnboardingSteps(ALL_STEPS);
-    expect(a.observe(keys("KeyV"))).toEqual(["voice"]);
+    expect(a.observe(keys("KeyK"))).toEqual(["voice"]);
     const b = new OnboardingSteps(ALL_STEPS);
     expect(b.observe(s({ voiceOn: true }))).toEqual(["voice"]);
     const c = new OnboardingSteps(ALL_STEPS);

@@ -41,7 +41,7 @@ export const ALL_STEPS: readonly StepDef[] = [
   { id: "pickup", label: "Loot piles · E", keys: ["E"], heading: "Loot piles · E", cardKeys: ["E"], text: "Tip: when someone dies, everything they carried drops as a glowing pile. Stand on one and press **E** to take it all. Press **E** to go on.", goal: 1, unit: "", bar: false },
   { id: "map", label: "Open the map", keys: ["M"], heading: "Open the map", cardKeys: ["M"], text: "Press **M** for the map: the planets, the pads and where you stand. **M** or **Esc** closes it.", goal: 1, unit: "", bar: false },
   { id: "wheel", label: "Phrase wheel", keys: ["G"], heading: "Say something", cardKeys: ["G"], text: "Hold **G**, point at a phrase and let go. Everyone near you sees it over your head.", goal: 1, unit: "", bar: false },
-  { id: "voice", label: "Voice (optional)", keys: ["V"], heading: "Voice chat", cardKeys: ["V"], text: "Optional: turn voice on in **Esc → Voice & radio** (16+, never recorded), then hold **V** to talk to people near you. This tip moves on by itself.", goal: 1, unit: "", bar: false, optional: true, autoAfter: 8 },
+  { id: "voice", label: "Voice (optional)", keys: ["K"], heading: "Voice chat", cardKeys: ["K"], text: "Optional: turn voice on in **Esc → Voice & radio** (16+, never recorded), then hold **K** to talk to people near you. This tip moves on by itself.", goal: 1, unit: "", bar: false, optional: true, autoAfter: 8 },
   { id: "portal", label: "Walk through a portal", keys: [], heading: "Off you go", cardKeys: [], text: "The three rings around the plaza lead to the planets. Start on **Arcadia** (levels 1–7): walk into its portal.", goal: 1, unit: "", bar: false, autoAfter: 45 },
 ];
 
@@ -110,7 +110,7 @@ export class OnboardingSteps {
     if (x.pressed.has("KeyE")) this.set("pickup", 1);
     if (x.mapOpen) this.set("map", 1);
     if (x.phrased) this.set("wheel", 1);
-    if (x.voiceOn || x.pressed.has("KeyV")) this.set("voice", 1);
+    if (x.voiceOn || x.pressed.has("KeyK")) this.set("voice", 1);
     // Only actually walking into a ring counts (T9): passing or standing in front of one doesn't.
     if (x.inPortal) this.set("portal", 1);
     const cur = this.current;

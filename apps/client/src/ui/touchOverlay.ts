@@ -181,6 +181,8 @@ export class TouchOverlay {
     this.button(top, { id: "map", label: "Map", cls: "fl-touch__small", press: (on) => on && this.tap("KeyM") });
     this.button(top, { id: "bag", label: "Bag", cls: "fl-touch__small", press: (on) => on && this.tap("KeyI") });
     this.button(top, { id: "menu", label: "☰", cls: "fl-touch__small", press: (on) => on && this.tap("Escape") });
+    // First / third person (V, D-view-fp-1).
+    this.button(top, { id: "view", label: "View", cls: "fl-touch__small", press: (on) => on && this.tap("KeyV") });
 
     // Right cluster: fire, alt, jump, roll, use, reload.
     const pad = el("div", "fl-touch__actions", this.root);

@@ -53,6 +53,8 @@ import { installControls } from "./controls.ts";
 import { HOTKEYS } from "./keys.ts";
 import { PhotoMode } from "./PhotoMode.ts";
 import { PlayerController } from "./PlayerController.ts";
+import { otherView, type ViewMode } from "./view.ts";
+import { uiSettings } from "../ui/uiSettings.ts";
 import { FRAME_MAX_RIDE_S, FRAME_MAX_S, frameClock } from "./frameClock.ts";
 import { bothSolids, stepOut } from "./stepOut.ts";
 import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
@@ -115,6 +117,11 @@ export class Game {
   readonly hitStop = new HitStop();
   /** Scratch: the player's chest for the occluder fade. */
   private readonly fadeChest = new THREE.Vector3();
+  /** The chosen camera view (uiSettings, D-view-fp-1); the player follows it once it exists. */
+  private viewChoice: ViewMode = "third";
+  /** First person: the avatar's eye and the sphere round its head that the occluder fade cuts away. */
+  private readonly eyeAt = new THREE.Vector3();
+  private readonly headCut = { centre: new THREE.Vector3(), radius: 0 };
   private reconnecting = false;
   /** Rejoins after "saving failed" closes: bounded, and not reset by a successful join. */
   private readonly storageBackoff = new StorageBackoff();
@@ -491,7 +498,11 @@ export class Game {
     this.planet = new Planet(this.ctx, body);
     this.env.setBody(body, 0, this.planet.look, this.planet.rig);
     this.particles.setMoteColor(this.planet.look.mote);
-    this.player ??= new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
+    if (!this.player) {
+      this.player = new PlayerController(this.planet.terrain, this.planet.body.waterLevel);
+      this.player.view = this.viewChoice;
+      this.player.onViewChange = (v) => this.chooseView(v); // scrolled all the way in or out
+    }
     this.player.setTerrain(this.planet.terrain, this.planet.body.waterLevel);
     // The body's structures (Portus' town, a planet's outpost and waystones) block like the server's,
     // and so do its natural solids (trunks, boulders, spires, big rocks: D-solid-1).
@@ -845,6 +856,7 @@ export class Game {
     } else {
       // Photo mode (Shift+P): the body stays put (and can still be hurt) while the camera flies.
       if (this.input.hit(HOTKEYS.photo)) this.photo.toggle(this.ctx.camera);
+      if (this.input.hit(HOTKEYS.view) && !this.photo.active) this.chooseView(otherView(this.player.view));
       if (!this.photo.active) this.player.update(dt, this.input, this.combat.aiming(), now);
       this.nature?.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1);
       const p = this.player.pos;
@@ -918,12 +930,22 @@ export class Game {
           });
       }
     }
+    this.headCut.radius = 0;
     if (this.photo.active) this.photo.update(dt, this.ctx.camera);
-    else if (!this.bench) this.player.placeCamera(this.ctx.camera, dt);
+    else if (!this.bench) {
+      // First person follows the drawn head (its face socket); dead, the camera pulls out (game/view.ts).
+      const p = this.player;
+      p.dead = !!this.combat.deadUntilRespawn;
+      const r = (p.viewNow === "first" || p.viewBlend > 0) && this.self ? this.self.firstPersonHead(this.eyeAt, this.headCut.centre) : 0;
+      p.setHead(r > 0 ? this.eyeAt : null);
+      p.placeCamera(this.ctx.camera, dt);
+      // Nearly in: the body stays and only the head is cut away; on the way the near-camera fade dissolves it all.
+      if (p.viewBlend > 0.85) this.headCut.radius = r;
+    }
     // Trees, rocks and props between the camera and the player dissolve (not in photo mode or the bench).
     // The cone aims at the drawn avatar's chest bone: in the saddle that's ~0.8 m higher than on foot.
     const chest = this.self ? avatarChest(this.self.root, this.self.socket("back")?.parent ?? null, this.fadeChest) : null;
-    updateOccluderFade(this.ctx.camera, chest, !this.photo.active && !this.bench && !NO_FADE);
+    updateOccluderFade(this.ctx.camera, chest, !this.photo.active && !this.bench && !NO_FADE, this.headCut.radius > 0 ? this.headCut : null);
     this.audio.updateListener(this.ctx.camera);
     if (FX_DEMO && now >= this.nextFxDemo) this.fxDemo(now, focus);
     this.env.afterCamera(this.ctx.camera, dt);
@@ -967,6 +989,18 @@ export class Game {
     }
     this.perf.frame(now, rawMs / 1000, x);
     this.input.endFrame();
+  }
+
+  /** The stored view choice changed (bind.ts, from uiSettings): the camera follows it. */
+  setView(v: ViewMode) {
+    this.viewChoice = v;
+    if (this.player) this.player.view = v;
+  }
+
+  /** The player picked a view (V, the pad, the touch button, the scroll wheel): store it; setView follows. */
+  chooseView(v: ViewMode) {
+    this.setView(v);
+    if (uiSettings.get().view !== v) uiSettings.set({ view: v });
   }
 
   /** Contact shadow under a character (or horse, r = 1) standing within 6 m of the ground. */
