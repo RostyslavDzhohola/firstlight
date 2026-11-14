@@ -8,6 +8,9 @@ import { prefabPoint, wildSitePlacements, type WildSitePlacement } from "@firstl
 import { structureCollider } from "@firstlight/shared/planet/sites";
 import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
 import { RULES } from "../src/world/BodyRoom.ts";
+import { newCharacter } from "@firstlight/shared/content/character";
+import { characterRepo } from "../src/world/characters.ts";
+import { joinAs } from "./helpers.ts";
 import { npcSystemOf, NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -119,5 +122,21 @@ describe("wild sites", () => {
     expect(pileStore.current.get(pile.id)).toMatchObject({ x: pile.x, y: pile.y, z: pile.z });
     // Next to the tower's foot, not across the site.
     expect(dist(pile, ground("arcadia", ws.dir))).toBeLessThan(ws.prefab.foot);
+  });
+
+  it("a character saved where the wreck's hull now stands joins on clear ground beside it", async () => {
+    const hull = wildSitePlacements(terrain("meridian")).find((p) => p.site.id === "long_haul_wreck")!;
+    const at = siteGround("meridian", hull, 9.75, 0);
+    const c = newCharacter(0, 0);
+    c.body = "meridian";
+    c.pos = at;
+    characterRepo.current.save("saved_in_hull", c);
+    const room = await joinAs(harness.game!, "saved_in_hull", "meridian");
+    harness.rooms.push(room);
+    const p = () => (room.state as any).players?.get(room.sessionId);
+    await waitFor(() => !!p());
+    const walls = structureCollider(terrain("meridian"));
+    expect(walls.isClear({ x: p().x, y: p().y, z: p().z })).toBe(true);
+    expect(dist(p(), at)).toBeLessThan(9);
   });
 });
