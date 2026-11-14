@@ -339,6 +339,9 @@ async function serverGroup(notes: string[]): Promise<Metric[]> {
       bots.stdout.on("data", (d) => (bl += d));
       bots.stderr.on("data", (d) => (bl += d));
       const exited = new Promise<void>((r) => bots.on("exit", () => r()));
+      // A level whose bots never all get in (seen at 100 on a loaded machine) must not hang the run.
+      const killer = setTimeout(() => bots.kill("SIGKILL"), (seconds + 180) * 1000);
+      void exited.then(() => clearTimeout(killer));
       // Wait for every bot to join, then sample twice over the steady part of the run.
       for (let i = 0; i < 600 && !/bots joined/.test(bl); i++) await sleep(250);
       await sleep(3000);
@@ -350,7 +353,9 @@ async function serverGroup(notes: string[]): Promise<Metric[]> {
       await exited;
       const res = /RESULT (\{.*\})/.exec(bl);
       if (!res) {
-        notes.push(`bots ${n}: no RESULT\n${bl.slice(-800)}`);
+        const joined = /(\d+)\/\d+ bots joined/.exec(bl);
+        notes.push(`bots ${n}: no RESULT (killed after ${seconds + 180} s; ${joined ? `${joined[1]} joined` : "the joins never finished"})\n${bl.slice(-600)}`);
+        out.push(m("server", `server.bots${n}.joined`, joined ? Number(joined[1]) : 0, "bots", "higher", 0));
         continue;
       }
       const r = JSON.parse(res[1]!);
