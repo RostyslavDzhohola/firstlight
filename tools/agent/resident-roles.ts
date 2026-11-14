@@ -235,6 +235,7 @@ export async function hunter(r: Resident): Promise<void> {
   const a = r.agent;
   const theirs = new Map<string, number>(); // creatures left to someone (and piles already tried), and until when
   let asked = false;
+  let hunting = false; // said "goes hunting" this visit
   let idle = 0;
   while (r.alive()) {
     await r.pause(150); // a breath every round: no branch below can spin
@@ -242,7 +243,7 @@ export async function hunter(r: Resident): Promise<void> {
     if (await mind(r, o)) continue;
     if (a.bodyId !== r.home) {
       if (!(await goTo(r, r.home))) await r.pause(3000);
-      asked = false;
+      asked = hunting = false;
       continue;
     }
     const w = world(r);
@@ -265,6 +266,11 @@ export async function hunter(r: Resident): Promise<void> {
     if (nearArena(w, a.position)) {
       await travelTo(r, pad, { sprint: true, within: 40, seconds: 60 });
       continue;
+    }
+    // The visit's errands (the guide, the shop) are done: from here on it hunts.
+    if (!hunting) {
+      hunting = true;
+      r.log("goes hunting");
     }
     // Loot that is ours and close. One try each: what didn't fit in the bags stays where it is.
     const now = Date.now();
