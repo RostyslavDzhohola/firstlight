@@ -643,11 +643,11 @@ No air: always clear, a black sky, Arcadia hanging still 36° up, about 20° acr
 |---|---|---|---|
 | Moonfall Pad (main pad, guide Surveyor Odile) | safe ring | – | none; 3 Glimmerhop L6 at 55 m |
 | the Hush | dry basin (mid of pads 3 and 7) | 7–9 | Glimmerhop packs of 3–5; Dustmoth pairs with 1–2 Glimmerhops |
-| wilds (density 0.45) | craters | 6–9 by distance | Glimmerhops 3–5, Dustmoths 2–3, mixed |
+| wilds (density 0.22) | craters | 6–9 by distance | Glimmerhops 2–4, Dustmoth pairs, mixed |
 
 | Enemy | Tier | Lv | HP (HP1) | Attacks: damage at L1 (telegraph) | Behaviour | Pack | Drops |
 |---|---|---|---|---|---|---|---|
-| Glimmerhop | Regular | 6–9 | 64–78 (40) | Moon Leap 15 (0.8 s), a 9 m leap that lands in a 2 m circle; Nip 8 (0.5 s) | leaps in from range, then nips | 3–5 | coins; Small Tonic 1/10 |
+| Glimmerhop | Regular | 6–9 | 64–78 (40) | Moon Leap 15 (0.8 s), a 9 m leap that lands in a 2 m circle; Nip 8 (0.5 s) | leaps in from range, then nips | 2–4 | coins; Small Tonic 1/10 |
 | Dustmoth | Regular | 6–9 | 42–51 (26) | Dust Spit 9 (0.6 s), 14 m/s bolt, chill 15% for 1.5 s | hovers 2.4 m up, keeps 9–14 m away | 2–3 | coins; grenade 1/25 |
 | Cratermaw | Elite | 8–9 | 350–372 (190) | Moonquake 24, 4.5 m ring + 4 m knockback (1.2 s); Maw 13 (0.6 s) | steadfast; guards the Quietfall Wreck | 1 | weapon 1/4 |
 

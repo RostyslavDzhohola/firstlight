@@ -69,10 +69,11 @@ export function meanDistance(viewer: OrbitId, body: OrbitId): number {
 
 /**
  * Where a moon's world hangs in the moon's sky (it keeps one face to its world, so its world never
- * moves in its sky): elevation and azimuth, radians, local sky frame.
+ * moves in its sky): elevation and azimuth, radians, local sky frame. Lumen's is a quarter turn
+ * from where its sun stands at noon, so Arcadia is about half lit all day and waxes and wanes with it.
  */
 export const HANGS: Partial<Record<OrbitId, { elev: number; az: number }>> = {
-  lumen: { elev: 0.62, az: 2.3 },
+  lumen: { elev: 0.62, az: SKY_PROFILES.lumen.noonAz + Math.PI / 2 },
 };
 
 /** Angular size scale against the look's size: real geometry, softened so every body stays readable. */

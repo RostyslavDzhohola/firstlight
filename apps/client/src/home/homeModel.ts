@@ -29,7 +29,7 @@ const LINE: Record<BodyId, string> = {
   arcadia: "Golden meadows round Glasswater Lake",
   hollowmere: "Violet dusk over Mourning Mere",
   meridian: "Red canyons and chrome spires",
-  lumen: "Grey craters under a black sky, Arcadia overhead",
+  lumen: "Grey craters under a black sky",
 };
 export const worldLine = (id: BodyId): string => LINE[id];
 /** "Levels 1–7"; Portus: "Safe · Lv 1–2" (the creeps outside its walls). */
@@ -57,8 +57,11 @@ export interface WorldCard {
   pads: number;
 }
 
+/** The worlds the home page lists: the hub and the planets. Lumen (#6) is found in the game, up from Arcadia. */
+const HOME_WORLDS = BODY_IDS.filter((id) => id !== "lumen");
+
 export function worldCards(online: HomeOnline | null): WorldCard[] {
-  return BODY_IDS.map((id) => {
+  return HOME_WORLDS.map((id) => {
     const b = BODIES[id];
     const boss = BOSS_BY_BODY[id];
     return {
@@ -128,7 +131,7 @@ export function progressView(me: MeInfo, fallbackStarter = 0, fallbackLook = 0):
   const into = Math.max(0, (c?.xp ?? 0) - xpAtLevel(level));
   const need = xpToNext(level);
   const starter = starterIndex(c?.starter ?? fallbackStarter);
-  const padsTotal = BODY_IDS.reduce((s, b) => s + (PADS[BODIES[b].padLayout] ?? 0), 0);
+  const padsTotal = HOME_WORLDS.reduce((s, b) => s + (PADS[BODIES[b].padLayout] ?? 0), 0);
   return {
     name: me.displayName || me.name || "You",
     guest: me.guest,
@@ -216,7 +219,7 @@ export function namesLine(names: readonly string[], players: number, max = 3): s
  */
 export const HERO_STILLS = ["portus-plaza-dusk", "arcadia-lake", "hollowmere-planet", "meridian-mesa", "portus-portal"] as const;
 /** The still on each world's card. */
-export const WORLD_STILL: Record<BodyId, string> = { portus: "portus-above", arcadia: "arcadia-pond", hollowmere: "hollowmere-fen", meridian: "meridian-waystation", lumen: "arcadia-pond" };
+export const WORLD_STILL: Partial<Record<BodyId, string>> = { portus: "portus-above", arcadia: "arcadia-pond", hollowmere: "hollowmere-fen", meridian: "meridian-waystation" };
 
 /** How long a hero still holds before the next fades in (ms), and the fade (home.css). */
 export const HERO_HOLD_MS = 7000;

@@ -23,10 +23,10 @@ describe("map markers", () => {
     expect(ms.some((m) => m.kind === "pad")).toBe(false);
   });
 
-  it("planets: every pad, the portal home, the guide and the boss lair", () => {
+  it("planets: every pad, the portal home (and Arcadia's moon portal), the guide and the boss lair", () => {
     const ms = staticMarkers("arcadia", createTerrain("arcadia"));
     expect(ms.filter((m) => m.kind === "pad")).toHaveLength(padDirs(BODIES.arcadia).length);
-    expect(ms.filter((m) => m.kind === "portal").map((m) => m.to)).toEqual(["portus"]);
+    expect(ms.filter((m) => m.kind === "portal").map((m) => m.to)).toEqual(["portus", "lumen"]);
     expect(ms.find((m) => m.kind === "guide")?.label).toBe("Lark · missions");
     expect(ms.find((m) => m.kind === "lair")?.label).toContain("Tidewrath");
     expect(ms.some((m) => m.kind === "peak" || m.label === "Kestrel Peak")).toBe(true);

@@ -541,7 +541,7 @@ export const NPC_DEFS: readonly NpcDef[] = [
   {
     id: "glimmerhop", name: "Glimmerhop", planet: "lumen", family: "lunar", tier: "regular", temper: "hostile",
     levels: [6, 9], hp: 40, speed: 2.4, runSpeed: 4.5, locomotion: "ground", radius: 0.5, height: 1.1, ...PERCEPTION,
-    pack: [3, 5], respawn: "pack", model: "glimmerhop",
+    pack: [2, 4], respawn: "pack", model: "glimmerhop",
     attacks: [
       atk({ id: "moonleap", name: "Moon Leap", shape: "leap", weight: "light", damage: 15, telegraph: 0.8, radius: 2, range: 9, minRange: 4, cooldown: 4.5, recovery: 0.7 }),
       atk({ id: "nip", name: "Nip", shape: "arc", weight: "light", damage: 8, telegraph: 0.5, radius: 2.1, angle: 90, range: 1.9, cooldown: 1.3 }),
@@ -954,13 +954,14 @@ export const PLANET_WILDS: Record<PlanetId, { density: number; groups: SpawnGrou
       { members: [{ kind: "dusk_wolf", count: [3, 5] }], weight: 1, ground: "ridge" },
     ],
   },
-  // A small body: denser wilds so the first ten seconds there have a fight in them.
+  // A small body: the arrival pack gives the first fight; the wilds stay sparse (a play-test at
+  // level 8 was swarmed by overlapping packs at 0.45).
   lumen: {
-    density: 0.45,
+    density: 0.22,
     groups: [
-      { members: [{ kind: "glimmerhop", count: [3, 5] }], weight: 3 },
-      { members: [{ kind: "dustmoth", count: [2, 3] }], weight: 2 },
-      { members: [{ kind: "glimmerhop", count: [2, 3] }, { kind: "dustmoth", count: [1, 1] }], weight: 2 },
+      { members: [{ kind: "glimmerhop", count: [2, 4] }], weight: 3 },
+      { members: [{ kind: "dustmoth", count: [2, 2] }], weight: 2 },
+      { members: [{ kind: "glimmerhop", count: [2, 2] }, { kind: "dustmoth", count: [1, 1] }], weight: 2 },
     ],
   },
 };

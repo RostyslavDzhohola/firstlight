@@ -78,7 +78,8 @@ export class SkyPlanets {
       const rim = airU.element(pi).mul(fres).mul(day.mul(1.3).add(0.3));
       const viewDir = V.negate();
       const sky = skyColor(viewDir, float(0));
-      const planet = mix(sky.mul(0.62).add(surface.mul(0.04)), surface.mul(lighting), day).add(rim);
+      // The night side keeps a faint floor of its own colour: under Lumen's black sky it would vanish.
+      const planet = mix(sky.mul(0.62).add(surface.mul(0.1)), surface.mul(lighting), day).add(rim);
       // Through the atmosphere: only a planet at the horizon sinks into the haze; above ~12° it is crisp.
       const T = smoothstep(-0.03, 0.2, dot(viewDir, atmo.up)).mul(0.8).add(0.18);
       mat.colorNode = mix(sky, planet, T);
