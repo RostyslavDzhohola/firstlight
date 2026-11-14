@@ -81,9 +81,9 @@ person visits and send false Play claims, lowering gets-in without joining: the 
   `rollupFunnel` does the same per folded day. At the caps (about 1.3 M visit rows plus account rows)
   that is a scan of seconds that stalls every room. Writes no longer wait; reads still do. Fix: read
   from a second read-only connection in a worker, or keep running aggregates.
-- **The first funnel write of a UTC day counts today's rows** (`budget()`, four `COUNT(*)` over
-  today's index range, up to 80,000 rows) inside whatever called it, possibly a room tick: tens of ms
-  once a day.
+- Fixed in this pass: the first funnel write of a UTC day counted today's rows (four `COUNT(*)`, up to
+  80,000 rows) inside whatever called it, possibly a room tick. A running server now starts the new day
+  from its own queue; only the first write after a start counts.
 - **Exposing `pnpm dev` itself** (both the Vite dev server and the API through a proxy) still hands the
   key to any page the proxy serves: a dev code is an authentication bypass by design. `pnpm dev` is
   for this machine only; say so wherever sharing a dev server is described.
