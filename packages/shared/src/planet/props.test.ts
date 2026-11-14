@@ -65,6 +65,7 @@ describe("props", () => {
     }
   });
 
+  // Builds real chunk meshes for every body: ~1-2 s alone, past 5 s when the full suite loads the machine.
   it("places props on the rendered ground, never on water or steep rock", () => {
     let total = 0;
     for (const id of BODY_IDS) {
@@ -90,7 +91,7 @@ describe("props", () => {
       }
     }
     expect(total).toBeGreaterThan(200);
-  });
+  }, 30_000);
 
   it("keeps pad clearings and the Portus plaza free", () => {
     for (const id of ["arcadia", "hollowmere", "meridian"] as const) {
