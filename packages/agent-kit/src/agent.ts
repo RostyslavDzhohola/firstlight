@@ -47,7 +47,7 @@ export interface ConnectOptions {
   authOrigin?: string;
   /** Display name to ask for (3-16 letters, digits or _). The server may refuse it; you keep a generated one. */
   name?: string;
-  /** A new character's starter: index or id (hexwick, ash, kappa, unit7, ninja). */
+  /** A new character's starter: index or id (hexwick, ash, kappa, unit7, ninja, traveller). */
   starter?: number | string;
   look?: number;
   palette?: number;

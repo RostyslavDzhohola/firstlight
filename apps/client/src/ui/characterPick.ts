@@ -4,7 +4,7 @@
 // Used for the first play and for rebirth (no life counter: the server doesn't send one).
 
 import "./character.css";
-import { lookId, STARTER_LOOKS, STARTERS, PALETTE_NAMES, starterLook, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { lookId, PLAIN_STARTER, STARTER_LOOKS, STARTER_ORDER, STARTERS, PALETTE_NAMES, starterLook, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { NAME_PATTERN, setDisplayName } from "../net/auth.ts";
 import { nameProblem, validSuggestion } from "./account.ts";
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite, uiRoot } from "./dom.ts";
@@ -36,6 +36,7 @@ const STARTER_COPY = [
   { role: "River ninja from the old stories", line: "Sweeps whole crowds with a bo staff.", weapon: "Bo staff · knocks back", pal: "Shell rim, hat band and wraps. Kappa's skin stays river-green." },
   { role: "Ivory-armoured trooper", line: "Steady blaster, one round lens.", weapon: "Compact carbine · battery cell", pal: "Armour plates, undersuit and the lens." },
   { role: "Fire ninja", line: "Throws kunai; a hand seal looses a fireball.", weapon: "Thrown kunai · hold RMB: Ember Seal", pal: "Hood, jacket and scarf, and the ember emblem on the back." },
+  { role: "An ordinary traveller", line: "No gifts yet: build yourself up as you level.", weapon: "A plain blade · blocks with RMB", pal: "Hood, wraps and the hilt inlays." },
 ] as const;
 
 /** A second look's own lines (by look id), over the starter's. */
@@ -44,8 +45,8 @@ const LOOK_COPY: Record<string, { role: string; pal: string }> = {
   unit7_b: { role: "Round ceramic scout with a radio pack", pal: "Ceramic shell, joints and the lens." },
 };
 
-/** content.md §8.2: each starter's default palette (Midnight, Sand, Moss, Ivory, Ember). */
-const DEFAULT_PALETTE = [2, 1, 3, 0, 4];
+/** content.md §8.2: each starter's default palette (Midnight, Sand, Moss, Ivory, Ember; the Traveller Dusk). */
+const DEFAULT_PALETTE = [2, 1, 3, 0, 4, 5];
 
 /** The hero render of a starter's look in a palette (480×720 WebP). */
 const heroUrl = (starter: number, look: number, palette: number) => `${config.assetBase}/characters/hero_${lookId(starter, look)}_${palette}.webp`;
@@ -70,7 +71,8 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<Char
   open = new Promise((resolve) => {
     const rebirth = !!opts.rebirth;
     const storedStarter = localStorage.getItem("fl.starter");
-    let starter = Math.max(0, Math.min(STARTERS.length - 1, Number(storedStarter ?? 0) || 0));
+    // A new player (nothing stored) starts on the plain Traveller (#80); a stored pick comes back.
+    let starter = storedStarter === null ? PLAIN_STARTER : Math.max(0, Math.min(STARTERS.length - 1, Number(storedStarter) || 0));
     let palette = Math.max(0, Math.min(5, Number(localStorage.getItem("fl.palette") ?? DEFAULT_PALETTE[starter]) || 0));
     let paletteTouched = storedStarter !== null;
     // each starter keeps its own look while browsing; the stored one comes back for the stored starter
@@ -106,7 +108,9 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<Char
     const list = el("section", "fl-charpick__starters", cols);
     list.setAttribute("aria-label", "Starters");
     el("div", "fl-label", list, "Starter");
-    const cards = STARTERS.map((s, i) => {
+    const cards: HTMLButtonElement[] = [];
+    for (const i of STARTER_ORDER) {
+      const s = STARTERS[i]!;
       const b = button("", "fl-starter", list);
       const portrait = el("span", "fl-starter__portrait", b);
       sprite(portraitSprite(i, looks[i]), "", portrait);
@@ -121,8 +125,8 @@ export function showCharacterPick(opts: CharacterPickOptions = {}): Promise<Char
         if (!paletteTouched) palette = DEFAULT_PALETTE[i]!;
         render();
       };
-      return b;
-    });
+      cards[i] = b; // by starter index, listed in STARTER_ORDER
+    }
 
     // ---- hero figure
     const hero = el("section", "fl-charpick__hero", cols);

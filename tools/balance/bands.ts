@@ -2,9 +2,9 @@
 // docs/content.md sections, DECISIONS (D), research report [04], or a run decision. A failed check is a
 // number that left its band; `pnpm balance` exits non-zero on any.
 
-import { STARTERS, WEAPONS } from "../../packages/shared/src/content/weapons.ts";
+import { PLAIN_STARTER, STARTERS, WEAPONS } from "../../packages/shared/src/content/weapons.ts";
 import { maxHp, REGEN } from "../../packages/shared/src/content/progression.ts";
-import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
+import { BASE_MOVE, STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
 import {
   affordability, BURST_FAMILIES, bossRows, COMBAT_FAMILIES, creatureRows, dominations, duelResults, median, progression,
   encounterGaps, pvpCell, PVP_LEVELS, regenSafety, roleLeaders, spellPeaks, weaponTable, buildRows, GUARD_FAMILIES, type Family,
@@ -176,7 +176,14 @@ export function checks(): Check[] {
   add({ id: "starter.dominance", what: "Starters at least as good as another on every stat", value: dom.length ? dom.map((d) => d.join(" > ")).join(", ") : "none", band: "none", ok: dom.length === 0, source: "issue #9" });
   const leaders = roleLeaders();
   const leads = STARTERS.map((s) => Object.values(leaders).filter((names) => names.includes(s.name)).length);
-  STARTERS.forEach((s, i) => add({ id: `starter.${s.id}.role`, what: `${s.name} leads roles`, value: String(leads[i]), band: `1–${Object.keys(leaders).length - 1}`, ok: leads[i]! >= 1 && leads[i]! < Object.keys(leaders).length, source: "issue #9 (each plays differently, none strictly best)" }));
+  // The plain Traveller (#80) is the baseline by design: it leads nothing and has the base numbers.
+  STARTERS.forEach((s, i) => {
+    if (i === PLAIN_STARTER) return;
+    add({ id: `starter.${s.id}.role`, what: `${s.name} leads roles`, value: String(leads[i]), band: `1–${Object.keys(leaders).length - 1}`, ok: leads[i]! >= 1 && leads[i]! < Object.keys(leaders).length, source: "issue #9 (each plays differently, none strictly best)" });
+  });
+  const plain = STARTER_STATS[PLAIN_STARTER]!;
+  const plainBase = plain.hp === 1 && plain.speed === 1 && plain.dodgeCooldown === BASE_MOVE.dodgeCooldown && (plain.spellPower ?? 1) === 1;
+  add({ id: "starter.plain.base", what: `${STARTERS[PLAIN_STARTER]!.name}: HP, pace, roll and spell power at the base, leads ${leads[PLAIN_STARTER]} roles`, value: plainBase ? "base" : "not base", band: "base, leads 0", ok: plainBase && leads[PLAIN_STARTER] === 0, source: "#80 (an ordinary traveller, no special stats)" });
   const worst = Math.min(...duelResults().map((r) => Math.min(r.ratio, 1 / r.ratio)));
   add({ id: "starter.duels", what: "Most lopsided starter duel (loser's speed ÷ winner's)", value: fmt(worst), band: "≥ 0.6", ok: worst >= 0.6, source: "D-balance-4 (no hopeless matchup)" });
 

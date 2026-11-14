@@ -7,7 +7,7 @@
 import "./hud.css";
 import "./styles/compat.css";
 import "./styles/kit.css";
-import { STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { PLAIN_STARTER, STARTERS, PALETTE_NAMES, WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
 import { PHRASES, type YouState } from "@firstlight/shared/net/protocol";
 import { el, icon, sprite, uiRoot } from "./dom.ts";
 import { formatDamage, isLowHp, parsePrompt, shownItem, slotView, type DamageKind, type SlotView } from "./hudFormat.ts";
@@ -205,7 +205,7 @@ export class Hud {
     this.buildHotbar();
     this.buildMid();
     this.toasts.setAttribute("aria-live", "polite");
-    this.starter = Number(localStorage.getItem("fl.starter") ?? 0) || 0;
+    this.starter = Number(localStorage.getItem("fl.starter") ?? PLAIN_STARTER) || 0;
     this.palette = Number(localStorage.getItem("fl.palette") ?? 0) || 0;
     this.look = Number(localStorage.getItem("fl.look") ?? 0) || 0;
     this.applySettings(this.settings);

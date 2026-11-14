@@ -62,6 +62,7 @@ import { CLIENT_SYSTEMS, type ClientSystem } from "./systems.ts";
 import { installSocial, partyRoomOn, removedFromWorld } from "../social/index.ts";
 import { goHome } from "../home/leave.ts";
 import { TravelQueue } from "./travelQueue.ts";
+import { PLAIN_STARTER } from "@firstlight/shared/content/weapons";
 
 
 /** ?bench runs without a server unless ?online is also given; ?offline forces it anywhere. */
@@ -544,7 +545,8 @@ export class Game {
     this.piles = new PilesView(this.ctx.scene);
     this.piles.applySettings(this.ctx.settings);
 
-    const stored = { starter: Number(localStorage.getItem("fl.starter") ?? 0), palette: Number(localStorage.getItem("fl.palette") ?? 0), look: Number(localStorage.getItem("fl.look") ?? 0) || 0 };
+    // Nothing stored (a new player who skipped the pick): the plain Traveller (#80).
+    const stored = { starter: Number(localStorage.getItem("fl.starter") ?? PLAIN_STARTER), palette: Number(localStorage.getItem("fl.palette") ?? 0), look: Number(localStorage.getItem("fl.look") ?? 0) || 0 };
     // S5: from the join until control is handed over, a close of the new room aborts the arrival
     // (ConnectionLost at the next check) instead of hanging or warming into no connection.
     let watch: ArrivalWatch | null = null;

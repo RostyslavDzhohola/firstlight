@@ -369,6 +369,7 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | Kappa | Riverstaff I (bo staff) | Fists |
 | Unit 7 | Pocket Carbine I (the blaster family) | Fists |
 | Hinoko (the ninja, 5th starter) | Ember Kunai I (with the Ember Seal) | Fists |
+| Traveller (the plain start, #80; listed first, a new player's default) | Sunbrand I | Fists |
 
 On rebirth: level 1, the chosen starter's T1 weapon, 0 coins (D).
 
@@ -1156,6 +1157,7 @@ spell numbers are in §2.7). Magic pips: Hexwick 5, Hinoko 4, Kappa 3, Unit 7 2,
 | Kappa | 1.00 (100 / 290) | 6.24 / 9.36 | 1.0 s | 1.00 | Balanced, Best dodge | crowd clear, evasion |
 | Unit 7 | 1.00 (100 / 290) | 6 / 9 | 1.25 s | 0.95 | Steady aim, Slow roll | duels (the reference body; pays with the roll, crowd clear and spell power) |
 | Hinoko | 0.88 (88 / 255) | 6.6 / 9.9 | 1.1 s | 1.05 | Fast, Fragile | mobility |
+| Traveller (#80) | 1.00 (100 / 290) | 6 / 9 | 1.2 s | 1.00 | Plain, Build it up | none by design: the base numbers, built up through the tree (#81); Brother Ash's body until it has its own |
 
 The calls made for issue #9's open questions (the owner hasn't answered; D-balance-4): (1) max HP, run/sprint
 and dodge cooldown vary (no stamina exists; carry slots, jump and fall damage stay shared); (2) a light layer,
@@ -1250,6 +1252,7 @@ not a trademark search.
 |---|---|---|
 | Decided (D) | FIRSTLIGHT, Portus, Arcadia, Hollowmere, Meridian, Hall of Firsts, Hexwick, Brother Ash, Unit 7, Hexquill, Sunbrand, Pocket Carbine, Woolback, Dusk Wolf, Tidewrath, The Receiver, Meridian Oversight, Hollow Court | OK, with flags: **Hollow King** is one word from *Hollow Knight* (Team Cherry); keep, with fallback "the Barrow King". **Kappa** is folklore (fine), but also an apparel trademark and a Twitch emote; low risk in games. **Tidewrath** is flagged Y in [r2-04] because of the kaiju archetype; mitigated by the design rules in 4.2 |
 | Starter looks (new, round 2) | River ninja, Wayfarer (Kappa); Trooper, Scout (Unit 7) | OK (generic words) |
+| Plain starter (new, #80) | Traveller | OK (a generic word; wears Brother Ash's existing body, no new look) |
 | Ninja starter (new, 6h) | Hinoko, Ember Kunai, Ember Seal | OK. "Hinoko" is the Japanese common noun for flying sparks (火の粉); no franchise character of that name known to us. "Ember Seal" and "Ember Kunai" are generic words (a kunai is a real tool). Rejected: "Kage", "Rin", "Hotaru", "Homura", "Hibana", "Kitsune"/fox motifs (all close to famous anime characters or the nine-tailed fox), "Wren" (already the example player name in UI copy and tests). Reasoned check only |
 | Weapons (new / [05]) | Riverstaff, Bearded Axe, Quarry Hammer, Emberglass Staff [05], Stormcoil, Scatterpipe [05], Yew Longbow, Stillshot Rifle, Comet Launcher, Scrapburst Grenade [05], Patchkit [05], Prism Bubble, Radio, Small/Large Tonic, Ferryman's Oar | OK. I rejected "Skyhammer" (Warhammer), "Boomtube" (DC's "Boom Tube"), "Farsight" (Warhammer 40k) and "Stonemaul" (WoW) |
 | Arcadia creatures (new) | Brightbits (faction), Hopbit, Golden Hopbit, Sparkfly, Linewyrm, Bomblet, Pixel Lancer, Cabinet Golem | OK, except "Hopbit": one letter from a franchise word, which this section's own rule bans; owner decision, still open (display name only, the id can stay). Silhouettes must follow the avoid list in 3.2 |

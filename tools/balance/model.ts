@@ -561,16 +561,19 @@ export function creatureLevels(def: NpcDef): [number, number][] {
 /** Hostile and neutral creatures a player fights (not eggs, not bosses). */
 export const FIGHT_DEFS = NPC_DEFS.filter((d) => d.family !== "egg" && d.tier !== "boss");
 
-/** Seconds for one player with each starter's weapon (gated tier) to kill the creature, from the first press. */
+/** The starter weapons, each once (the plain Traveller carries Brother Ash's Sunbrand, #80): the five medians are taken over. */
+export const STARTER_WEAPONS: readonly string[] = [...new Set(STARTERS.map((s) => s.weapon as string))];
+
+/** Seconds for one player with each starter weapon (gated tier) to kill the creature, from the first press. */
 export function playerKillsCreature(def: NpcDef, enemyLevel: number, playerLevel = expectedPlayerLevel(enemyLevel)): { min: number; median: number; max: number } {
   // The Enforcer's riot shield blocks frontal damage until broken: count it (a head-on fight).
   const hp = npcMaxHp(def, enemyLevel) + npcShieldHp(def, enemyLevel);
-  const times = STARTERS.map((s) => {
-    const w = WEAPONS.find((x) => x.id === s.weapon)!;
+  const times = STARTER_WEAPONS.map((id) => {
+    const w = WEAPONS.find((x) => x.id === id)!;
     const k = timeToKill(hitTimeline(w, gatedTier(playerLevel), playerLevel, "full", 300), hp);
     return k ? k.t : Infinity;
   }).sort((a, b) => a - b);
-  return { min: times[0]!, median: times[2]!, max: times[4]! };
+  return { min: times[0]!, median: median(times), max: times[times.length - 1]! };
 }
 
 const isMelee = (a: AttackDef) => a.shape === "arc" || a.shape === "ring" || a.shape === "charge" || a.shape === "leap" || a.shape === "line";
@@ -837,7 +840,7 @@ export function bossRows(): BossRow[] {
   return BOSS_DEFS.map((b) => {
     const def = npcDef(b.id);
     const L = b.level - 1; // the content's model: two players one level under the boss
-    const dps = median(STARTERS.map((s) => weaponRow(s.weapon as Family, gatedTier(L), L).sustainedDps));
+    const dps = median(STARTER_WEAPONS.map((id) => weaponRow(id as Family, gatedTier(L), L).sustainedDps));
     let mult = def.armour ?? 1;
     if (b.plates) {
       const cycle = b.plates.hold + b.plates.window + b.plates.cooldown;

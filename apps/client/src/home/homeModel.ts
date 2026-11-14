@@ -6,7 +6,7 @@ import { BOSS_BY_BODY, npcDef, PORTUS_WILDS } from "@firstlight/shared/content/n
 import { MEDAL_BY_ID, MEDALS } from "@firstlight/shared/content/medals";
 import { LEVEL_CAP, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
 import { PLAQUES, type HallLine } from "@firstlight/shared/content/secrets";
-import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
+import { STARTER_ORDER, STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import { SPELLS } from "@firstlight/shared/content/spells";
@@ -305,16 +305,16 @@ function allNewsTiles(hall: readonly HallLine[] | null): NewsTile[] {
       claimed: hunt?.claimed,
     },
     {
-      id: "starters", title: "Five starters that play differently",
-      text: "Each has its own weapon, health, pace and dodge: one strength paid for by one weakness. Pick again every time you are reborn.",
-      icons: STARTERS.map((st, i) => ({ sprite: HEAD_SPRITES[i] ?? "head-unit7", label: traits(i) })),
+      id: "starters", title: "Start plain, or pick one of five",
+      text: "The Traveller starts with a plain blade and builds up as it levels. The other five each have their own weapon, health, pace and dodge: one strength paid for by one weakness. Pick again every time you are reborn.",
+      icons: STARTER_ORDER.map((i) => ({ sprite: HEAD_SPRITES[i] ?? "head-unit7", label: traits(i) })),
       state: null,
     },
   ];
 }
 const NUMBER_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
 const numberWord = (n: number) => NUMBER_WORDS[n] ?? String(n);
-const HEAD_SPRITES = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "head-ninja"];
+const HEAD_SPRITES = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "head-ninja", "head-ash"];
 
 /** The agents guide in the public repo (shown only once the repo is public). */
 export function agentsGuideUrl(repoUrl: string): string {

@@ -224,7 +224,7 @@ export const TOOLS: readonly ToolDef[] = [
         url: { type: "string", description: "Game server origin. Default: $FL_URL, else http://localhost:2567.", maxLength: 200 },
         authUrl: { type: "string", description: "Sign-in origin, when it differs from url (the site origin on a hosted game). Default: $FL_AUTH_URL, else url.", maxLength: 200 },
         name: { type: "string", description: "Display name to ask for: 3-16 letters, digits or _. The server may refuse it (taken, not allowed); you then get a generated one.", minLength: 3, maxLength: 16 },
-        starter: { type: "string", description: "A new character's class: hexwick (magic bolts), ash (sword), kappa (staff), unit7 (carbine, default), ninja (thrown kunai). Ignored when the character already exists.", enum: STARTER_IDS },
+        starter: { type: "string", description: "A new character's class: hexwick (magic bolts), ash (sword), kappa (staff), unit7 (carbine, default), ninja (thrown kunai), traveller (the plain start: a sword and base numbers, built up through the tree). Ignored when the character already exists.", enum: STARTER_IDS },
         body: { type: "string", description: "World to join. Leave out to arrive wherever the character is.", enum: BODY_IDS },
         dev: { type: "boolean", description: "Use a dev guest token instead of the sign-in flow (local servers started with ALLOW_DEV_GUESTS=1). Default: $FL_DEV=1." },
       },

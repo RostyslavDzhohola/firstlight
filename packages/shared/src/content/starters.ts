@@ -42,6 +42,8 @@ export const STARTER_STATS: readonly StarterStats[] = [
   { id: "unit7", hp: 1.0, speed: 1.0, dodgeCooldown: 1.25, spellPower: 0.95, traits: ["Steady aim", "Slow roll"] },
   // Hinoko: the fastest runner, the most fragile.
   { id: "ninja", hp: 0.88, speed: 1.1, dodgeCooldown: 1.1, spellPower: 1.05, traits: ["Fast", "Fragile"] },
+  // The Traveller (#80): the plain start, base numbers everywhere; the build tree makes it someone.
+  { id: "traveller", hp: 1, speed: 1, dodgeCooldown: BASE_MOVE.dodgeCooldown, spellPower: 1, traits: ["Plain", "Build it up"] },
 ];
 
 /** The row for a starter index; anything unknown gets the base (1.0 everywhere). */

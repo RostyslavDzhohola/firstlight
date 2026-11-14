@@ -11,7 +11,7 @@
 import * as THREE from "three/webgpu";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { ANIM, PF } from "@firstlight/shared/net/schema";
-import { STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
+import { lookId, STARTER_LOOKS, STARTERS, WEAPONS } from "@firstlight/shared/content/weapons";
 import { flags } from "../config.ts";
 import { avatarAssets, MODEL_SCALE, modelIndex, preloadAvatars, ROLL_SPEED, UAL_PELVIS, type AvatarAssets } from "./avatars/assets.ts";
 import { avatarMaterial, PALETTES, proxyMaterial, setAvatarPalette } from "./avatars/material.ts";
@@ -1007,8 +1007,11 @@ const WARMUP_ITEMS = ["sunbrand", "hexquill", "carbine", "riverstaff", "embergla
  *  is drawn. Checked in a real renderer with ?avatars&warmcheck: no build after the warm-up. */
 export function avatarWarmupLooks(): { palette: number; starter: number; look: number; item: string }[] {
   const looks: { palette: number; starter: number; look: number; item: string }[] = [];
+  const seen = new Set<string>();
   for (let starter = 0; starter < STARTERS.length; starter++) {
     for (let look = 0; look < (STARTER_LOOKS[starter]?.length ?? 1); look++) {
+      if (seen.has(lookId(starter, look))) continue; // a look worn by two starters (the Traveller in Ash's body) builds once
+      seen.add(lookId(starter, look));
       const i = looks.length;
       looks.push({ palette: i % PALETTES.length, starter, look, item: WARMUP_ITEMS[i % WARMUP_ITEMS.length]! });
     }
