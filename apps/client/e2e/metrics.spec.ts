@@ -19,6 +19,12 @@ const MODE = process.env.METRICS_MODE ?? "";
 const OUT_FILE = process.env.METRICS_OUT ?? "";
 const TIER = process.env.METRICS_TIER ?? "medium";
 
+interface HeapNode {
+  callFrame: { functionName: string; url: string; lineNumber: number; columnNumber: number };
+  selfSize: number;
+  children: HeapNode[];
+}
+
 interface Resources {
   requests: number;
   transferKB: number;
@@ -136,8 +142,28 @@ test("metrics · browser", { tag: ["@metrics"] }, async ({ player: fixturePlayer
         flags[k!] = v ?? true;
       }
       await page.goto(player.url(flags));
+      // METRICS_HEAPPROF=1: Chrome's sampling heap profiler over the run, summed by allocating function.
+      const cdp = process.env.METRICS_HEAPPROF === "1" ? await page.context().newCDPSession(page) : null;
+      if (cdp) {
+        await page.waitForFunction(() => !!(window as unknown as { __game?: unknown }).__game, null, { timeout: 5 * 60_000 });
+        await cdp.send("HeapProfiler.enable");
+        await cdp.send("HeapProfiler.startSampling", { samplingInterval: 16384 });
+      }
       await page.waitForFunction(() => (window as unknown as { __benchDone?: boolean }).__benchDone === true, null, { timeout: 10 * 60_000, polling: 1000 });
       runs[body] = await page.evaluate(() => (window as unknown as { __bench: unknown }).__bench);
+      if (cdp) {
+        const { profile } = (await cdp.send("HeapProfiler.stopSampling")) as unknown as { profile: { head: HeapNode } };
+        const sites = new Map<string, number>();
+        const walk = (n: HeapNode) => {
+          const f = n.callFrame;
+          const key = `${f.functionName || "(anon)"} ${f.url.replace(/^.*\/assets\//, "")}:${f.lineNumber + 1}:${f.columnNumber + 1}`;
+          if (n.selfSize) sites.set(key, (sites.get(key) ?? 0) + n.selfSize);
+          for (const c of n.children) walk(c);
+        };
+        walk(profile.head);
+        (runs[body] as Record<string, unknown>).heapSites = [...sites].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, v]) => [k, Math.round(v / 1024)]);
+        await cdp.detach();
+      }
     }
     out.bodies = runs;
   }

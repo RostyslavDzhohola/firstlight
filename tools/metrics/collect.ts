@@ -13,8 +13,9 @@
 //   pnpm metrics --repeat 3            run each group 3 times: medians, and noise from the spread
 //   pnpm metrics --compare a.json b.json   deltas, flagging changes beyond each metric's noise (exit 1 on a regression)
 //   pnpm metrics --merge a.json b.json --out c.json   several runs (one per group) into one file
+//   pnpm metrics --markdown run.json [--skip <regex>]   a run as a markdown table
 // Options: --gfx webgpu|webgl (browser groups, default webgpu), --tier <tier>, --bodies portus,arcadia,
-//   --viewport 1920x1080 --dpr 2 (frame: a real window's size, #87), --flags a=b,c (extra URL flags),
+//   --viewport 1920x1080 --dpr 2 (frame: a real window's size, #87), --heapprof (frame: allocation sites in the raw report), --flags a=b,c (extra URL flags),
 //   --seconds N (frame run length, default 20), --bots 1,25,50,100, --out <file>, --no-build, --json.
 // Browser groups use the journeys' stack on E2E_PORT/E2E_CLIENT_PORT (default 2612/5212); the server group
 // runs its own server on METRICS_SERVER_PORT (default 2622). Headless and muted, like every test browser.
@@ -229,7 +230,7 @@ function frameGroup(notes: string[]): Metric[] {
   const tier = opt("--tier", process.env.METRICS_TIER ?? "medium");
   for (const gfx of opt("--gfx", "webgpu").split(",")) {
     const viewport = opt("--viewport"), dpr = opt("--dpr", "1");
-    const j = browserRun("frame", gfx, { METRICS_TIER: tier, METRICS_BODIES: opt("--bodies", "portus,arcadia,hollowmere,meridian"), METRICS_SECONDS: opt("--seconds", "20"), METRICS_VIEWPORT: viewport, METRICS_DPR: dpr, METRICS_FLAGS: opt("--flags") }, notes);
+    const j = browserRun("frame", gfx, { METRICS_TIER: tier, METRICS_BODIES: opt("--bodies", "portus,arcadia,hollowmere,meridian"), METRICS_SECONDS: opt("--seconds", "20"), METRICS_VIEWPORT: viewport, METRICS_DPR: dpr, METRICS_FLAGS: opt("--flags"), METRICS_HEAPPROF: has("--heapprof") ? "1" : "" }, notes);
     if (!j) continue;
     // The default window (1280×720 at DPR 1) keeps the plain id; another size is part of the id.
     const size = viewport || dpr !== "1" ? `.vp${viewport || "1280x720"}d${dpr}` : "";
@@ -437,6 +438,16 @@ async function main() {
     if (has("--json")) console.log(JSON.stringify(d, null, 1));
     else printCompare(d, has("--all-rows"));
     process.exitCode = d.some((x) => x.verdict === "worse") ? 1 : 0;
+    return;
+  }
+
+  if (has("--markdown")) {
+    // A run file as a markdown table (docs/metrics.md's baseline): id, value, unit, better, noise.
+    const r = JSON.parse(readFileSync(opt("--markdown"), "utf8")) as MetricsRun;
+    const skip = new RegExp(opt("--skip", "^$"));
+    console.log(`Commit \`${r.commit.slice(0, 8)}\` (${r.branch}), ${r.when.slice(0, 16)}Z, ${r.machine.cpu}, ${r.machine.cores} cores, load ${r.machine.load1}${r.machine.busy ? " (busy)" : ""}, ${r.repeat} run(s) per group.\n`);
+    console.log("| id | value | unit | better | noise |\n|---|---:|---|---|---:|");
+    for (const x of r.metrics) if (!skip.test(x.id)) console.log(`| \`${x.id}\` | ${fmt(x.value)} | ${x.unit} | ${x.better} | ${x.noise ? `±${Math.round(x.noise * 100)} %` : x.floor ? `±${x.floor}` : "exact"}${x.noise && x.floor ? ` (≥ ${x.floor})` : ""} |`);
     return;
   }
 
