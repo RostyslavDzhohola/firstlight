@@ -2219,3 +2219,10 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   filter as before), decodes each image back and fails unless every RGBA byte equals the PNG's; the
   meshopt data is copied byte for byte. Every supported browser decodes WebP. Why: the "bytes before
   the world" climb (#85) with the same picture.
+- **D-perf-3 (2026-11-14):** the wild sites' GLBs are meshopt-compressed (16-bit positions, 16-bit
+  colours; the sites build runs the pinned gltf-transform 4.5.1 like the portus and vegetation
+  builds): 1.49 MB → 0.61 MB for the three planets, the arriving planet's file fetched on every
+  planet arrival. `WildSites.ts` decodes them and bakes each node's dequantising transform into float
+  positions before its flat shading. Every one of the 29,824 triangles matches the old file within
+  0.6 mm with identical colours. Why: bytes before the world on a planet arrival (#85). Over brotli
+  the two are within 2 %; the gain is for raw and gzip transfer and the deploy.

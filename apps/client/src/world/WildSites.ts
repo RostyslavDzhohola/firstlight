@@ -1,11 +1,12 @@
 // The wild sites on a planet (content/wildSites.ts, planet/wildSites.ts): the Blender-built prefabs of
 // tools/blender/sites, drawn exactly where the shared placement puts their colliders.
 //
-// Draw budget: one planet's GLB (sites_<body>.glb, ~100–250 KB) holds each prefab twice (LOD0 and a
-// decimated LOD1, both vertex-coloured, no textures) plus its emissive bits. Each site is one mesh
-// (one draw, one shadow draw) and, where it has lamps or crystals, one small glow mesh. A site is drawn
-// within SITE_DRAW_DISTANCE (its landmark further: they are meant to be seen from afar), LOD0 within
-// the tier's SITE_LOD_DISTANCE, LOD1 beyond, and three's frustum culling does the rest. Every site on a
+// Draw budget: one planet's GLB (sites_<body>.glb, 115–340 KB, meshopt with 16-bit positions: D-perf-3)
+// holds each prefab twice (LOD0 and a decimated LOD1, both vertex-coloured, no textures) plus its
+// emissive bits. Each site is one mesh (one draw, one shadow draw) and, where it has lamps or
+// crystals, one small glow mesh. A site is drawn within SITE_DRAW_DISTANCE (its landmark further: they
+// are meant to be seen from afar), LOD0 within the tier's SITE_LOD_DISTANCE, LOD1 beyond, and three's
+// frustum culling does the rest. Every site on a
 // body shares two materials, and a hidden one-triangle mesh of each sits in the group from the start
 // so the loading screen's warm-up compiles both before play.
 //
@@ -15,6 +16,7 @@
 import * as THREE from "three/webgpu";
 import { vertexColor } from "three/tsl";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import type { Terrain } from "@firstlight/shared";
 import { wildSitePlacements, wildSiteSolids, type WildSitePlacement } from "@firstlight/shared/planet/wildSites";
 import { config } from "../config.ts";
@@ -62,9 +64,17 @@ function siteGlowMaterial(): THREE.MeshBasicNodeMaterial {
   return glowMaterial;
 }
 
-/** Flat-shaded copy of a GLB geometry (the build ships no normals: every face is flat). */
-function flat(g: THREE.BufferGeometry): THREE.BufferGeometry {
+/** Float positions in prefab space: the GLB's quantised ones through their node's dequantising transform. */
+function prefabPositions(a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, m: THREE.Matrix4): THREE.BufferAttribute {
+  const out = new THREE.Float32BufferAttribute(new Float32Array(a.count * 3), 3);
+  for (let i = 0; i < a.count; i++) out.setXYZ(i, a.getX(i), a.getY(i), a.getZ(i));
+  return out.applyMatrix4(m);
+}
+
+/** Flat-shaded copy of a GLB geometry in prefab space (the build ships no normals: every face is flat). */
+function flat(g: THREE.BufferGeometry, m: THREE.Matrix4): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g.clone();
+  out.setAttribute("position", prefabPositions(out.getAttribute("position"), m));
   out.deleteAttribute("normal");
   out.computeVertexNormals();
   out.computeBoundingSphere();
@@ -78,12 +88,14 @@ export function loadSiteGeometry(body: string, fetchUrl = `${config.assetBase}/s
   let p = glbCache.get(fetchUrl);
   if (!p) {
     p = new GLTFLoader()
+      .setMeshoptDecoder(MeshoptDecoder)
       .loadAsync(fetchUrl)
       .then((gltf) => {
         const out = new Map<string, THREE.BufferGeometry>();
+        gltf.scene.updateMatrixWorld(true);
         gltf.scene.traverse((o) => {
           const m = o as THREE.Mesh;
-          if (m.isMesh) out.set(m.name, flat(m.geometry));
+          if (m.isMesh) out.set(m.name, flat(m.geometry, m.matrixWorld));
         });
         return out;
       })
