@@ -21,7 +21,7 @@ export interface WildSitePrefab {
   lookout: readonly [number, number, number];
 }
 
-export const WILD_SITE_PREFABS_VERSION = "43db808d13fb00fa";
+export const WILD_SITE_PREFABS_VERSION = "7c70d8aeeea3668f";
 
 export const WILD_SITE_PREFABS: readonly WildSitePrefab[] = [
   {

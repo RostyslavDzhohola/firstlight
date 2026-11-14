@@ -826,6 +826,11 @@ def to_object(name, bm):
     me.update()
     for p in me.polygons:
         p.use_smooth = False
+    # The exporter writes the active colour attribute as COLOR_0 (export_vertex_color="ACTIVE").
+    col = me.color_attributes.get("Col")
+    if col:
+        me.color_attributes.active_color = col
+        me.color_attributes.render_color_index = me.color_attributes.active_color_index
     obj = bpy.data.objects.new(name, me)
     scene.collection.objects.link(obj)
     return obj
@@ -857,6 +862,10 @@ def lod1_of(obj, ratio):
     dg = bpy.context.evaluated_depsgraph_get()
     ev = o.evaluated_get(dg)
     me2 = bpy.data.meshes.new_from_object(ev)
+    col = me2.color_attributes.get("Col")
+    if col:
+        me2.color_attributes.active_color = col
+        me2.color_attributes.render_color_index = me2.color_attributes.active_color_index
     o.modifiers.clear()
     o.data = me2
     return o
