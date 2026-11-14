@@ -138,8 +138,15 @@ const capOf = (what: Budgeted) =>
 function budget(db: Db, now: number): Budget {
   const day = Math.floor(now / DAY);
   let b = budgets.get(db);
-  if (!b || b.day !== day) {
-    // A new day (or a restart): count what today already holds, so a restart doesn't reset the cap.
+  if (b && b.day !== day) {
+    // A new day in a running server: this process wrote everything since it started, so today starts
+    // from what it has queued, with no query (it may run inside a room tick).
+    b = { day, used: { visits: 0, visitRows: 0, accountRows: 0, errors: 0 } };
+    for (const p of pending) if (p.db === db) b.used[p.kind === "error" ? "errors" : p.row.subject.startsWith("v:") ? "visitRows" : "accountRows"]++;
+    budgets.set(db, b);
+  } else if (!b) {
+    // The first write since start (or a test's reset): count what today already holds, so a restart
+    // doesn't reset the cap.
     const since = day * DAY;
     const n = (sql: string) => (stmt(db, sql).get(since) as { n: number }).n;
     b = {
