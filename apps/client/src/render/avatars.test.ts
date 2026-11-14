@@ -451,11 +451,11 @@ describe("the own avatar after a Skipstep (#78)", () => {
   });
 });
 
-describe("the Riverstaff's block grip (#76)", () => {
-  it("turns in the hand while the guard is held, eased both ways; other items and guns stay on their mount", () => {
+describe("held grips: the Riverstaff's block (#76) and the long weapons' carry while moving (#63)", () => {
+  it("the Riverstaff turns in the hand while the guard is held, eased both ways; other items and guns stay on their mount", () => {
     const rest = new THREE.Quaternion();
     const q = new THREE.Quaternion();
-    const axis = (t: number, id = "riverstaff", r = rest) => new THREE.Vector3(0, 0, 1).applyQuaternion(mod.heldWeaponQuat(id, t, r, q));
+    const axis = (t: number, id = "riverstaff", r = rest) => new THREE.Vector3(0, 0, 1).applyQuaternion(mod.heldWeaponQuat(id, "block", t, r, q));
     expect(axis(0).z).toBeCloseTo(1, 9);
     const held = axis(1);
     expect(held.angleTo(new THREE.Vector3(0, 0, 1))).toBeGreaterThan(0.5); // a real turn, not a nudge
@@ -464,6 +464,22 @@ describe("the Riverstaff's block grip (#76)", () => {
     expect(half.angleTo(new THREE.Vector3(0, 0, 1))).toBeGreaterThan(0.1);
     expect(axis(1, "sunbrand").z).toBeCloseTo(1, 9); // the clip was made for a sword's guard
     const gun = mod.GUN_GRIP;
-    expect(mod.heldWeaponQuat("carbine", 1, gun, q).angleTo(gun)).toBeCloseTo(0, 9);
+    expect(mod.heldWeaponQuat("carbine", "block", 1, gun, q).angleTo(gun)).toBeCloseTo(0, 9);
+  });
+
+  it("run, sprint and the roll ask for the carry grip, the guard for the block grip, attacks and aiming for none", () => {
+    expect(["run", "sprint", "roll_fast"].map(mod.heldPose)).toEqual(["carry", "carry", "carry"]);
+    expect(mod.heldPose("block_hold")).toBe("block");
+    for (const clip of ["idle", "walk", "aim", "cast", "attack_melee", "heavy_melee", "jump_air"]) expect(mod.heldPose(clip)).toBeNull();
+  });
+
+  it("every long weapon has a carry grip (a turn about the socket's Y axis); short ones and guns don't", () => {
+    for (const id of ["riverstaff", "emberglass", "axe", "longbow", "boarspear"]) {
+      expect(mod.hasHeldGrip(id, "carry"), id).toBe(true);
+      const tip = new THREE.Vector3(0, 0, 1).applyQuaternion(mod.heldWeaponQuat(id, "carry", 1, new THREE.Quaternion(), new THREE.Quaternion()));
+      expect(tip.angleTo(new THREE.Vector3(0, 0, 1)), id).toBeGreaterThan(0.5);
+    }
+    for (const id of ["sunbrand", "carbine", "crossbow", "fists"]) expect(mod.hasHeldGrip(id, "carry"), id).toBe(false);
+    expect(mod.hasHeldGrip("riverstaff", null)).toBe(false);
   });
 });

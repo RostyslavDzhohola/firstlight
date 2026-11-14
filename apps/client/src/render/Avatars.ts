@@ -129,29 +129,48 @@ export const GUN_GRIP = new THREE.Quaternion().setFromRotationMatrix(new THREE.M
   new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0)));
 
 /**
- * Block grips (#76, D-fix-view-3): while the guard is held (`block_hold`) these held items turn in the
- * hand, a rotation in the hand socket's axes after the mount (degrees, Blender's Euler XYZ: X first,
- * then Y, then Z about the fixed axes, as prop_check.py --rot reads it; three's order "ZYX"). The shared block
- * clip holds a sword's guard; a staff held its way ran through the Kappa's hat brim and down into the
- * shell. Turned, it lies across the guard. Checked on both Kappa looks with the held-prop clip check
- * (tools/blender/props3d/prop_check.py --rot) and renders from three sides.
+ * Held grips: while a clip plays, some held items turn in the hand, a rotation in the hand socket's
+ * axes after the mount (degrees, Blender's Euler XYZ: X first, then Y, then Z about the fixed axes, as
+ * prop_check.py --rot reads it; three's order "ZYX"). Each is checked with the held-prop clip check
+ * (tools/blender/props3d/prop_check.py --rot) on the shipped starters.
+ * - `block` (#76, D-fix-view-3), with `block_hold`: the shared block clip holds a sword's guard; a staff
+ *   held its way ran through the Kappa's hat brim and down into the shell. Turned, it lies across the guard.
+ * - `carry` (#63, D-fix-moon-3), with run, sprint and the roll: every long weapon plays the bare-hands
+ *   locomotion clips through the fist, and swung 8–10 cm through the head. Turned about the socket's Y
+ *   axis the long end trails back and down along the forearm, clear of the head, chest and legs.
  */
-const BLOCK_GRIP_DEG: Readonly<Record<string, readonly [number, number, number]>> = {
-  riverstaff: [-135, -5, 12],
+export type HeldPose = "block" | "carry";
+const HELD_GRIP_DEG: Readonly<Record<HeldPose, Readonly<Record<string, readonly [number, number, number]>>>> = {
+  block: { riverstaff: [-135, -5, 12] },
+  carry: { riverstaff: [0, 80, 0], emberglass: [0, 75, 0], axe: [0, 90, 0], longbow: [0, 80, 0], boarspear: [0, 80, 0] },
 };
-const BLOCK_GRIP = new Map(
-  Object.entries(BLOCK_GRIP_DEG).map(([id, [x, y, z]]) => [id, new THREE.Quaternion().setFromEuler(new THREE.Euler((x * Math.PI) / 180, (y * Math.PI) / 180, (z * Math.PI) / 180, "ZYX"))]),
-);
-/** Seconds the held item takes to turn into its block grip and back (about the clip's own blend in). */
+const HELD_GRIP: Record<HeldPose, Map<string, THREE.Quaternion>> = {
+  block: gripMap(HELD_GRIP_DEG.block),
+  carry: gripMap(HELD_GRIP_DEG.carry),
+};
+function gripMap(deg: Readonly<Record<string, readonly [number, number, number]>>): Map<string, THREE.Quaternion> {
+  return new Map(Object.entries(deg).map(([id, [x, y, z]]) => [id, new THREE.Quaternion().setFromEuler(new THREE.Euler((x * Math.PI) / 180, (y * Math.PI) / 180, (z * Math.PI) / 180, "ZYX"))]));
+}
+/** The held pose a clip asks for: the guard turns block grips, moving fast turns carry grips. */
+export function heldPose(clip: string): HeldPose | null {
+  if (clip === "block_hold") return "block";
+  if (clip === "run" || clip === "sprint" || clip === "roll_fast") return "carry";
+  return null;
+}
+/** Whether held item `id` has a grip for `pose`. */
+export function hasHeldGrip(id: string, pose: HeldPose | null): boolean {
+  return !!pose && HELD_GRIP[pose].has(id);
+}
+/** Seconds the held item takes to turn into a grip and back (about the clips' own blend in). */
 export const BLOCK_GRIP_TIME = 0.15;
 const _grip = new THREE.Quaternion();
 
 /**
  * The held item's rotation in the hand socket: its mount (`rest`: GUN_GRIP or none) turned by the
- * weapon's block grip, `t` of the way (0 … 1, smoothstepped). Weapons without a block grip stay at rest.
+ * weapon's grip for `pose`, `t` of the way (0 … 1, smoothstepped). Without a grip it stays at rest.
  */
-export function heldWeaponQuat(id: string, t: number, rest: THREE.Quaternion, out: THREE.Quaternion): THREE.Quaternion {
-  const grip = BLOCK_GRIP.get(id);
+export function heldWeaponQuat(id: string, pose: HeldPose | null, t: number, rest: THREE.Quaternion, out: THREE.Quaternion): THREE.Quaternion {
+  const grip = pose ? HELD_GRIP[pose].get(id) : undefined;
   out.copy(rest);
   if (!grip || t <= 0) return out;
   const x = Math.min(1, t);
@@ -289,9 +308,10 @@ export class AvatarView {
   private readonly attached = new Map<SocketName, THREE.Object3D>();
   private weaponIndex = 0;
   private weaponObj: THREE.Object3D | null = null;
-  /** The held item's mount in the hand (GUN_GRIP or none) and how far it is turned into its block grip (0 … 1). */
+  /** The held item's mount in the hand (GUN_GRIP or none), the grip it is turned into and how far (0 … 1). */
   private readonly weaponRest = new THREE.Quaternion();
-  private blockGripT = 0;
+  private gripPose: HeldPose | null = null;
+  private gripT = 0;
   private flagBits = 0;
   private lastAnim: number = ANIM.IDLE;
   private speed = 0;
@@ -371,7 +391,8 @@ export class AvatarView {
       if (def.cls === "ranged" && def.delivery !== "arrow") this.weaponRest.copy(GUN_GRIP);
       else this.weaponRest.identity();
       obj.quaternion.copy(this.weaponRest);
-      this.blockGripT = 0;
+      this.gripPose = null;
+      this.gripT = 0;
       socket.add(obj);
       this.weaponObj = obj;
       obj.visible = this.rezSolid;
@@ -685,7 +706,7 @@ export class AvatarView {
     this.clock += dt;
     this.drive(anim);
     this.lastAnim = anim;
-    this.stepBlockGrip(dt);
+    this.stepHeldGrip(dt);
     // LOD-aware mixer stepping
     this.pendingDt += dt;
     if (this.lod === "full") {
@@ -701,15 +722,27 @@ export class AvatarView {
     } else if (this.pendingDt > 1) this.pendingDt = 1;
   }
 
-  /** Turn the held item into its block grip while the guard is held, and back out after (#76). */
-  private stepBlockGrip(dt: number) {
+  /**
+   * Turn the held item into the grip its clip asks for (the guard: block, running and rolling: carry)
+   * and back out after (#76, #63). From one grip to another it turns back to the mount first.
+   */
+  private stepHeldGrip(dt: number) {
     const obj = this.weaponObj;
     if (!obj) return;
-    const goal = this.currentName === "block_hold" ? 1 : 0;
-    if (goal === this.blockGripT) return;
+    const id = WEAPONS[this.weaponIndex]?.id ?? "";
+    const want = heldPose(this.currentName);
+    const goal = hasHeldGrip(id, want) ? want : null;
     const step = dt / BLOCK_GRIP_TIME;
-    this.blockGripT = goal > this.blockGripT ? Math.min(1, this.blockGripT + step) : Math.max(0, this.blockGripT - step);
-    heldWeaponQuat(WEAPONS[this.weaponIndex]?.id ?? "", this.blockGripT, this.weaponRest, obj.quaternion);
+    if (goal && goal === this.gripPose) {
+      if (this.gripT >= 1) return;
+      this.gripT = Math.min(1, this.gripT + step);
+    } else if (this.gripT > 0) {
+      this.gripT = Math.max(0, this.gripT - step);
+    } else {
+      if (this.gripPose === goal) return;
+      this.gripPose = goal;
+    }
+    heldWeaponQuat(id, this.gripPose, this.gripT, this.weaponRest, obj.quaternion);
   }
 
   dispose() {
