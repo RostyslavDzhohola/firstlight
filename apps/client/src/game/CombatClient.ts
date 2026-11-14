@@ -227,8 +227,10 @@ export class CombatClient {
       const ms = m.line ? subtitleMs(m.line, m.text) : Math.min(9000, 2500 + m.text.length * 45);
       const s = this.toScreen(at.clone(), 2.3);
       if (s) this.hud.bubble(s.x, s.y, m.text, { name: speaker.name, ms });
-      if (m.to === me && uiSettings.get().subtitles) this.hud.subtitle(String(speaker.name).replace(/_/g, " "), m.text, ms);
-      if (m.line) say(this.game.audio, m.line, { name: null, at: at.addScaledVector(at.clone().normalize(), 1.6), key: m.by }); // from its head
+      // A spoken line's subtitle is say()'s, held while its recording plays; free text gets a reading time.
+      const name = String(speaker.name).replace(/_/g, " ");
+      if (m.line) say(this.game.audio, m.line, { name: m.to === me ? name : null, at: at.addScaledVector(at.clone().normalize(), 1.6), key: m.by }); // from its head
+      else if (m.to === me && uiSettings.get().subtitles) this.hud.subtitle(name, m.text, ms);
     });
     room.onMessage("death", (m: { victim: string; killer: string | null; killerName: string; aliveMs: number; level: number; pileId: string }) => {
       if (m.victim !== me) return;

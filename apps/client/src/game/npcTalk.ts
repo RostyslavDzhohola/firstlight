@@ -7,7 +7,7 @@ import * as THREE from "three/webgpu";
 import { CHARACTER_BY_OBJECT, CHARACTERS, dialogueFor, missionSpeaker, spokenId, type CharacterId } from "@firstlight/shared/content/dialogue";
 import { GUIDES } from "@firstlight/shared/content/missions";
 import { gleamsWon, selaLine } from "@firstlight/shared/content/gleams";
-import { preload, say } from "../audio/speech.ts";
+import { preload, say, speechOf } from "../audio/speech.ts";
 import type { Game } from "./Game.ts";
 
 /** Idle remarks: how near you must be, and how often a character (and anyone at all) may make one. */
@@ -43,8 +43,6 @@ export class NpcTalk {
   private t = 0;
   private readonly preloaded = new Set<CharacterId>();
   private current: { who: CharacterId; at: THREE.Vector3 } | null = null;
-  /** Until when (this.t) each character is still saying its last line: a farewell never cuts in. */
-  private readonly busyUntil = new Map<CharacterId, number>();
 
   constructor(private readonly game: Game) {}
 
@@ -62,8 +60,7 @@ export class NpcTalk {
   }
 
   private speak(who: CharacterId, id: string, at: THREE.Vector3) {
-    const ms = say(this.game.audio, id, { name: CHARACTERS[who].name, at, key: who });
-    this.busyUntil.set(who, this.t + ms / 1000 - 0.9); // the subtitle outlasts the voice by 0.9 s
+    say(this.game.audio, id, { name: CHARACTERS[who].name, at, key: who });
   }
 
   /** You pressed E at a character: their greeting. Returns the line's id (null: not a speaking character). */
@@ -84,7 +81,8 @@ export class NpcTalk {
     const c = this.current;
     this.current = null;
     // Accepting a mission closes the panel: the offer they're saying plays out instead of a goodbye.
-    if (c && this.t >= (this.busyUntil.get(c.who) ?? 0)) this.say(c.who, "farewell", dialogueFor(c.who, "farewell").map((l) => l.id), c.at);
+    // Busy lasts until their recording really ends (audio/speech.ts), however long it took to load.
+    if (c && !speechOf(this.game.audio).busy(c.who)) this.say(c.who, "farewell", dialogueFor(c.who, "farewell").map((l) => l.id), c.at);
   }
 
   /** You accepted a mission: its giver says the offer. */
@@ -92,6 +90,13 @@ export class NpcTalk {
     const who = missionSpeaker(missionId);
     const at = this.current?.at ?? null;
     if (who && at) this.speak(who, spokenId.mission(missionId), at);
+  }
+
+  /** The body's systems are going: these characters stop talking, and nothing they were loading plays later. */
+  dispose() {
+    const speech = speechOf(this.game.audio);
+    for (const who of Object.keys(CHARACTERS) as CharacterId[]) speech.stop(who);
+    this.current = null;
   }
 
   /**

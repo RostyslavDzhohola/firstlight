@@ -281,6 +281,7 @@ export class QuestClient implements ClientSystem {
 
   dispose() {
     window.removeEventListener("keydown", this.onKey);
+    this.talk.dispose();
     this.offTrack();
     this.trackSync.dispose();
     Panel.current?.close(false);
