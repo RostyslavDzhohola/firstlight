@@ -86,7 +86,8 @@ describe("the pad layout (D-controls-5)", () => {
     // Reached through context actions: E/R (X), Digit1–4 (LB/RB), Shift (LS click), M and Tab (Select).
     const viaContext = ["KeyE", "KeyR", "Digit1", "Digit2", "Digit3", "Digit4", "ShiftLeft", "ShiftRight", "KeyM", "Tab"];
     // Pause-menu rows for pads and touch (controls.ts): journal, tutorial checklist (and inventory, map, players again).
-    const viaMenu = ["KeyJ", "KeyT"];
+    // L / Shift+L (#69): the journal's Track buttons choose the tracked mission, Settings → Missions collapses the panel.
+    const viaMenu = ["KeyJ", "KeyT", "KeyL"];
     // Keyboard-only by choice: photo, screenshot, perf/admin overlays, the phrase wheel, invites, voice.
     const keyboardOnly = ["KeyP", "Backquote", "KeyG", "KeyY", "KeyN", "KeyV", "KeyB", "KeyW", "KeyA", "KeyS", "KeyD"];
     for (const b of BINDINGS) {
