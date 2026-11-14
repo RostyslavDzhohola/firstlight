@@ -360,7 +360,7 @@ export function runResidents(o: ResidentsOptions): ResidentsRun {
       }
     };
     // With a budget, a valid count comes before anyone joins.
-    await checkHumans();
+    if (o.maxHumans !== undefined) await checkHumans();
     const plays: Promise<void>[] = [];
     for (const m of members) {
       if (stopping) break;
