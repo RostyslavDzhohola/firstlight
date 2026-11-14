@@ -274,6 +274,28 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX IF NOT EXISTS client_error_at ON client_error(at);
   `,
+  // 12 (fix-ship, D-ship-6): the funnel's daily aggregates. Raw funnel_step rows are kept for
+  // FUNNEL_LIMITS.retentionDays; each older cohort day is folded into a fixed set of rows here (KPI
+  // numerators and denominators, step counts, medians with their counts) and its raw rows deleted, so
+  // the raw table stays under caps × retention and this one grows by a bounded number of rows a day.
+  // Additive and idempotent.
+  `
+  CREATE TABLE IF NOT EXISTS funnel_day (
+    day     TEXT NOT NULL,
+    metric  TEXT NOT NULL,
+    num     REAL NOT NULL DEFAULT 0,
+    den     REAL NOT NULL DEFAULT 0,
+    value   REAL,
+    PRIMARY KEY (day, metric)
+  );
+  `,
+  // 13 (fix-sec2, review round two #8): a folded account subject keeps its raw rows, marked here, so
+  // a character that comes back after its cohort day was folded is still known (its first join, its
+  // steps) and is never counted as a new subject. Visits are deleted when folded (they can't act by
+  // then: db/funnel.ts keeps raw rows longer than a visit lives).
+  `
+  ALTER TABLE funnel_step ADD COLUMN folded INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

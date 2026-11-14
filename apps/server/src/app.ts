@@ -23,6 +23,8 @@ import { createPlayGate, playBodyRefusal } from "./world/playGate.ts";
 import type { VerifyContext } from "./auth/identity.ts";
 import { createGateway, mountAgentApi, type Gateway, type GatewayOptions } from "./agents/gateway.ts";
 import { mountMcp } from "./agents/mcpHttp.ts";
+import { mountFunnelIngest } from "./ops/funnel.ts";
+import { expectVisit } from "./world/funnel.ts";
 
 export interface GameOptions {
   port: number;
@@ -40,6 +42,13 @@ export interface GameOptions {
   revalidate?: (userId: string, sessionId?: string) => string | null;
   /** Production: no loopback exemptions from per-address limits (D-security-3, D-security-4). */
   production?: boolean;
+  /**
+   * In-process tests only: a caller on a loopback socket (with no forwarding header naming anyone
+   * else) skips the per-address limits of /api/play. main.ts never sets it, so no running server has
+   * the exemption: a reverse proxy on the same machine that adds no forwarding header would make
+   * every remote caller look local (review round two, blocker 1). Ignored in production.
+   */
+  loopbackExempt?: boolean;
   /** The hosted agent gateway (/mcp, /api/agent; D-agents-gw-1): how its seats sign in, or false for none. */
   gateway?: Omit<GatewayOptions, "loopback"> | false;
 }
@@ -86,6 +95,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     for (const m of [playCalls, ipCalls]) for (const [k, v] of m) if (v.every((t) => now - t > PLAY_LIMITS.windowMs)) m.delete(k);
   }, 60_000);
   pruneCalls.unref();
+  /** The in-process tests' exemption from per-address limits (GameOptions.loopbackExempt). */
+  const loopbackExempt = (req: Request) => !!opts.loopbackExempt && !opts.production && loopbackCaller(req);
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", true);
@@ -98,7 +109,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     "Access-Control-Allow-Origin": corsFor(headers.get("origin")),
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Loadtest-Secret, X-Firstlight-Agent",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Loadtest-Secret, X-Firstlight-Agent, X-Firstlight-Dev-Key",
     Vary: "Origin",
   });
   // No client-side joinOrCreate/joinById/create; reconnect only.
@@ -108,7 +119,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     if (req.path.startsWith("/api/") && !req.path.startsWith("/api/auth/")) {
       res.setHeader("Access-Control-Allow-Origin", corsFor(req.headers.origin));
       res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Loadtest-Secret, X-Firstlight-Agent");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Loadtest-Secret, X-Firstlight-Agent, X-Firstlight-Dev-Key");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.setHeader("Vary", "Origin");
       if (req.method === "OPTIONS") {
@@ -119,6 +130,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     next();
   });
 
+  // The funnel's page endpoints read their own small bodies, so they go before the JSON parser (D-ship-6).
+  mountFunnelIngest(app);
   opts.mountBeforeJson?.(app);
   app.use(express.json({ limit: "32kb" }));
 
@@ -136,7 +149,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
 
   app.post("/api/play", async (req, res) => {
     // Before any verification (D-security-3): the request budgets, then the cheap field checks.
-    if (!playGate.admit(directRequestIp(req), loopbackCaller(req))) {
+    if (!playGate.admit(directRequestIp(req), loopbackExempt(req))) {
       res.status(429).json({ ok: false, error: "slow down" });
       return;
     }
@@ -177,10 +190,9 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     recent.push(now);
     playCalls.set(identity.userId, recent);
     const ip = directRequestIp(req);
-    // Per-address limits skip load-test bots and loopback (local development and in-process tests;
-    // production requests always carry the edge's client address).
-    // Production has no loopback exemption (D-security-4); addresses are keyed IPv6 per /64.
-    const perAddress = !identity.loadtest && !(!opts.production && loopbackCaller(req));
+    // Per-address limits skip load-test bots, and loopback only on an in-process test server that
+    // asked for it (loopbackExempt; never in production). Addresses are keyed IPv6 per /64.
+    const perAddress = !identity.loadtest && !loopbackExempt(req);
     if (!identity.loadtest) {
       const key = ip ? banKey(ip) : "unknown";
       const fromIp = (ipCalls.get(key) ?? []).filter((t) => now - t < PLAY_LIMITS.windowMs);
@@ -279,6 +291,8 @@ export async function createGame(opts: GameOptions): Promise<Game> {
         opts.limits,
       );
       if (result.ok) pendingSeats.bind(claim, result.reservation.sessionId, result.reservation.roomId);
+      // The funnel (#85): the page's visit, so the room can record that this visit joined a world.
+      if (result.ok && !sandbox) expectVisit(result.reservation.sessionId, req.body.visit);
       else pendingSeats.release(claim);
       if (agent && !result.ok) releaseAgentSlot(identity.agentClaim);
       res.json(result);

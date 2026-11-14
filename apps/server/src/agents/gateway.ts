@@ -87,14 +87,19 @@ const JoinArgs = z.strictObject({
 });
 
 const hash = (token: string) => createHash("sha256").update(token).digest("base64url");
+const CANCELLED_JOIN = { ok: false, reason: "cancelled", hint: "the caller hung up or cancelled while the character joined; it has left" } as const;
 
 export interface Gateway {
   readonly tools: ReadonlyMap<string, ToolDef>;
   /** Is the gateway taking joins right now (AGENTS_ENABLED and seats > 0)? */
   open(): boolean;
   seatsUsed(): number;
-  /** Seat a new character for the caller at `ip`; `seat` (the handle) comes with a successful result. */
-  join(ip: string | null, args: unknown): Promise<GatewayResult>;
+  /**
+   * Seat a new character for the caller at `ip`; `seat` (the handle) comes with a successful result.
+   * When `signal` aborts (the caller hung up or cancelled) the join answers "cancelled" and the seat
+   * it made is closed as soon as the sign-in finishes: nobody will ever hold its handle.
+   */
+  join(ip: string | null, args: unknown, signal?: AbortSignal): Promise<GatewayResult>;
   /**
    * Run a tool for the seat behind `token`. When `signal` aborts (the caller hung up, or cancelled
    * the request), the call leaves the seat's queue if it waits, or is stopped if it runs.
@@ -175,7 +180,8 @@ export function createGateway(opts: GatewayOptions): Gateway {
     tools,
     open,
     seatsUsed: () => seats.size,
-    async join(ip, args) {
+    async join(ip, args, signal) {
+      if (signal?.aborted) return { ...CANCELLED_JOIN };
       if (!open()) return { ok: false, reason: AGENT_REFUSAL.OFF, hint: "AI agents can't play on this server right now (AGENTS_ENABLED is off)." };
       if (!ip) return { ok: false, reason: "forbidden", hint: "no client address" };
       const key = banKey(ip);
@@ -205,6 +211,10 @@ export function createGateway(opts: GatewayOptions): Gateway {
         // Closed while it joined (shutdown).
         await session.agent?.close().catch(() => {});
         return { ok: false, reason: "closed" };
+      }
+      if (signal?.aborted) {
+        await drop(token);
+        return { ...CANCELLED_JOIN };
       }
       seat.lastUsed = Date.now();
       return { ...r, ok: true, seat: token, idleMinutes: Math.round(GATEWAY_RULES.idleMs / 60_000) };
@@ -333,10 +343,10 @@ export function mountAgentApi(app: Express, gateway: Gateway, allowedOrigins: re
     if (!guard(req, res)) return;
     const b = await body(req, res);
     if (!b) return;
+    // The caller hangs up while it joins: nobody will ever hold the handle, so the join closes the seat.
     const gone = hangUpSignal(res);
-    const r = await gateway.join(directRequestIp(req), b.v ?? {});
-    // The caller hung up while it joined: nobody will ever hold this handle, so the seat goes now.
-    if (r.ok && gone.aborted) return void (await gateway.drop(String(r.seat)));
+    const r = await gateway.join(directRequestIp(req), b.v ?? {}, gone);
+    if (gone.aborted) return;
     send(res, r.ok ? { ...r, howto: HTTP_HOWTO, playbook: PLAYBOOK } : r);
   });
 

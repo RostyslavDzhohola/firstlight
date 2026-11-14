@@ -12,7 +12,7 @@ import { placeCallout, type Rect } from "../ui/calloutPlace.ts";
 import { el } from "../ui/dom.ts";
 import type { Game } from "./Game.ts";
 import { huntTargets } from "./huntTargets.ts";
-import { missionTarget, type PointerNpc, type PointerTarget } from "./missionTarget.ts";
+import { missionTarget, siteSpot, type PointerNpc, type PointerTarget } from "./missionTarget.ts";
 import type { ClientSystem } from "./systems.ts";
 import { objectiveObject, trialSeen } from "./trialState.ts";
 import { missionTrack } from "./missionTrack.ts";
@@ -87,7 +87,7 @@ class MissionPointer implements ClientSystem {
       // The server's list, held since the join (huntTargets.ts): null until one came (older servers never send it).
       const hunt = huntTargets();
       const eligible = hunt && open && hunt.id === open.id ? hunt.npcs : null;
-      this.target = def ? (def.race || def.defend || def.collect || def.find || def.reach ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts })) : null;
+      this.target = def ? (def.race || def.defend || def.collect || def.find || def.reach ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts, siteAt: this.siteAt(terrain) })) : null;
       // The missions panel (top right) is kept clear too: a pinned label at the right edge sat on it
       // (play-through 2026-11-14). Read with the pick, 4 times a second, not every frame.
       const panel = g.hud.root.querySelector<HTMLElement>(".fl-missions");
@@ -152,6 +152,13 @@ class MissionPointer implements ClientSystem {
   private readonly objAt = new Map<string, [number, number, number]>();
 
   /** Race / defend / collect: the next ring, the beacon, or the nearest piece left (trialState.ts); find: the object; reach: the place. */
+  /** The wild-site lookup for this body's terrain (built once per terrain). */
+  private sites: { terrain: unknown; at: ReturnType<typeof siteSpot> } | null = null;
+  private siteAt(terrain: Parameters<typeof siteSpot>[0]): ReturnType<typeof siteSpot> {
+    if (this.sites?.terrain !== terrain) this.sites = { terrain, at: siteSpot(terrain) };
+    return this.sites.at;
+  }
+
   private objective(def: MissionDef, counts: readonly number[] | undefined, me: [number, number, number]): PointerTarget | null {
     if (def.body !== this.game.bodyId) return null;
     const posOf = (id: string): [number, number, number] | null => {

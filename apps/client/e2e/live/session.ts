@@ -1098,7 +1098,8 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
     if (!(await panel.count())) throw new Error("pressed E by the guide but no panel opened (`fl screen` shows the prompt, if any)");
     const said = (await panel.innerText()).replace(/\s+/g, " ").trim();
     let took = 0;
-    for (let i = 0; i < 4; i++) {
+    // Every Accept on the panel (Lark has five since the moon's L1).
+    for (let i = 0; i < 8; i++) {
       const accept = panel.getByRole("button", { name: /^accept$/i }).first();
       if (!(await accept.count())) break;
       await accept.click();

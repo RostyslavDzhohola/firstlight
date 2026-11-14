@@ -37,7 +37,7 @@ interface LegacySession {
   key: string;
   seat: string | null;
   lastUsed: number;
-  /** The join in progress: a second join waits for it instead of seating a second character. */
+  /** The join in flight: another join is refused while it runs (one at a time, nothing waits). */
   joining: Promise<unknown> | null;
   /** Ended (DELETE, or swept): a join that finishes afterwards closes its seat. */
   closed: boolean;
@@ -74,7 +74,6 @@ function headerValue(req: Request, name: string): string | undefined {
 }
 
 const hash = (t: string) => createHash("sha256").update(t).digest("base64url");
-const CANCELLED_JOIN = { ok: false, reason: "cancelled", hint: "the caller hung up while the character joined; it has left" } as const;
 
 export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonly string[]): void {
   const allowed = new Set(allowedOrigins);
@@ -106,22 +105,19 @@ export function mountMcp(app: Express, gateway: Gateway, allowedOrigins: readonl
     const ip = directRequestIp(req);
     if (!toolNames.has(name)) return toolContent({ ok: false, reason: "unknown tool", hint: `tools: ${[...toolNames].join(", ")}` });
     if (name === "firstlight_join") {
+      // Hung up or cancelled while it joined: gateway.join closes the seat it made (nobody holds it).
       if (!legacy) {
-        const r = await gateway.join(ip, args);
+        const r = await gateway.join(ip, args, signal);
         if (!r.ok) return toolContent(r);
-        // Hung up while it joined: nobody holds the handle, so the seat goes now.
-        if (signal.aborted) {
-          await gateway.drop(String(r.seat));
-          return toolContent({ ...CANCELLED_JOIN });
-        }
         return toolContent({ ...r, note: `your seat is ${String(r.seat)}: pass it as "seat" in every other firstlight_* call` });
       }
-      // One join at a time per session: a second one waits for the first, then finds the seat taken.
-      while (legacy.joining) await legacy.joining.catch(() => {});
+      // One join at a time per session, and nothing waits behind it: a join while one is in flight
+      // is refused at once (review round two, finding 2: waiting joins were an unbounded queue).
+      if (legacy.joining) return toolContent({ ok: false, reason: "join in progress", hint: "this session's character is joining; wait for that answer (one join at a time)" });
       if (legacy.closed) return toolContent({ ok: false, reason: "session ended", hint: "this MCP session was closed; initialize again" });
       const playing = legacy.seat && gateway.has(legacy.seat) ? legacy.seat : null;
-      if (playing) return toolContent(await gateway.call(playing, ip, name, args));
-      const joining = gateway.join(ip, args);
+      if (playing) return toolContent(await gateway.call(playing, ip, name, args, signal));
+      const joining = gateway.join(ip, args, signal);
       legacy.joining = joining;
       let r: Awaited<typeof joining>;
       try {

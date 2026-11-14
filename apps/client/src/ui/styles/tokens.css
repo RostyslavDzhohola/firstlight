@@ -155,6 +155,7 @@
   --meridian: #d2553a;
   --meridian-2: #3fd0c9;
   --meridian-chrome: #cfd6dd;
+  --lumen: #d9e2f2; /* moon pearl (the portal's colour, game/nextSteps.ts) */
 
   /* Starter palettes (content.md §8.3) */
   --pal-ivory-p: #e9e4d8;    --pal-ivory-s: #6f7780;    --pal-ivory-a: #f2b544;

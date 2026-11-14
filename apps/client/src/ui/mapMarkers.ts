@@ -28,7 +28,6 @@ export interface MapMarker {
   area?: number;
 }
 
-const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
 
 /** Portus landmarks in the town frame (east, north metres), from the town layout. */
 const PORTUS_SPOTS: readonly [string, number, number][] = [
@@ -79,7 +78,7 @@ export function staticMarkers(body: BodyId, terrain: Terrain): MapMarker[] {
     for (const [name, e, n] of PORTUS_SPOTS) out.push({ id: `town:${name}`, kind: "town", dir: townDir(e, n, def.radius), label: name, priority: 1 });
   }
   for (const s of portalSpots(def, terrain)) {
-    out.push({ id: `portal:${s.to}`, kind: "portal", dir: s.dir, label: body === "portus" ? `${cap(s.to)} portal` : "Portal to Portus", priority: 3, to: s.to });
+    out.push({ id: `portal:${s.to}`, kind: "portal", dir: s.dir, label: body === "portus" ? `${BODIES[s.to].name} portal` : `Portal to ${BODIES[s.to].name}`, priority: 3, to: s.to });
   }
   return out;
 }

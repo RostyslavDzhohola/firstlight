@@ -11,7 +11,8 @@
 //   matched (with no ORIGIN_SECRET configured, which production refuses, that is development:
 //   Vite's proxy). Without a usable entry it falls back to `directRequestIp`.
 // Every address is validated (`net.isIP`); a header that isn't one counts as absent. Limits and bans
-// key IPv6 by /64 (`banKey`). Loopback is exempt from per-address limits only outside production.
+// key IPv6 by /64 (`banKey`). Loopback is exempt from per-address limits only on an in-process test
+// server that asks for it (GameOptions.loopbackExempt), never on a running one.
 //
 // /api/auth/* gets the proxied address in CLIENT_IP_HEADER (any client-supplied copy is stripped
 // first); Better Auth reads only that header (rate limits, IP bans).
@@ -99,8 +100,9 @@ function forwardedAddresses(req: IncomingMessage): string[] {
 }
 
 /**
- * The person at this machine, for development-only routes that would leak something to anyone else
- * (#84's sign-in code). Only the TCP socket's own address grants it: it must be loopback. Headers can
+ * Looks like the person at this machine: defence in depth for development-only routes (#84's sign-in
+ * code), never proof on its own: a proxy on this machine that adds no forwarding header passes it,
+ * so that route also requires the run's key (D-sec2-1). The TCP socket's own address must be loopback. Headers can
  * only take it away, never give it: a forwarding header naming anyone but loopback (a proxy on this
  * machine passing on a remote caller, e.g. Vite's xfwd or nginx) refuses, and so does a Host that isn't
  * a loopback name (a page whose domain was rebound to 127.0.0.1). The `x-forwarded-*` and `x-real-ip`
@@ -111,9 +113,9 @@ export function localDevRequest(req: IncomingMessage): boolean {
 }
 
 /**
- * Did this request come from this machine: the socket's own address is loopback and no forwarding
- * header names anyone else? The development exemptions from per-address limits use it, so a remote
- * caller can't earn them by sending `X-Real-IP: 127.0.0.1` to a server that isn't production.
+ * Did this request come from this machine as far as headers can tell: the socket's own address is
+ * loopback and no forwarding header names anyone else? Not proof (see localDevRequest): only the
+ * in-process tests' exemption from per-address limits uses it (GameOptions.loopbackExempt).
  */
 export function loopbackCaller(req: IncomingMessage): boolean {
   return isLoopback(req.socket?.remoteAddress) && forwardedAddresses(req).every(isLoopback);

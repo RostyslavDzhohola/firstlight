@@ -1007,9 +1007,14 @@ const PORTRAIT_IDS = STARTER_LOOKS.flatMap((ls) => ls.map((l) => l.id));
 
 /** Items drawn with a render of their sculpted model (`.px-icon-<id>`) instead of their pixel map. */
 const ICON_IDS: ReadonlySet<string> = new Set(SCULPTED_WEAPONS);
+/** Rendered icons whose image has loaded (installSprites asks for each once): until then, or if it
+ *  fails, the item shows its pixel sprite, so no slot is ever blank (weapons review 2). */
+const iconsIn = new Set<string>();
+
+const iconUrl = (id: string) => `${config.assetBase}/weapons/icon_${id}.webp`;
 
 export function itemSprite(id: string | null | undefined): string {
-  if (id && ICON_IDS.has(id)) return `icon-${id}`;
+  if (id && ICON_IDS.has(id) && iconsIn.has(id)) return `icon-${id}`;
   return (id && ITEM_SPRITE[id]) || "chest";
 }
 
@@ -1058,6 +1063,15 @@ export function installSprites(doc: Document = document): void {
   style.dataset.flSprites = "";
   style.textContent = Object.keys(SPRITES).map((n) => `.px-${n}{--i:${spriteUrl(n)}}`).join("\n") + "\n" +
     PORTRAIT_IDS.map((id) => `.px-portrait-${id}{--i:url("${config.assetBase}/characters/portrait_${id}.webp");image-rendering:auto;background-size:cover}`).join("\n") + "\n" +
-    [...ICON_IDS].map((id) => `.px-icon-${id}{--i:url("${config.assetBase}/weapons/icon_${id}.webp");image-rendering:auto;background-size:contain}`).join("\n");
+    [...ICON_IDS].map((id) => `.px-icon-${id}{--i:url("${iconUrl(id)}");image-rendering:auto;background-size:contain}`).join("\n");
   doc.head.appendChild(style);
+  // Fetch each rendered icon once; it replaces the pixel sprite only once it has loaded.
+  if (typeof Image !== "undefined") {
+    for (const id of ICON_IDS) {
+      const img = new Image();
+      img.onload = () => iconsIn.add(id); // a corrupt file fires error, not load
+      img.onerror = () => console.warn(`[sprites] icon for ${id} didn't load; showing its pixel sprite`);
+      img.src = iconUrl(id);
+    }
+  }
 }

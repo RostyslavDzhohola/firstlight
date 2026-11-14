@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.25.0",
   "engines": { "node": "24.x" },
   "scripts": {
-    "dev": "pnpm --parallel --filter @firstlight/server --filter @firstlight/client dev",
+    "dev": "node tools/dev.ts",
     "build": "pnpm --filter @firstlight/client build",
     "test": "vitest run",
     "typecheck": "pnpm -r --parallel typecheck",
@@ -14,7 +14,8 @@
     "e2e:gate": "pnpm --filter @firstlight/client exec node e2e/gate.mjs",
     "e2e:live": "pnpm --filter @firstlight/client e2e:live",
     "balance": "node tools/balance/report.ts",
-    "metrics": "node tools/metrics/collect.ts"
+    "metrics": "node tools/metrics/collect.ts",
+    "check:eggs": "node tools/eggs/bundle-guard.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",

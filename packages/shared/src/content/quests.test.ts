@@ -80,6 +80,12 @@ describe("missions (content.md §5)", () => {
       const sites = m.hunt.place ? [] : wildSitesOn(m.body).flatMap((s) => [s.guardian.kind, ...s.pack.map((p) => p.kind)]);
       const spawnable = new Set([...areas.flatMap(kinds), ...sites, ...(m.hunt.place ? [] : PLANET_WILDS[m.body].groups.flatMap((g) => g.members.map((x) => x.kind)))]);
       for (const t of m.hunt.targets) expect(spawnable.has(t.npcKind), `${m.id}: ${t.npcKind} spawns in ${m.hunt.place ?? m.body}`).toBe(true);
+      // A hunt that leads to a wild site: the site is on the mission's body and one of its targets lives there.
+      if (m.hunt.site) {
+        const site = wildSitesOn(m.body).find((s) => s.id === m.hunt!.site);
+        expect(site, `${m.id}: site ${m.hunt.site} on ${m.body}`).toBeDefined();
+        expect(m.hunt.targets.some((t) => t.npcKind === site!.guardian.kind || site!.pack.some((p) => p.kind === t.npcKind))).toBe(true);
+      }
     }
   });
 

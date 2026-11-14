@@ -283,25 +283,46 @@ The cheapest missing piece is one client beacon at session end, carrying the Pla
 tutorial step reached, frames over 33 ms and the mean fps. With it, eight of the eleven rows become
 real-visit numbers.
 
-### The funnel, measured since lane ship (D-ship-1)
+### The funnel, measured since lane ship (D-ship-1, bounded and verified since D-ship-6)
 
 The server now keeps the first-session funnel itself, so most rows above are real-visit numbers.
-`/stats` leads with them (last day, 7 days, all time, each against its #85 target), and
-`pnpm metrics --funnel --funnel-db <game.db>` (read-only) or `--funnel-json <saved /stats?format=json>`
-turns them into `funnel.<day|week|all>.<kpi>` metrics.
+`/stats` leads with them (last day, 7 days, all time, each against its #85 target, with a Source
+column), and `pnpm metrics --funnel --funnel-db <game.db>` (read-only) or
+`--funnel-json <saved /stats?format=json>` turns them into `funnel.<day|week|all>.<kpi>` metrics.
 
-| KPI (#85) | now measured from |
-|---|---|
-| 80 % of Play presses reach the world; median under 30 s | the page's `play` and `world` steps (with the seconds since Play) |
-| 60 % finish the tutorial | the server's tutorial completion per new character (each tutorial step per visit too) |
-| 40 % take a mission | the server's first mission accepted per new character |
-| median first session over 10 min | the length of each account's first session |
-| 25 % reach level 5 | the server's level 5 per new character |
-| 15 % back within a week | a session on a later UTC day, over accounts at least 7 days old |
-| 30 % of level-2 players save | level 2 and saved on the same account |
-| no crash | client error reports (`/api/client-error`) per visit that reached the world |
+Each share counts the subjects that reached **both** of its steps, over those that reached the first.
+A visit is one the server issued (`POST /api/visit` when the page loads, a signed token); a new
+character is one a join created (`new`), so characters from before the funnel never count as new.
+"Server" KPIs rest on steps the server decided; "page" KPIs have a numerator only the page reports.
+
+| KPI (#85) | id | source | now measured from |
+|---|---|---|---|
+| 80 % of Play presses reach the world | `gets_in` | server | visits with the page's `play` that the server saw join a world (the token rides on `/api/play`, the room records `join`) |
+| (the same, the page's own report) | `gets_in_page` | page | visits with `play` and the page's `world` step |
+| median under 30 s | `gets_in_s` | page | the page's seconds from Play to the world, for visits that pressed Play and joined |
+| 60 % finish the tutorial | `tutorial` | server | new characters with the server's tutorial completion |
+| 40 % take a mission | `mission` | server | new characters with a first mission accepted |
+| median first session over 10 min | `first_session_ms` | server | each new character's first session length |
+| 25 % reach level 5 | `level5` | server | new characters at level 5 |
+| 15 % back within a week | `back_week` | server | a session on a later UTC day within 7 days, over new characters at least 7 days old |
+| 30 % of level-2 players save | `level2_saved` | server | level 2 and saved on the same account |
+| no crash | `crash_free` | page | visits that joined a world and sent an error report (with their token) |
+
+What a stranger can and can't do to these numbers: visits are issued per address (10 per 10 min)
+and per day (5,000), and each holds at most 30 rows, so fabricating visits costs addresses and can
+only add "page" claims or Play presses without joins; it cannot add a server-verified step, and a
+visit's kind (person, test, agent) is fixed at issue. A flood can still pull `gets_in` down (Play
+presses that never join) until the day's visit cap; `/stats` then says the day was capped.
+
+Bounds (`FUNNEL_LIMITS`, `INGEST` in `apps/server/src/db/funnel.ts` and `ops/funnel.ts`): 40,000
+visit rows, 40,000 account rows and 1,000 error reports a UTC day; raw steps kept 21 days, then
+folded into `funnel_day` (daily totals, about a hundred rows a day; all-time medians are medians of
+the daily medians); error reports kept 30 days; every write queued and flushed once a second in one
+transaction; bodies 4 kb for every content type.
 
 Still lab-only: frame rate on real visits (the beacon carries no frame times yet) and soft-locks.
+Test visits (our tools' secret, `navigator.webdriver`, `?e2e`, `?bench`) and agents are counted apart;
+Do Not Track, Global Privacy Control and the home page's opt-out send nothing.
 
 ## Baseline (2026-11-13, `night/integration` head)
 

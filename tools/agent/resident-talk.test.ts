@@ -163,6 +163,45 @@ describe("the model brain", () => {
     expect(seen.length - before).toBe(1);
   });
 
+  // Review round two, finding 6: a timeout or a failed read released the output allowance, though
+  // the provider may have produced (and billed) the answer. Only reported usage lowers a reservation.
+  it("keeps the whole reservation when the call's real usage is unknown; reported usage settles it", async () => {
+    const gg = () => ctx({ kind: "phrase", phrase: "GG" });
+    const reserve = tokenReserve(modelPrompt(gg()));
+    const ok = (json: unknown) => new Response(JSON.stringify(json), { status: 200, headers: { "content-type": "application/json" } });
+    const outcomes: Record<string, () => Promise<Response>> = {
+      "http 500": async () => new Response("{}", { status: 500 }),
+      "http 429": async () => new Response("{}", { status: 429 }),
+      timeout: async () => {
+        throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
+      },
+      network: async () => {
+        throw new TypeError("fetch failed");
+      },
+      "unreadable body": async () => new Response("{not json", { status: 200 }),
+      "no usage": async () => ok({ choices: [{ message: { content: '{"say": ["marlo.gg.1"]}' } }] }),
+    };
+    for (const [name, answer] of Object.entries(outcomes)) {
+      let calls = 0;
+      // Room for two reservations less one token: a second call fits only if the first released any of its own.
+      const b = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 99, tokensPerHour: 2 * reserve - 1, minGapMs: 0, fetch: async () => (calls++, answer()) }, scriptedBrain(() => 0));
+      await b.answer(gg());
+      await b.answer(gg());
+      expect(calls, name).toBe(1);
+      expect(b.stats.lastFallback, name).toBe("budget");
+    }
+    // Both numbers reported: the call holds what it used, so the next one fits.
+    let calls = 0;
+    const settled = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 99, tokensPerHour: 2 * reserve - 1, minGapMs: 0, fetch: async () => (calls++, ok({ choices: [{ message: { content: '{"say": ["marlo.gg.1"]}' } }], usage: { prompt_tokens: 50, completion_tokens: 5 } })) });
+    await settled.answer(gg());
+    await settled.answer(gg());
+    expect(calls).toBe(2);
+    // Half a report settles half: the unreported part keeps its reservation.
+    const partial = modelBrain({ api: "openai", url: base, model: "m", callsPerHour: 99, tokensPerHour: 1e6, minGapMs: 0, fetch: async () => ok({ choices: [{ message: { content: '{"say": ["marlo.gg.1"]}' } }], usage: { completion_tokens: 5 } }) });
+    await partial.answer(gg());
+    expect(partial.stats).toMatchObject({ tokensIn: reserve - 80, tokensOut: 5 });
+  });
+
   it("parses only offered ids and only listed places; the env picks the brain", () => {
     const p = modelPrompt(ctx({ kind: "phrase", phrase: "Help!" }));
     const places = placesFor(obs(), 1);

@@ -46,31 +46,63 @@ function meshOf(scene: THREE.Object3D): THREE.Mesh | null {
 }
 
 /**
- * Load every sculpted item (`low`: the 256² textures). Never rejects: an item that fails is left out
- * (a console warning) and keeps its code-built model. `tick` is called once per finished file.
+ * How long the optional sculpted items may hold the loading screen (ms). Past it the load resolves
+ * with what it has; the rest keep their code-built models for this visit (weapons review 1: a
+ * download that never settled held entry for good).
  */
-export async function preloadSculptedWeapons(loader: GLTFLoader, low: boolean, tick: () => void = () => {}): Promise<void> {
+export const SCULPTED_PRELOAD_DEADLINE_MS = 15_000;
+
+export interface SculptedPreloadOptions {
+  /** Texture loader (tests); default: the asset base's WebP. */
+  texture?: (name: string, srgb: boolean) => Promise<THREE.Texture>;
+  deadlineMs?: number;
+}
+
+/**
+ * Load every sculpted item (`low`: the 256² textures). Never rejects and never takes longer than the
+ * deadline: an item that fails or is still downloading then is left out (a console warning) and keeps
+ * its code-built model, also when its files land later, so nothing changes a material the warm-up
+ * already compiled. `tick` is called once per finished file.
+ */
+export async function preloadSculptedWeapons(loader: GLTFLoader, low: boolean, tick: () => void = () => {}, opts: SculptedPreloadOptions = {}): Promise<void> {
   const suffix = low ? "_256" : "";
-  await Promise.all(SCULPTED_WEAPONS.map(async (id) => {
+  const tex = opts.texture ?? texture;
+  let open = true;
+  const all = Promise.all(SCULPTED_WEAPONS.map(async (id) => {
     try {
-      const done = <T>(p: Promise<T>) => p.then((v) => { tick(); return v; });
+      const done = <T>(p: Promise<T>) => p.then((v) => { if (open) tick(); return v; });
       const [gltf, albedo, normal] = await Promise.all([
         done(loader.loadAsync(`${base()}${id}.glb`)),
-        done(texture(`${id}_albedo${suffix}`, true)),
-        done(texture(`${id}_normal${suffix}`, false)),
+        done(tex(`${id}_albedo${suffix}`, true)),
+        done(tex(`${id}_normal${suffix}`, false)),
       ]);
+      if (!open) {
+        console.warn(`[weapons] sculpted ${id} arrived after the loading deadline; keeping the code-built model`);
+        return;
+      }
       const mesh = meshOf(gltf.scene);
       if (!mesh) throw new Error("no mesh in the GLB");
       // The GLB's node may carry a transform; bake it so the geometry sits in socket space.
       mesh.updateWorldMatrix(true, false);
       const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
       geometry.computeBoundingSphere();
-      const tex: StarterTextures = { albedo, normal };
-      ready.set(id, { geometry, material: avatarMaterial(tex, "painted") });
+      const maps: StarterTextures = { albedo, normal };
+      ready.set(id, { geometry, material: avatarMaterial(maps, "painted") });
     } catch (err) {
-      console.warn(`[weapons] sculpted ${id} failed to load; keeping the code-built model`, err);
+      if (open) console.warn(`[weapons] sculpted ${id} failed to load; keeping the code-built model`, err);
     }
   }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((res) => {
+    timer = setTimeout(() => {
+      const late = SCULPTED_WEAPONS.filter((id) => !ready.has(id));
+      if (late.length) console.warn(`[weapons] sculpted ${late.join(", ")} not in after ${opts.deadlineMs ?? SCULPTED_PRELOAD_DEADLINE_MS} ms; keeping the code-built models`);
+      res();
+    }, opts.deadlineMs ?? SCULPTED_PRELOAD_DEADLINE_MS);
+  });
+  await Promise.race([all, deadline]);
+  open = false;
+  clearTimeout(timer);
 }
 
 /** How many files preloadSculptedWeapons fetches (for a loading bar). */

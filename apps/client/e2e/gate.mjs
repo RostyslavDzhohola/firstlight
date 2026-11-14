@@ -11,8 +11,8 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { gates } = JSON.parse(readFileSync(path.join(here, "gates.json"), "utf8"));
-if (!Array.isArray(gates) || gates.some((g) => !/^J\d+\.\d+$|^smoke$/.test(g.id) || !Array.isArray(g.projects) || !g.projects.length)) {
-  console.error("gates.json: every gate needs an id like J2.4 (or smoke) and a non-empty projects list");
+if (!Array.isArray(gates) || gates.some((g) => !/^J(\d+|fail)\.\d+$|^smoke$/.test(g.id) || !Array.isArray(g.projects) || !g.projects.length)) {
+  console.error("gates.json: every gate needs an id like J2.4 or Jfail.3 (or smoke) and a non-empty projects list");
   process.exit(2);
 }
 if (!gates.length) {

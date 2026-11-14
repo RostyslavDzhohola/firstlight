@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The home page's visits line (#12, owner 2026-10-18): only who's online now, no analytics note;
-// total visits apart in the footer; the Privacy link only when DataFast is in the page.
+// total visits apart in the footer; the Privacy link always (our own funnel is disclosed either way).
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,14 +28,14 @@ describe("the home page's visits line (#12)", () => {
     expect(document.body.textContent).not.toMatch(/cookie|Analytics/i);
   });
 
-  it("without DataFast: our own count, no total, no Privacy link", () => {
+  it("without DataFast: our own count, no total, and still the Privacy link (our own funnel, review ship #6)", () => {
     const was = config.datafast;
     (config as { datafast: unknown }).datafast = null;
     try {
       renderVisits(null, 3);
       expect(document.getElementById("home-visits")!.textContent).toBe("3 online now");
       expect(document.getElementById("home-total")).toBeNull();
-      expect(document.getElementById("home-privacy")).toBeNull();
+      expect(document.querySelector(".fl-home__credit #home-privacy")!.textContent).toBe("Privacy");
     } finally {
       (config as { datafast: unknown }).datafast = was;
     }
