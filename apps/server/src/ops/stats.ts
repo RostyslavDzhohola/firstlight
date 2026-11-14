@@ -46,12 +46,12 @@ function onlineNow(): { total: number; perBody: Record<string, number>; test: nu
 }
 
 const STEP_NAMES: Record<string, string> = {
-  page: "Opened the page",
+  page: "Opened the page (visit issued)",
   play: "Pressed Play",
   pick: "Picked a character",
-  world: "World on screen",
+  world: "World on screen (the page's report)",
   tutorial_done: "Finished the tutorial",
-  join: "Joined a world",
+  join: "Joined a world (the server saw it)",
   kill: "First kill",
   mission: "First mission taken",
   level2: "Level 2",
@@ -79,7 +79,8 @@ function stepRows(steps: readonly string[], pick: (r: FunnelReport) => Record<st
 
 function funnelSection(f: ReturnType<typeof funnelWindows>): string {
   const w = f.windows;
-  const kpiRows = f.kpis.all.map((k, i) => `<tr><td>${esc(k.label)}</td><td class="muted">${esc(k.target)}</td>${kpiCell(f.kpis.day[i]!)}${kpiCell(f.kpis.week[i]!)}${kpiCell(k)}</tr>`).join("");
+  const kpiRows = f.kpis.all.map((k, i) => `<tr><td>${esc(k.label)}</td><td class="muted">${k.source === "server" ? "server" : "page"}</td><td class="muted">${esc(k.target)}</td>${kpiCell(f.kpis.day[i]!)}${kpiCell(f.kpis.week[i]!)}${kpiCell(k)}</tr>`).join("");
+  const capped = Object.entries(f.limits.today).filter(([, b]) => b.used >= b.cap).map(([k]) => k);
   const head = `<tr><th></th><th class="num">Last day</th><th class="num">7 days</th><th class="num">All time</th></tr>`;
   const tutorialSteps = w.all.tutorial.map((t) => `tutorial:${t.step}`);
   const tutorialRows = tutorialSteps.length
@@ -91,8 +92,9 @@ function funnelSection(f: ReturnType<typeof funnelWindows>): string {
   const split = (m: Record<string, number>) => Object.entries(m).sort((a, b) => b[1] - a[1]);
   return `
 <section><h2>Launch KPIs (#85): new visits and characters</h2>
-<table><tr><th>KPI</th><th>Target</th><th class="num">Last day</th><th class="num">7 days</th><th class="num">All time</th></tr>${kpiRows}</table>
-<p class="muted">A window holds the visits and characters whose first step falls in it. People only: our test visits and accounts (${w.all.apart.test}) and AI agents (${w.all.apart.agent}) are counted apart. Characters that played before the funnel existed are not counted.</p></section>
+<table><tr><th>KPI</th><th>Source</th><th>Target</th><th class="num">Last day</th><th class="num">7 days</th><th class="num">All time</th></tr>${kpiRows}</table>
+<p class="muted">A window holds the visits and new characters whose first step falls in it; each share counts those that reached both of its steps. Source "server": the server decided both steps (a visit's join comes from its token at /api/play); "page": the numerator is what the page reported. People only: our test visits and accounts (${w.all.apart.test}) and AI agents (${w.all.apart.agent}) are counted apart. Characters made before the funnel existed are not new ones. Raw steps are kept ${f.limits.retentionDays} days, older days as daily totals (their medians are medians of daily medians).</p>
+${capped.length ? `<p style="color:var(--bad)">Today's funnel cap reached (${esc(capped.join(", "))}): later steps today are not recorded, so today's figures are partial.</p>` : ""}</section>
 <div class="grid2">
 <section><h2>First visit, step by step</h2><table>${head}${stepRows(VISIT_FUNNEL, (r) => r.visits, w)}</table></section>
 <section><h2>New characters, step by step</h2><table>${head}${stepRows(ACCOUNT_FUNNEL, (r) => r.accounts, w)}</table></section>
@@ -103,7 +105,7 @@ ${tutorialRows ? `<section><h2>Tutorial, step by step (visits)</h2><table>${head
 <section><h2>Graphics fallbacks and failure screens (7 d)</h2>${bars([...split(w.week.fallback).map(([k, v]) => [`WebGL2: ${k}`, v] as [string, number]), ...(["boot_fail", "lost", "webgl_none", "removed", "version"] as const).filter((k) => w.week.visits[k]).map((k) => [k.replace("_", " "), w.week.visits[k]!] as [string, number])])}</section>
 </div>
 <section><h2>Client errors (7 d): ${f.errors.week.total} report(s)</h2>${errorRows ? `<table><tr><th class="num">Reports</th><th>Error</th><th>Where</th><th>Last</th></tr>${errorRows}</table>` : `<p class="muted">No client errors reported.</p>`}
-<p class="muted">Each page reports a kind of error once per session. Last day: ${f.errors.day.total}, all time (90 d kept): ${f.errors.all.total}. From test visits and agents, apart: ${f.errors.week.apart}.</p></section>`;
+<p class="muted">Each page reports a kind of error once per session. Last day: ${f.errors.day.total}, all time (${f.limits.errorRetentionDays} d kept): ${f.errors.all.total}. From test visits and agents, apart: ${f.errors.week.apart}.</p></section>`;
 }
 
 export function mountStats(app: Express, deps: OpsDeps): void {

@@ -489,7 +489,11 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
     void legacy;
     characterRepo.current.ensure?.(auth.userId);
     char ??= characterRepo.current.load(auth.userId);
-    if (!char) char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
+    let charCreated = false;
+    if (!char) {
+      char = newCharacter(options?.starter ?? 0, options?.palette ?? 0, now, options?.look ?? 0);
+      charCreated = true;
+    }
     if (inheritedPos && char.body === this.bodyDef.id) char.pos = inheritedPos;
     const p = new PlayerState();
     let pos: V3;
@@ -554,6 +558,7 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
       lastPhraseAt: 0,
       healAcc: 0,
       ...(this.sandbox ? { sandbox: this.sandbox } : {}),
+      ...(charCreated ? { charCreated: true } : {}),
     };
     if (old) {
       const carried = a as unknown as Record<string, unknown>, from = old as unknown as Record<string, unknown>;
