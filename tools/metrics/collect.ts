@@ -683,7 +683,7 @@ async function main() {
     const ra = readRun(a), rb = readRun(b);
     const skip = opt("--skip") ? new RegExp(opt("--skip")) : undefined;
     const d = compareRuns(ra, rb, { skip, sessionMinutes: opt("--session-minutes") ? Number(opt("--session-minutes")) : undefined });
-    const outcome = compareOutcome(ra, rb, d);
+    const outcome = compareOutcome(ra, rb, d, { skip });
     if (has("--json")) console.log(JSON.stringify({ outcome, deltas: d }, null, 1));
     else printCompare(d, outcome, has("--all-rows"));
     process.exitCode = outcome.code;

@@ -299,7 +299,7 @@ export interface Outcome {
 }
 
 /** The verdict a hill climb acts on: only code 0 with some `better` delta is an improvement. */
-export function compareOutcome(a: MetricsRun, b: MetricsRun, d: Delta[]): Outcome {
+export function compareOutcome(a: MetricsRun, b: MetricsRun, d: Delta[], opts: Pick<CompareOptions, "skip"> = {}): Outcome {
   const failures: string[] = [];
   const inconclusive: string[] = [];
   for (const g of b.groups) {
@@ -311,7 +311,7 @@ export function compareOutcome(a: MetricsRun, b: MetricsRun, d: Delta[]): Outcom
   if (count("worse").length) failures.push(`${count("worse").length} worse: ${list(count("worse"))}`);
   if (count("missing").length) failures.push(`${count("missing").length} missing from the after run: ${list(count("missing"))}`);
   if (count("incompatible").length) failures.push(`${count("incompatible").length} measured differently: ${list(count("incompatible"))}`);
-  const gates = failedGates(b);
+  const gates = failedGates({ metrics: b.metrics.filter((m) => !opts.skip?.test(m.id)) });
   if (gates.length) failures.push(`after fails ${gates.length} gate(s): ${gates.slice(0, 8).join(", ")}`);
   if (count("noisy").length) inconclusive.push(`${count("noisy").length} timing(s) not judged (busy machine): ${list(count("noisy"))}`);
   if (count("unbaselined").length) inconclusive.push(`${count("unbaselined").length} with no complete baseline: ${list(count("unbaselined"))}`);

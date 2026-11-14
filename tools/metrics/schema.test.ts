@@ -157,6 +157,8 @@ describe("compare", () => {
     const a = run([metric("x", 1), metric("typecheck.ms", 1)]);
     const b = run([metric("x", 1)]);
     expect(compareOutcome(a, b, compareRuns(a, b, { skip: /^typecheck/ })).code).toBe(0);
+    const g = run([metric("x", 1), metric("tests.client.failed", 2, { gate: true, noise: 0 })]);
+    expect(compareOutcome(g, g, compareRuns(g, g, { skip: /^tests/ }), { skip: /^tests/ }).code).toBe(0);
   });
 });
 
