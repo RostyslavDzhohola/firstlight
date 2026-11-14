@@ -8,7 +8,7 @@ import { BODIES, BODY_IDS, bodyGravity, createTerrain, inWalledZone, isSafe, nat
 import { BACKPACK_SLOTS, HOTBAR_SLOTS, newCharacter, type CharacterData } from "@firstlight/shared/content/character";
 import { INV_SLOTS, moveSlot, storeItem } from "@firstlight/shared/content/inventory";
 import { fallDamageFraction, levelForXp, pvpKillXp, xpAtLevel, xpToNext } from "@firstlight/shared/content/progression";
-import { buildStats, normalizeTree, playerMaxHp } from "@firstlight/shared/content/tree";
+import { buildStats, normalizeTree, playerMaxHp, reloadMs } from "@firstlight/shared/content/tree";
 import { STARTERS, starterLook, WEAPON_BY_ID, WEAPON_INDEX } from "@firstlight/shared/content/weapons";
 import { NET, PHRASES, type InvItem, type YouState } from "@firstlight/shared/net/protocol";
 import { ANIM, BodyState, NpcState, PF, PileState, PlayerState } from "@firstlight/shared/net/schema";
@@ -859,10 +859,10 @@ export class BodyRoom extends Room<{ state: BodyState; metadata: BodyRoomMetadat
 
   reload(a: PlayerActor | undefined) {
     if (!a || a.dead) return;
-    const { tier } = selectedWeapon(a);
+    const { def, tier } = selectedWeapon(a);
     const item = a.char.hotbar[a.char.selected];
     if (!item || tier.mag === undefined || (item.mag ?? tier.mag) >= tier.mag) return;
-    a.reloadEndsAt = Date.now() + (tier.reload ?? 1.5) * 1000;
+    a.reloadEndsAt = Date.now() + reloadMs(def, tier, buildStats(a.char.tree)); // the same time as an empty magazine's (Quick Hands)
     item.mag = tier.mag;
     a.youDirty = true;
   }

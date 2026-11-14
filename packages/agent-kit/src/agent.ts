@@ -18,7 +18,7 @@ import { SHOP, itemName } from "@firstlight/shared/content/items";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import { isTrialType as isTrial, MISSION_BY_ID, missionGoal, missionsFrom, type MissionDef } from "@firstlight/shared/content/missions";
 import { AETHER, aetherAt, castBlock, FROSTBLOOM, SPELL_BY_ID, SPELL_INDEX, SPELLS, WISHFALL } from "@firstlight/shared/content/spells";
-import { buildStats, nodeLine, spellCooldownS, spendRefusal, TREE } from "@firstlight/shared/content/tree";
+import { buildStats, nodeLine, reloadMs, spellCooldownS, spendRefusal, TREE, weaponHeat } from "@firstlight/shared/content/tree";
 import { STARTER_STATS, starterMove } from "@firstlight/shared/content/starters";
 import { NF, NPC_DEFS } from "@firstlight/shared/content/npcs";
 import { towardDir } from "@firstlight/shared/content/places";
@@ -518,6 +518,12 @@ export class FirstlightAgent {
     return this.you?.selected ?? 0;
   }
 
+  /** The weapon in hand's reload time for this build (content/tree.ts reloadMs, as the server times it). */
+  private reloadMsNow(): number {
+    const w = this.weapon();
+    return reloadMs(w.def, w.tier, buildStats(this.you?.tree?.nodes));
+  }
+
   private weapon(): { def: WeaponDef; tier: TierStats; item: InvItem | null; slot: number } {
     const slot = this.selectedSlot();
     const item = this.you?.hotbar?.[slot] ?? null;
@@ -609,7 +615,7 @@ export class FirstlightAgent {
         break;
       case "denied":
         this.lastDenial = { action: m.action, reason: m.reason, at: Date.now() };
-        if (m.reason === "reloading" || m.reason === "empty") this.reloadUntil = Math.max(this.reloadUntil, Date.now() + (this.weapon().tier.reload ?? 1.5) * 1000);
+        if (m.reason === "reloading" || m.reason === "empty") this.reloadUntil = Math.max(this.reloadUntil, Date.now() + this.reloadMsNow());
         else if (m.reason === "overheated") this.overheatUntil = Math.max(this.overheatUntil, Date.now() + 1500);
         else this.note("denied", `refused: ${m.action} (${m.reason})`, { key: `denied:${m.action}:${m.reason}`, amount: 0 });
         break;
@@ -1391,7 +1397,7 @@ export class FirstlightAgent {
             if (w.def.gravity && flight > 0) aim = addScaled(aim, up, 0.5 * w.def.gravity * flight * flight);
             const dir = norm(sub(aim, head));
             room.send("fire", { slot: w.slot, ox: head[0], oy: head[1], oz: head[2], dx: dir[0], dy: dir[1], dz: dir[2], t: now });
-            this.spendShot(w.tier, w.item, now);
+            this.spendShot(w.def, w.tier, w.item, now);
           }
         },
       };
@@ -1399,15 +1405,16 @@ export class FirstlightAgent {
   }
 
   /** Mirror the server's magazine and heat rules for a shot just sent (combat.ts consumeAttack). */
-  private spendShot(tier: TierStats, item: InvItem | null, now: number) {
+  private spendShot(def: WeaponDef, tier: TierStats, item: InvItem | null, now: number) {
+    const build = buildStats(this.you?.tree?.nodes);
     if (tier.mag !== undefined && item) {
       const mag = (item.mag ?? tier.mag) - 1;
       item.mag = mag <= 0 ? tier.mag : mag;
-      if (mag <= 0) this.reloadUntil = now + (tier.reload ?? 1.5) * 1000 + 120;
+      if (mag <= 0) this.reloadUntil = now + reloadMs(def, tier, build) + 120;
     }
     if (tier.heat !== undefined) {
       this.heat = Math.max(0, this.heat - (now - this.lastShotAt) / 1000) + 1;
-      if (this.heat >= tier.heat) {
+      if (this.heat >= weaponHeat(tier.heat, build)) {
         this.overheatUntil = now + 1500 + 120;
         this.heat = 0;
       }
@@ -1733,8 +1740,9 @@ export class FirstlightAgent {
     const w = this.weapon();
     if (w.tier.mag === undefined) return { ok: false, reason: "nothing to reload" };
     this.room!.send("reload", { slot: w.slot });
-    this.reloadUntil = Date.now() + (w.tier.reload ?? 1.5) * 1000 + 120;
-    return { ok: true, seconds: w.tier.reload ?? 1.5 };
+    const ms = this.reloadMsNow();
+    this.reloadUntil = Date.now() + ms + 120;
+    return { ok: true, seconds: ms / 1000 };
   }
 
   // ------------------------------------------------------------------------------------ the world's E key

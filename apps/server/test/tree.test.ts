@@ -6,7 +6,9 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, isSafe } from "@firstlight/shared";
-import { playerMaxHp, RESPEC, ROLL_GAP_MS, TREE, treePoints } from "@firstlight/shared/content/tree";
+import { NEUTRAL_BUILD, playerMaxHp, reloadMs, RESPEC, ROLL_GAP_MS, TREE, treePoints } from "@firstlight/shared/content/tree";
+import { WEAPON_BY_ID } from "@firstlight/shared/content/weapons";
+import { consumeAttack } from "../src/world/combat.ts";
 import Database from "better-sqlite3";
 import { ensureAccount, killCharacter, loadCharacter, openGameDb, saveCharacter, type CharacterData, type Db } from "../src/db/index.ts";
 import { MIGRATIONS, migrate } from "../src/db/schema.ts";
@@ -147,6 +149,49 @@ describe("build tree on a live room (#81)", () => {
     } finally {
       repo.save = save;
     }
+  }, 20_000);
+
+  // Review finding 5: Quick Hands shortens the manual reload (R) as much as the one an empty magazine starts.
+  it("Quick Hands times the manual reload and the empty-magazine reload alike", async () => {
+    const b = await bot("reloader", "arcadia");
+    const a = actorOf(b);
+    await tpAndWait(b, offPad("arcadia", 0, 60)); // out of town: no firing in a safe zone
+    const carbine = WEAPON_BY_ID.get("carbine")!;
+    const tier = carbine.tiers[0]!;
+    a.char.hotbar[a.char.selected] = { id: "carbine", tier: 1, qty: 1, mag: 5 };
+    /**
+     * The reload each path starts: R with a part-used magazine (the server's clock is between the send
+     * and the moment the room shows it, so its length is bracketed), then the last round fired.
+     */
+    const paths = async () => {
+      a.reloadEndsAt = 0;
+      a.char.hotbar[a.char.selected]!.mag = 5;
+      const sent = Date.now();
+      b.send("reload", { slot: a.char.selected });
+      await waitFor(() => a.reloadEndsAt > 0);
+      const seen = Date.now();
+      const manual = { min: a.reloadEndsAt - seen, max: a.reloadEndsAt - sent };
+      a.reloadEndsAt = 0;
+      a.lastAttackAt = 0;
+      a.protectedUntil = 0; // a new character's spawn protection holds fire
+      a.char.hotbar[a.char.selected]!.mag = 1;
+      const now = Date.now();
+      expect(consumeAttack(a, carbine, tier, now)).toMatchObject({ ok: true });
+      return { manual, auto: a.reloadEndsAt - now };
+    };
+    const plain = await paths();
+    expect(plain.auto).toBe(reloadMs(carbine, tier, NEUTRAL_BUILD));
+    expect(plain.auto).toBe(1400);
+    expect(plain.manual.min).toBeLessThanOrEqual(1400);
+    expect(plain.manual.max).toBeGreaterThanOrEqual(1400);
+    b.send("admin", { cmd: "level", args: { level: 4 } });
+    await waitFor(() => tree(b)?.points === 3);
+    expect(await spend(b, "aim_steady")).toBeNull();
+    expect(await spend(b, "aim_quick_hands")).toBeNull();
+    const quick = await paths();
+    expect(quick.auto).toBeCloseTo(1400 * 0.7, 6);
+    expect(quick.manual.min).toBeLessThanOrEqual(980 + 1e-6);
+    expect(quick.manual.max).toBeGreaterThanOrEqual(980 - 1e-6);
   }, 20_000);
 
   it("loses the points with the level on death; the reborn character starts with none", async () => {

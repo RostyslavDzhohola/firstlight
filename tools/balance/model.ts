@@ -17,7 +17,7 @@ import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
 import { siteDiscoveryXp, WILD_SITES, type WildSiteDef } from "../../packages/shared/src/content/wildSites.ts";
 import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
 import { FROSTBLOOM, SPELL_BY_ID, spellDamage, wardShell, WISHFALL } from "../../packages/shared/src/content/spells.ts";
-import { BRANCHES, buildStats, NEUTRAL_BUILD, playerMaxHp, spendRefusal, TREE, weaponHeat, type BranchId, type BuildStats } from "../../packages/shared/src/content/tree.ts";
+import { BRANCHES, buildStats, NEUTRAL_BUILD, playerMaxHp, reloadMs, spendRefusal, TREE, weaponHeat, type BranchId, type BuildStats } from "../../packages/shared/src/content/tree.ts";
 
 // ------------------------------------------------------------------------------------ weapons
 
@@ -88,7 +88,7 @@ export function hitTimeline(def: WeaponDef, tierIndex: number, level: number, po
   const sealLvl = damageMult(level);
   const lvl = sealLvl * (def.cls === "melee" ? b.meleeDamage : def.cls === "ranged" ? b.rangedDamage : 1);
   const drawS = (tier.draw ?? 1) * b.draw;
-  const reloadS = (tier.reload ?? 1.5) * (def.cls === "ranged" ? b.reload : 1);
+  const reloadS = reloadMs(def, tier, b) / 1000;
   const heatCap = tier.heat === undefined ? undefined : weaponHeat(tier.heat, b);
   const hits: Hit[] = [];
   const round = (x: number) => Math.max(1, Math.round(x));

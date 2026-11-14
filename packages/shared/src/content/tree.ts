@@ -202,6 +202,16 @@ export function rollReady(times: readonly number[], now: number, cooldownMs: num
   return recent < Math.max(1, charges);
 }
 
+/**
+ * How long a reload takes (ms) for this weapon tier and build: the tier's time (1.5 s when unset),
+ * shortened by Quick Hands for ranged weapons. The only reload formula: the server's automatic
+ * reload (an empty magazine) and the manual one (R) both use it, and so do the agent kit and the
+ * balance model (build tree review 5).
+ */
+export function reloadMs(def: { cls: string }, tier: { reload?: number }, build: Pick<BuildStats, "reload">): number {
+  return (tier.reload ?? 1.5) * 1000 * (def.cls === "ranged" ? build.reload : 1);
+}
+
 /** Shots before a magic weapon overheats for this build (Cool Head): the tier's, stretched and rounded. */
 export function weaponHeat(heat: number, build: Pick<BuildStats, "heat">): number {
   return Math.round(heat * build.heat);

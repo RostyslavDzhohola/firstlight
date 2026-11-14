@@ -3,7 +3,7 @@
 // blocking, burn, healing. The room calls these from message handlers and the tick.
 
 import { damageMult, falloff, REGEN, splashFalloff } from "@firstlight/shared/content/progression";
-import { BLOCK_CAP, buildStats, playerMaxHp, weaponHeat } from "@firstlight/shared/content/tree";
+import { BLOCK_CAP, buildStats, playerMaxHp, reloadMs, weaponHeat } from "@firstlight/shared/content/tree";
 import { WEAPONS, WEAPON_BY_ID, WEAPON_INDEX, type Destroys, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import type { Terrain } from "@firstlight/shared";
 import { NET } from "@firstlight/shared/net/protocol";
@@ -310,18 +310,18 @@ export function consumeAttack(p: PlayerActor, def: WeaponDef, tier: TierStats, n
   if (now < p.overheatUntil) return { ok: false, reason: "overheated" };
   const item = p.char.hotbar[p.char.selected];
   const build = buildStats(p.char.tree);
-  const reloadMs = (tier.reload ?? 1.5) * 1000 * (def.cls === "ranged" ? build.reload : 1); // Quick Hands (tree)
+  const reload = reloadMs(def, tier, build); // Quick Hands (tree)
   if (tier.mag !== undefined && item) {
     const mag = item.mag ?? tier.mag;
     if (mag <= 0) {
-      p.reloadEndsAt = now + reloadMs;
+      p.reloadEndsAt = now + reload;
       item.mag = tier.mag;
       p.youDirty = true;
       return { ok: false, reason: "empty" };
     }
     item.mag = mag - 1;
     if (item.mag <= 0) {
-      p.reloadEndsAt = now + reloadMs;
+      p.reloadEndsAt = now + reload;
       item.mag = tier.mag;
       p.youDirty = true;
     } else p.youLazy = true; // the ammo readout catches up within ~0.4 s, not one full 'you' per shot

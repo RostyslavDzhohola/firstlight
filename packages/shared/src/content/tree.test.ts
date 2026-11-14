@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { maxHp } from "./progression.ts";
 import { STARTER_STATS, starterStats } from "./starters.ts";
-import { BRANCHES, buildStats, NEUTRAL_BUILD, nodeLine, normalizeTree, playerMaxHp, pointsLeft, respecCost, ROLL_GAP_MS, rollReady, spendRefusal, spentPoints, TREE, treePoints, treeYou } from "./tree.ts";
+import { BRANCHES, buildStats, NEUTRAL_BUILD, nodeLine, normalizeTree, playerMaxHp, pointsLeft, reloadMs, respecCost, ROLL_GAP_MS, rollReady, spendRefusal, spentPoints, TREE, treePoints, treeYou } from "./tree.ts";
 
 describe("build tree (#81)", () => {
   it("has five branches, rows from 1 with costs 1, 2, 3, 3, and about half the tree at level 20", () => {
@@ -62,5 +62,13 @@ describe("build tree (#81)", () => {
     expect(rollReady([1000 - ROLL_GAP_MS + 1], 1000, 1200, 2)).toBe(false);
     expect(rollReady([1000 - ROLL_GAP_MS], 1000, 1200, 2)).toBe(true);
     expect(rollReady([-300, 1000 - ROLL_GAP_MS + 1], 1000, 1200, 2)).toBe(false);
+  });
+
+  it("one reload time for every path: the tier's, Quick Hands cuts it for ranged weapons only", () => {
+    const quick = buildStats(["aim_steady", "aim_quick_hands"]);
+    expect(reloadMs({ cls: "ranged" }, { reload: 1.4 }, NEUTRAL_BUILD)).toBe(1400);
+    expect(reloadMs({ cls: "ranged" }, { reload: 1.4 }, quick)).toBeCloseTo(980, 6);
+    expect(reloadMs({ cls: "ranged" }, {}, quick)).toBeCloseTo(1050, 6); // unset: 1.5 s
+    expect(reloadMs({ cls: "magic" }, { reload: 1.4 }, quick)).toBe(1400);
   });
 });
