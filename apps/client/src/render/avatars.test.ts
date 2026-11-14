@@ -425,3 +425,28 @@ describe("character textures follow the tier up (D-load-6)", () => {
     expect(loads).toBe(1);
   });
 });
+
+describe("the own avatar after a Skipstep (#78)", () => {
+  it("a blink's 10 m move doesn't rez it in or spike its ground speed; an unannounced jump that far does", () => {
+    const dt = 1 / 60;
+    const a = new mod.AvatarView(0, 0);
+    const b = new mod.AvatarView(0, 0);
+    for (const v of [a, b]) for (let i = 0; i < 30; i++) v.set(at(i * 0.1).x, at(i * 0.1).y, at(i * 0.1).z, 1, 0, 0, ANIM.RUN, dt);
+    const to = at(13);
+    a.blinked();
+    a.set(to.x, to.y, to.z, 1, 0, 0, ANIM.RUN, dt);
+    b.set(to.x, to.y, to.z, 1, 0, 0, ANIM.RUN, dt);
+    expect(a.rezzing).toBe(false);
+    expect(a.groundSpeed).toBeLessThan(7);
+    expect(b.rezzing).toBe(true); // fast travel, a rebirth: it materialises
+    a.dispose();
+    b.dispose();
+  });
+
+  it("a hop's way down keeps the jump clip while it runs; the fall's flail only after it (fallClip)", () => {
+    expect(mod.fallClip("jump_air", true)).toBe("jump_air");
+    expect(mod.fallClip("jump_air", false)).toBe("fall");
+    expect(mod.fallClip("run", true)).toBe("fall"); // off a ledge: no jump to keep
+    expect(mod.fallClip("fall", true)).toBe("fall");
+  });
+});

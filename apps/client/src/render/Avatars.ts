@@ -194,6 +194,15 @@ function headCutOf(model: THREE.Object3D, head: THREE.Object3D): { centre: THREE
 /** A move of more than this in one frame is a teleport (m): the fastest horse covers under 1 m. */
 export const TELEPORT_M = 8;
 
+/**
+ * The clip for ANIM.FALL given the clip playing now: a hop's way down keeps the jump clip while it
+ * still runs (it reaches its landing as a 0.73 s hop lands); the long fall's flail only once it has
+ * run out, or off a ledge with no jump (#78: every hop flailed from its top).
+ */
+export function fallClip(current: string, running: boolean): "jump_air" | "fall" {
+  return current === "jump_air" && running ? "jump_air" : "fall";
+}
+
 type Lod = "full" | "mid" | "far";
 const byRezDist = (p: AvatarView, q: AvatarView) => p.rezDist - q.rezDist;
 
@@ -896,7 +905,7 @@ export class AvatarView {
       case ANIM.JUMP: name = "jump_air"; break;
       // A hop's way down keeps the jump clip (it reaches its landing as a 0.73 s hop lands); the long
       // fall's flail only once the clip has run out, off a ledge (#78: every hop flailed half-way).
-      case ANIM.FALL: name = this.currentName === "jump_air" && !!this.current?.isRunning() ? "jump_air" : "fall"; break;
+      case ANIM.FALL: name = fallClip(this.currentName, !!this.current?.isRunning()); break;
       case ANIM.SWIM:
         if (sp > 0.6) { name = "swim"; ts = clamp(sp / CLIP_SPEED.swim!, 0.7, 1.6); } else name = "swim_idle";
         break;

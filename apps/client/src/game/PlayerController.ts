@@ -305,6 +305,20 @@ export class PlayerController {
     this.fallStartRadius = this.pos.length();
   }
 
+  /**
+   * After a blink the server placed (Skipstep: its `correct` came first and stopped the body): move on
+   * with `vel`, the velocity from before it, along the new ground, and keep a jump that was still
+   * rising (#78: the hop was cut off 26 ms in and the body dropped where it landed). A fall's speed
+   * is not kept (the blink put the feet on the ground there).
+   */
+  resumeAfterBlink(vel: THREE.Vector3) {
+    const up = _up.copy(this.pos).normalize();
+    const along = vel.dot(up);
+    const rise = Math.max(0, along);
+    this.vel.copy(vel).addScaledVector(up, rise - along);
+    if (rise > 0) this.onGround = false;
+  }
+
   /** Place the player (arrival, travel, respawn): the camera faces the body's reference direction. */
   teleport(x: number, y: number, z: number) {
     this.pos.set(x, y, z);

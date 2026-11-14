@@ -865,3 +865,51 @@ describe("the camera and the controller ease by time, not by frames (review B2)"
     expect(slow.facingDot).toBeCloseTo(fast.facingDot, 1);
   });
 });
+
+describe("a Skipstep in the middle of a jump (#78)", () => {
+  /** Jump while running; `blinkAt` seconds in, the server's correct puts us 10 m ahead (it stops the body). */
+  function hop(blinkAt: number | null) {
+    const pc = spawn();
+    const input = fakeInput(["KeyW"]);
+    run(pc, input, 0.3);
+    input.pressed.add("Space");
+    pc.update(1 / 60, input, false);
+    input.pressed.clear();
+    let air = 1 / 60;
+    let peak = pc.pos.length();
+    let blinked = blinkAt === null;
+    for (let i = 0; i < 180 && !pc.onGround; i++) {
+      if (!blinked && air >= blinkAt!) {
+        blinked = true;
+        const before = pc.vel.clone(); // SpellClient keeps the velocity from the frame before the blink
+        const to = pc.pos.clone().add(new THREE.Vector3(0, 0, 10)).setLength(pc.pos.length());
+        pc.correct(to.x, to.y, to.z);
+        expect(pc.vel.length()).toBe(0);
+        pc.resumeAfterBlink(before);
+      }
+      pc.update(1 / 60, input, false);
+      air += 1 / 60;
+      peak = Math.max(peak, pc.pos.length());
+    }
+    return { pc, air, peak: peak - R };
+  }
+
+  it("a jump still rising keeps rising: it lasts and peaks like one without the blink", () => {
+    const plain = hop(null);
+    const blink = hop(0.026); // measured in the browser: the correct came 26 ms into the jump
+    expect(plain.air).toBeGreaterThan(0.5);
+    expect(blink.air).toBeGreaterThan(plain.air - 0.05);
+    expect(blink.peak).toBeGreaterThan(plain.peak * 0.9);
+    // ...and the run goes on along the ground (the forward speed from before the blink).
+    expect(blink.pc.vel.z).toBeGreaterThan(3);
+  });
+
+  it("on the way down the blink keeps the run but not the fall's speed", () => {
+    const pc = spawn();
+    pc.vel.set(0, -6, 5); // falling and running forward
+    pc.resumeAfterBlink(pc.vel.clone());
+    expect(pc.vel.y).toBeCloseTo(0, 9);
+    expect(pc.vel.z).toBeCloseTo(5, 9);
+    expect(pc.onGround).toBe(true);
+  });
+});
