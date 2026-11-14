@@ -6,7 +6,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AgentError, FirstlightAgent, type ActionResult, type MoveTarget } from "@firstlight/agent-kit";
+import { AgentError, FirstlightAgent, type ActionResult, type ConnectOptions, type MoveTarget } from "@firstlight/agent-kit";
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { MISSIONS, isTrialType } from "@firstlight/shared/content/missions";
 import { SPELL_IDS, SPELLS } from "@firstlight/shared/content/spells";
@@ -67,13 +67,37 @@ export function checkArgs(schema: Schema, args: unknown): string | null {
   return null;
 }
 
-/** One character per process. */
+/** One character: per process locally, per seat on the server's gateway. */
 export class Session {
   agent: FirstlightAgent | null = null;
   readonly log: (line: string) => void;
+  /** The tools this session answers to (the gateway swaps in its own join). */
+  tools: ReadonlyMap<string, ToolDef> = TOOL_BY_NAME;
+  /** Calls in flight or queued (the gateway's idle timer doesn't run while one is). */
+  busy = 0;
+  private chain: Promise<unknown> = Promise.resolve();
 
   constructor(log: (line: string) => void = () => {}) {
     this.log = log;
+  }
+
+  /**
+   * Run a tool, one at a time and in order: a character does one thing at a time. `firstlight_stop`
+   * jumps the queue, so it can interrupt the walk or the fight in progress.
+   */
+  call(name: string, args: unknown): Promise<Record<string, unknown>> {
+    const run = async () => {
+      this.busy++;
+      try {
+        return await callTool(this, name, args);
+      } finally {
+        this.busy--;
+      }
+    };
+    if (name === "firstlight_stop") return run();
+    const next = this.chain.then(run, run);
+    this.chain = next.catch(() => {});
+    return next;
   }
 
   /** The status line and fresh events every action result carries. */
@@ -103,6 +127,25 @@ function sessionFile(url: string, name: string): string | undefined {
   return join(process.env.FL_AGENT_HOME ?? join(homedir(), ".firstlight", "agents"), `${host}-${name.replace(/[^A-Za-z0-9_]+/g, "_") || "agent"}.json`);
 }
 
+/**
+ * Put the session's character in the world (every `firstlight_join` ends here): refused while one
+ * plays; on success the first look around comes with the result.
+ */
+export async function joinWith(s: Session, opts: ConnectOptions): Promise<Record<string, unknown>> {
+  if (s.agent && (s.agent.status === "playing" || s.agent.status === "reconnecting")) return { ok: false, reason: "already playing", hint: "firstlight_leave first to join again", ...s.status() };
+  const agent = new FirstlightAgent();
+  try {
+    const r = await agent.connect({ log: s.log, ...opts });
+    s.agent = agent;
+    // The first private state arrives a moment after the join.
+    for (let i = 0; i < 40 && agent.observe({ peek: true }).self.maxHp === 0; i++) await new Promise((ok) => setTimeout(ok, 50));
+    return { ...r, look: agent.observe().summary };
+  } catch (e) {
+    await agent.close().catch(() => {});
+    return { ok: false, reason: e instanceof AgentError ? e.code : "join failed", hint: (e as Error).message };
+  }
+}
+
 const act = async (s: Session, r: Promise<ActionResult>): Promise<Record<string, unknown>> => ({ ...(await r), ...s.status() });
 
 export const TOOLS: readonly ToolDef[] = [
@@ -124,31 +167,19 @@ export const TOOLS: readonly ToolDef[] = [
       },
     },
     async run(s, a) {
-      if (s.agent && (s.agent.status === "playing" || s.agent.status === "reconnecting")) return { ok: false, reason: "already playing", hint: "firstlight_leave first to join again", ...s.status() };
       const url = (a.url ?? process.env.FL_URL ?? "http://localhost:2567") as string;
       const name = (a.name ?? process.env.FL_AGENT_NAME) as string | undefined;
       const dev = a.dev ?? process.env.FL_DEV === "1";
-      const agent = new FirstlightAgent();
-      try {
-        const r = await agent.connect({
-          url,
-          authUrl: (a.authUrl ?? process.env.FL_AUTH_URL) as string | undefined,
-          authOrigin: process.env.FL_AUTH_ORIGIN,
-          name,
-          starter: (a.starter ?? "unit7") as string,
-          body: a.body as BodyId | undefined,
-          // A dev identity is its id: the name's (so the same name is the same character), or a new one each run.
-          ...(dev ? { token: `dev:${name ? name.toLowerCase() : `agent${Math.random().toString(36).slice(2, 8)}`}:${name ?? "Agent"}` } : { sessionFile: sessionFile(url, name ?? "agent") }),
-          log: s.log,
-        });
-        s.agent = agent;
-        // The first private state arrives a moment after the join.
-        for (let i = 0; i < 40 && agent.observe({ peek: true }).self.maxHp === 0; i++) await new Promise((ok) => setTimeout(ok, 50));
-        return { ...r, look: agent.observe().summary };
-      } catch (e) {
-        await agent.close().catch(() => {});
-        return { ok: false, reason: e instanceof AgentError ? e.code : "join failed", hint: (e as Error).message };
-      }
+      return joinWith(s, {
+        url,
+        authUrl: (a.authUrl ?? process.env.FL_AUTH_URL) as string | undefined,
+        authOrigin: process.env.FL_AUTH_ORIGIN,
+        name,
+        starter: (a.starter ?? "unit7") as string,
+        body: a.body as BodyId | undefined,
+        // A dev identity is its id: the name's (so the same name is the same character), or a new one each run.
+        ...(dev ? { token: `dev:${name ? name.toLowerCase() : `agent${Math.random().toString(36).slice(2, 8)}`}:${name ?? "Agent"}` } : { sessionFile: sessionFile(url, name ?? "agent") }),
+      });
     },
   },
   {
@@ -392,10 +423,15 @@ export const TOOLS: readonly ToolDef[] = [
 
 export const TOOL_BY_NAME: ReadonlyMap<string, ToolDef> = new Map(TOOLS.map((t) => [t.name, t]));
 
+/** The same tools with another `firstlight_join` (the server's gateway: no url, no dev tokens). */
+export function withJoin(join: ToolDef): ReadonlyMap<string, ToolDef> {
+  return new Map(TOOLS.map((t) => (t.name === "firstlight_join" ? [t.name, join] : [t.name, t])));
+}
+
 /** Run a tool by name with unchecked arguments: validates, guards, never throws. */
 export async function callTool(s: Session, name: string, args: unknown): Promise<Record<string, unknown>> {
-  const tool = TOOL_BY_NAME.get(name);
-  if (!tool) return { ok: false, reason: "unknown tool", hint: `tools: ${TOOLS.map((t) => t.name).join(", ")}` };
+  const tool = s.tools.get(name);
+  if (!tool) return { ok: false, reason: "unknown tool", hint: `tools: ${[...s.tools.keys()].join(", ")}` };
   const bad = checkArgs(tool.inputSchema, args);
   if (bad) return { ok: false, reason: "bad arguments", hint: bad };
   if (tool.needsAgent && !s.agent) return { ok: false, reason: "not in the game", hint: "call firstlight_join first" };

@@ -33,7 +33,6 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 /** The bridge's request handler (exported for the tests). */
 export function bridge(session: Session, onQuit: () => void = () => {}) {
-  let chain: Promise<unknown> = Promise.resolve();
   return async (req: IncomingMessage, res: ServerResponse) => {
     const send = (status: number, body: unknown) => {
       const text = JSON.stringify(body);
@@ -70,9 +69,7 @@ export function bridge(session: Session, onQuit: () => void = () => {}) {
         }
       }
       // One action at a time, in order; stop jumps the queue to interrupt a walk or a fight.
-      const call = () => callTool(session, name, args);
-      const result = name === "firstlight_stop" ? call() : (chain = chain.then(call, call));
-      const r = (await result) as Record<string, unknown>;
+      const r = await session.call(name, args);
       return send(r.reason === "unknown tool" ? 404 : 200, r);
     } catch (e) {
       return send(500, { ok: false, reason: "error", hint: (e as Error).message });

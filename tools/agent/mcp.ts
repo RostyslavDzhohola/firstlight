@@ -10,16 +10,31 @@
 // (where guest sessions are kept; default ~/.firstlight/agents), FL_AGENT_SESSION=none (don't keep one).
 
 import { createInterface } from "node:readline";
-import { callTool, PLAYBOOK, Session, TOOLS } from "./tools.ts";
+import { PLAYBOOK, Session, type ToolDef } from "./tools.ts";
 
 export const MCP_PROTOCOL = "2025-06-18";
-const SUPPORTED = new Set(["2024-11-05", "2025-03-26", "2025-06-18"]);
+/** Versions with the `initialize` handshake ("legacy" since 2026-07-28) this server speaks. */
+export const LEGACY_VERSIONS: readonly string[] = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+const SUPPORTED = new Set(LEGACY_VERSIONS);
+export const SERVER_INFO = { name: "firstlight-agent", title: "FIRSTLIGHT (play the game)", version: "1.1.0" };
 
 interface Rpc {
   jsonrpc?: string;
   id?: string | number | null;
   method?: string;
   params?: Record<string, unknown>;
+}
+
+/** Tools as MCP lists them. */
+export function toolList(tools: readonly ToolDef[]): Record<string, unknown>[] {
+  return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+}
+
+/** A tool's result as an MCP CallToolResult: the summary reads better as text than inside JSON. */
+export function toolContent(r: Record<string, unknown>): { content: { type: "text"; text: string }[]; isError: boolean } {
+  const { summary, look, ...rest } = r as { summary?: string; look?: string } & Record<string, unknown>;
+  const text = [summary ?? look, Object.keys(rest).length > 1 || rest.ok !== true ? JSON.stringify(rest) : null].filter(Boolean).join("\n");
+  return { content: [{ type: "text", text: text || JSON.stringify(rest) }], isError: r.ok === false };
 }
 
 /** Answer one JSON-RPC message (null for notifications). Exported for the tests. */
@@ -34,21 +49,17 @@ export async function handleRpc(session: Session, msg: Rpc): Promise<Record<stri
       return reply({
         protocolVersion: SUPPORTED.has(asked) ? asked : MCP_PROTOCOL,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "firstlight-agent", title: "FIRSTLIGHT (play the game)", version: "1.0.0" },
+        serverInfo: SERVER_INFO,
         instructions: PLAYBOOK,
       });
     }
     case "ping":
       return reply({});
     case "tools/list":
-      return reply({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+      return reply({ tools: toolList([...session.tools.values()]) });
     case "tools/call": {
       const name = String(msg.params?.name ?? "");
-      const r = await callTool(session, name, msg.params?.arguments);
-      // The summary reads better as text than inside JSON.
-      const { summary, look, ...rest } = r as { summary?: string; look?: string } & Record<string, unknown>;
-      const text = [summary ?? look, Object.keys(rest).length > 1 || rest.ok !== true ? JSON.stringify(rest) : null].filter(Boolean).join("\n");
-      return reply({ content: [{ type: "text", text: text || JSON.stringify(rest) }], isError: r.ok === false });
+      return reply(toolContent(await session.call(name, msg.params?.arguments)));
     }
     case "resources/list":
       return reply({ resources: [] });
@@ -83,8 +94,7 @@ async function main() {
   const session = new Session((line) => process.stderr.write(`[firstlight] ${line}\n`));
   const out = (m: unknown) => process.stdout.write(`${JSON.stringify(m)}\n`);
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  // One call at a time, in order: a character does one thing at a time.
-  let chain: Promise<void> = Promise.resolve();
+  // Tool calls run one at a time, in order (Session.call); the rest answer at once.
   rl.on("line", (line) => {
     if (!line.trim()) return;
     const parsed = parseRpc(line);
@@ -93,14 +103,9 @@ async function main() {
       return;
     }
     const msg = parsed.msg;
-    // firstlight_stop must be able to interrupt a walk or a fight in progress.
-    const urgent = msg.method === "tools/call" && msg.params?.name === "firstlight_stop";
-    const run = async () => {
-      const r = await handleRpc(session, msg).catch((e: unknown) => ({ jsonrpc: "2.0", id: msg.id ?? null, error: { code: -32603, message: (e as Error).message } }));
-      if (r) out(r);
-    };
-    if (urgent || msg.method !== "tools/call") void run();
-    else chain = chain.then(run);
+    void handleRpc(session, msg)
+      .catch((e: unknown) => ({ jsonrpc: "2.0", id: msg.id ?? null, error: { code: -32603, message: (e as Error).message } }))
+      .then((r) => r && out(r));
   });
   const bye = async () => {
     await session.agent?.close().catch(() => {});

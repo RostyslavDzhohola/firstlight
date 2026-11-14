@@ -21,6 +21,8 @@ import { BOT_BUDGET, BOT_SEAT_KEY, botBudget } from "./world/botBudget.ts";
 import { botSecretFromEnv, checkToolSecret, resetToolGuesses } from "./auth/loadtest.ts";
 import { createPlayGate, playBodyRefusal } from "./world/playGate.ts";
 import type { VerifyContext } from "./auth/identity.ts";
+import { createGateway, mountAgentApi, type Gateway, type GatewayOptions } from "./agents/gateway.ts";
+import { mountMcp } from "./agents/mcpHttp.ts";
 
 export interface GameOptions {
   port: number;
@@ -38,6 +40,8 @@ export interface GameOptions {
   revalidate?: (userId: string, sessionId?: string) => string | null;
   /** Production: no loopback exemptions from per-address limits (D-security-3, D-security-4). */
   production?: boolean;
+  /** The hosted agent gateway (/mcp, /api/agent; D-agents-gw-1): how its seats sign in, or false for none. */
+  gateway?: Omit<GatewayOptions, "loopback"> | false;
 }
 
 const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "::1"]);
@@ -307,6 +311,14 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     res.json({ rooms: stats, rssMB: Math.round(mem.rss / 1048576), heapMB: Math.round(mem.heapUsed / 1048576), cpuUserS: cpu.user / 1e6, cpuSystemS: cpu.system / 1e6, uptimeS: process.uptime() });
   });
 
+  // The agent gateway plays its seats through this very server, over loopback (its port is known once it listens).
+  let listening = opts.port;
+  const gateway: Gateway | null = opts.gateway === false ? null : createGateway({ ...opts.gateway, loopback: () => `http://127.0.0.1:${listening}` });
+  if (gateway) {
+    mountAgentApi(app, gateway, opts.allowedOrigins);
+    mountMcp(app, gateway, opts.allowedOrigins);
+  }
+
   opts.mountAfterJson?.(app);
 
   const transport = new WebSocketTransport({ server: httpServer, maxPayload: 16 * 1024 });
@@ -317,6 +329,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
   await gameServer.listen(opts.port);
   const address = httpServer.address();
   const port = typeof address === "object" && address ? address.port : opts.port;
+  listening = port;
 
   return {
     app,
@@ -324,6 +337,7 @@ export async function createGame(opts: GameOptions): Promise<Game> {
     gameServer,
     port,
     async close() {
+      await gateway?.close();
       await gameServer.gracefullyShutdown(false).catch(() => {});
       await new Promise<void>((r) => httpServer.close(() => r()));
     },

@@ -51,6 +51,10 @@ export const env = {
   /** Agents playing at once from one address, and in one room copy (D-agents-3). */
   agentsPerIp: num("AGENTS_PER_IP", 4),
   agentsPerRoom: num("AGENTS_PER_ROOM", 8),
+  /** The hosted agent gateway (/mcp, /api/agent; D-agents-gw-1): seats it plays at once (0 = off), and
+   *  how long a seat may go without a call before it is closed. It follows AGENTS_ENABLED. */
+  agentGatewaySeats: num("AGENT_GATEWAY_SEATS", 16),
+  agentGatewayIdleS: num("AGENT_GATEWAY_IDLE_S", 600),
 };
 
 /**

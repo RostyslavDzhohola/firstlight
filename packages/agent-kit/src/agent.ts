@@ -60,6 +60,11 @@ export interface ConnectOptions {
   sessionFile?: string;
   /** One line per notable thing (joins, reconnects), for the caller's log. */
   log?: (line: string) => void;
+  /**
+   * Extra headers on every HTTP request the kit makes (sign-in, name, /api/play). The server's own
+   * gateway (apps/server/src/agents) uses them to say which address a seat is played from.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface ActionResult {
@@ -229,12 +234,18 @@ export class FirstlightAgent {
     if (opts.token) this.tokens = fixedToken(opts.token);
     else if (opts.dev) this.tokens = fixedToken(`dev:agent${Math.random().toString(36).slice(2, 10)}:${opts.name ?? "Agent"}`);
     else {
-      this.tokens = guestSession(opts.authUrl ?? this.url, opts.sessionFile, opts.authOrigin, (why) => {
-        this.newGuest = true;
-        this.log(why);
-      });
+      this.tokens = guestSession(
+        opts.authUrl ?? this.url,
+        opts.sessionFile,
+        opts.authOrigin,
+        (why) => {
+          this.newGuest = true;
+          this.log(why);
+        },
+        opts.headers,
+      );
       if (opts.name) {
-        const r = await claimName(this.url, await this.tokens.get(), opts.name);
+        const r = await claimName(this.url, await this.tokens.get(), opts.name, opts.headers);
         if (!r.ok) nameNote = `name not set: ${r.message}`;
       }
     }
@@ -265,7 +276,7 @@ export class FirstlightAgent {
       const token = await tokens.get(fresh, sameSession);
       const res = await fetch(`${this.url}/api/play`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", [AGENT_HEADER]: "1" },
+        headers: { ...this.opts?.headers, Authorization: `Bearer ${token}`, "Content-Type": "application/json", [AGENT_HEADER]: "1" },
         body: JSON.stringify({ body, v: PROTOCOL_VERSION, starter: this.starter, palette: this.opts?.palette ?? 0, look: this.opts?.look ?? 0, agent: true }),
         signal: AbortSignal.timeout(20_000),
       });
