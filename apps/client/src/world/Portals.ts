@@ -312,7 +312,8 @@ export class Portals {
   }
 }
 
-function makeLabel(text: string, color: number): THREE.Sprite {
+/** A floating world label (white text with a coloured glow) on a sprite 6 × 1.1 m; the caller owns its disposal. */
+export function makeLabel(text: string, color: number): THREE.Sprite {
   const c = document.createElement("canvas");
   c.width = 512;
   c.height = 96;

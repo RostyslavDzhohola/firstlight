@@ -1255,7 +1255,7 @@ function makeCommands(player: Player, consoleErrors: string[]): { commands: Reco
     step: { usage: "step", help: "local only: do the current tutorial step with real input; says what its card asked and how long it took", run: step },
     tutorial: {
       usage: "tutorial [all]",
-      help: "local only: every tutorial step in turn up to the portal (`all`: walk into the Arcadia portal too); one line per step",
+      help: "local only: every tutorial step in turn (it ends in the plaza since #68; `portal arcadia` walks on); one line per step",
       async run([all]) {
         localOnly("the tutorial macros (they hit training dummies)");
         const lines: string[] = [];

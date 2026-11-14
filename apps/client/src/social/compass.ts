@@ -1,8 +1,12 @@
 // Compass strip at the top of the HUD: N/E/S/W relative to the camera, party members on the same
 // body, the way back to safety while you're outside safe zones (the nearest pad's 12 m ring, or on
-// Portus the nearest town gate: shared zones.ts), and your waypoint (ui/waypoint.ts) with its distance.
+// Portus the nearest town gate: shared zones.ts), the nearest pad (on Portus: the plaza, home), your
+// waypoint (ui/waypoint.ts), and markers other systems add (`compassGuides`: the tracked mission, the
+// tutorial's next place), each with its distance (#70). Turning until a marker sits under the caret
+// faces it.
 
-import { BODIES, nearestSafeEntry, type BodyId } from "@firstlight/shared";
+import { BODIES, nearestSafeEntry, padDirs, type BodyId } from "@firstlight/shared";
+import { placeDir } from "@firstlight/shared/content/places";
 import { el } from "./dom.ts";
 import { bearingTo, headingOf, stripX, surfaceDistance, type V3 } from "./compassMath.ts";
 
@@ -16,15 +20,27 @@ export interface CompassMarker {
   label: string;
   colour: string;
   pos: V3;
+  /** Party member (default), a guide (the tutorial's next place), the tracked mission or the nearest pad. */
+  kind?: "party" | "guide" | "mission" | "home";
 }
+
+/**
+ * Compass markers from other systems (#68, #70): the tutorial's way, the tracked mission. Each source
+ * returns its markers every frame; SocialUi adds them to the party's.
+ */
+export const compassGuides = new Set<() => CompassMarker[]>();
 
 export class Compass {
   readonly root = el("div", "fl-compass");
   private readonly ticks: HTMLElement[] = [];
   private readonly cards: { deg: number; e: HTMLElement }[] = [];
-  private readonly markers = new Map<string, { e: HTMLElement; dot: HTMLElement; text: HTMLElement }>();
+  private readonly markers = new Map<string, { e: HTMLElement; dot: HTMLElement; text: HTMLElement; label: string }>();
   private readonly pad = el("div", "mk pad");
   private readonly padText: HTMLElement;
+  /** The nearest pad (on Portus, the plaza: home), hidden when you stand on it. */
+  private readonly home = el("div", "mk home");
+  private readonly homeText: HTMLElement;
+  private homeLabel = "";
   private readonly wp = el("div", "mk wp");
   private readonly wpText: HTMLElement;
   private wpLabel = "";
@@ -46,6 +62,10 @@ export class Compass {
     el("i", "", this.pad);
     this.padText = el("span", "", this.pad);
     this.root.appendChild(this.pad);
+    this.home.dataset.e2e = "compass-home";
+    el("i", "", this.home);
+    this.homeText = el("span", "", this.home);
+    this.root.appendChild(this.home);
     this.wp.dataset.e2e = "compass-waypoint";
     this.wp.style.display = "none";
     el("i", "", this.wp);
@@ -89,6 +109,32 @@ export class Compass {
       this.padText.textContent = `SAFE ${Math.max(0, Math.round(surfaceDistance(pos, target, R) - entry.edge))} m`;
     }
 
+    // Home: the nearest pad on a planet, the plaza on Portus; always shown (pinned at the strip's end
+    // when it's behind you) unless you're standing on it.
+    {
+      const R = def.radius;
+      const dirs = def.terrain.kind === "hub" ? [placeDir("portus_plaza")] : padDirs(def);
+      const up = Math.hypot(pos[0], pos[1], pos[2]) || 1;
+      let best = dirs[0]!;
+      let bestDot = -Infinity;
+      for (const d of dirs) {
+        const k = (d[0] * pos[0] + d[1] * pos[1] + d[2] * pos[2]) / up;
+        if (k > bestDot) {
+          bestDot = k;
+          best = d;
+        }
+      }
+      const target: V3 = [best[0] * R, best[1] * R, best[2] * R];
+      const m = Math.round(surfaceDistance(pos, target, R));
+      const label = m <= 15 ? "" : `${def.terrain.kind === "hub" ? "HOME" : "PAD"} ${m} m`;
+      if (label !== this.homeLabel) {
+        this.homeLabel = label;
+        this.homeText.textContent = label;
+        this.home.style.display = label ? "" : "none";
+      }
+      if (label) this.home.classList.toggle("edge", place(this.home, bearingTo(pos, forward, target), false));
+    }
+
     // Waypoint: always shown, pinned to the strip's end when it's behind you.
     if (!waypoint) {
       if (this.wpLabel) {
@@ -106,21 +152,26 @@ export class Compass {
       }
     }
 
-    // Party members.
+    // Party members, then the other systems' markers (the tracked mission, the tutorial's way).
     const seen = new Set<string>();
     for (const m of markers) {
       seen.add(m.key);
       let v = this.markers.get(m.key);
       if (!v) {
-        const e = el("div", "mk", this.root);
+        const e = el("div", `mk${m.kind && m.kind !== "party" ? ` ${m.kind}` : ""}`, this.root);
+        if (m.kind && m.kind !== "party") e.dataset.e2e = `compass-${m.kind}`;
         const dot = el("i", "", e);
         const text = el("span", "", e);
-        v = { e, dot, text };
+        v = { e, dot, text, label: "" };
         this.markers.set(m.key, v);
       }
-      v.dot.style.background = m.colour;
+      if (v.dot.style.background !== m.colour) v.dot.style.background = m.colour;
       const dist = Math.round(Math.hypot(m.pos[0] - pos[0], m.pos[1] - pos[1], m.pos[2] - pos[2]));
-      v.text.textContent = `${m.label} ${dist} m`;
+      const label = `${m.label} ${dist > 50 ? Math.round(dist / 5) * 5 : dist} m`;
+      if (label !== v.label) {
+        v.label = label;
+        v.text.textContent = label;
+      }
       const clamped = place(v.e, bearingTo(pos, forward, m.pos), false);
       v.e.classList.toggle("edge", clamped);
     }

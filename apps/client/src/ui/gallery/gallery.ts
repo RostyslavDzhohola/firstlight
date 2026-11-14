@@ -494,8 +494,8 @@ async function run() {
     case "onboarding-loot":
     case "onboarding-portal":
     case "onboarding-done": {
-      // The live onboarding HUD: step 4 (sprint, bar half full), the dummies with their callout, the
-      // final portal pointer (after the payout, with Star/Fork), or the end card.
+      // The live onboarding HUD: step 4 (sprint, bar half full), the attack lesson with its way to a
+      // dummy, the last tip (after the payout), or the end card with its way to the Arcadia portal.
       gameEl.className = "fl-gallery-world";
       const hud = new Hud();
       hud.setIdentity("Wren_07", 3, 0);
@@ -503,17 +503,18 @@ async function run() {
       hud.setHp(100, 100);
       const onb = new OnboardingHud(hud.root.querySelector<HTMLElement>(".fl-hud__layer")!, () => {}, "https://github.com/example/firstlight", { expanded: q.has("expanded"), onExpanded: () => {} });
       const steps = new OnboardingSteps();
-      const sample = { dt: 0, moved: 0, lookRad: 0, anim: ANIM.IDLE as number, dummiesDown: 0, pressed: new Set<string>(), mapOpen: false, phrased: false, voiceOn: false, atPortal: false, inPortal: false };
+      const sample = { dt: 0, moved: 0, lookRad: 0, anim: ANIM.IDLE as number, trained: false, pressed: new Set<string>(), mapOpen: false, phrased: false, voiceOn: false, inPortal: false };
       for (const id of ["move", "look", "jump"] as const) steps.complete(id);
       steps.observe({ ...sample, dt: 1.1, anim: ANIM.SPRINT });
       if (screen !== "onboarding") for (const id of ["sprint", "dodge"] as const) steps.complete(id);
-      if (screen === "onboarding-attack") steps.observe({ ...sample, dummiesDown: 1 });
       if (screen === "onboarding-loot") for (const id of ["attack", "switch"] as const) steps.complete(id);
-      if (screen === "onboarding-portal") for (const id of ["attack", "switch", "pickup", "map", "wheel", "voice"] as const) steps.complete(id);
+      if (screen === "onboarding-portal") for (const id of ["attack", "switch", "pickup", "map"] as const) steps.complete(id);
       onb.render(steps, screen === "onboarding-portal");
-      if (screen === "onboarding-attack") onb.setCallout({ x: -0.18, y: 0.16, z: 0.5 }, "Training dummies · 1 / 3 down", "10 XP each. Three hits knock one down.");
-      if (screen === "onboarding-portal") onb.setCallout({ x: -0.4, y: 0.1, z: 0.5 }, "Arcadia", "Levels 1–7 · walk in");
-      if (screen === "onboarding-done") onb.showDone(50);
+      if (screen === "onboarding-attack") onb.setWay({ label: "Training dummy", deg: -35, metres: 9 });
+      if (screen === "onboarding-done") {
+        onb.showDone(50);
+        onb.setWay({ label: "Arcadia portal", deg: 60, metres: 24 });
+      }
       break;
     }
     case "kit-inventory":

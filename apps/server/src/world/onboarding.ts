@@ -1,8 +1,9 @@
 // Onboarding on Portus (SPEC §6.12, content.md §1.1, shared/content/onboarding.ts): offered once per
 // account to a brand-new character (level 1, never died), and kept through a rebirth until it ends (D-fixes-2). The client teaches move, look, jump,
-// sprint and dodge on its own (nothing is paid for those); the server counts hits on the three
-// training dummies from `train` messages (Portus town is a safe zone, so real attacks are refused there),
-// pays 10 XP per dummy and, when all three are down, 20 XP (a reborn trainee is topped up to the 50 total, D-fixes-4) and the Spark medal. Skipping ends it with
+// sprint and dodge on its own (nothing is paid for those); the attack lesson is one `train` swing
+// (#68; Portus town is a safe zone, so real attacks are refused there): it knocks down the dummy it
+// reaches, if any (10 XP), and completes the tutorial: the completion tops a level-1 trainee up to 50 XP
+// (D-fixes-4) and pays the Spark medal. Skipping ends it with
 // nothing more paid. Progress lives in account stats, so it survives reconnects and never repeats.
 // Every payout (the dummy's flag, the completion flag, the character's XP, the medal) commits in one
 // transaction (D26); the player hears about it only after the commit.
@@ -132,49 +133,45 @@ export class OnboardingSystem implements RoomSystem {
     return t.hits.every((h) => h >= ONBOARDING.HITS_PER_DUMMY);
   }
 
+  /** What the tutorial paid in all: the whole route once done (completionXp tops it up), else the dummies hit. */
   private paid(t: Trainee, done: boolean): number {
-    return t.hits.filter((h) => h >= ONBOARDING.HITS_PER_DUMMY).length * ONBOARDING.DUMMY_XP + (done ? ONBOARDING.DONE_XP : 0);
+    return done ? TUTORIAL_TOTAL_XP : t.hits.filter((h) => h >= ONBOARDING.HITS_PER_DUMMY).length * ONBOARDING.DUMMY_XP;
   }
 
-  /** A training attack: which dummy (if any) does the held weapon reach from where we stand? */
+  /**
+   * A training swing (#68): one left click finishes the tutorial's attack lesson. Any swing counts,
+   * anywhere on Portus, with anything in hand; when the held weapon reaches a dummy that dummy is
+   * knocked down too (one hit). The payout is the whole tutorial's at once (the dummy's 10 XP, if
+   * one was hit, and the completion topping a level-1 trainee up to 50 XP = level 2, D-fixes-4).
+   */
   train(c: Client, m: z.infer<typeof trainSchema>) {
     const a = this.room.playerById(c.sessionId);
     const t = a ? this.trainee(a) : undefined;
     if (!a || !t || a.dead || a.superseded) return;
     const { def, tier } = selectedWeapon(a);
-    if (def.delivery === "heal" || def.delivery === "bubble" || def.delivery === "none" || tier.level > a.char.level) return;
     const now = Date.now();
     if (now - t.lastAt < Math.max(ONBOARDING_RULES.MIN_GAP_MS, tier.rate * 1000 * 0.85)) return;
-    // Knocked-down dummies take no more hits while one still stands (a swing or a shot at a standing
-    // dummy used to land on a nearer or nearer-along-the-ray down one, e2e); with all down they do,
-    // so a failed completion can be retried.
-    const all = this.allDown(t);
-    const open = (i: number) => all || t.hits[i]! < ONBOARDING.HITS_PER_DUMMY;
-    const i = def.delivery === "melee" ? this.meleeTarget(a, m, def.range, def.arc ?? 90, open) : this.rayTarget(a, m, def.falloffTo ?? def.range, open);
-    if (i < 0) return;
     t.lastAt = now;
-    const was = t.hits[i]!;
-    t.hits[i] = Math.min(ONBOARDING.HITS_PER_DUMMY, was + 1);
+    const attacks = def.delivery !== "heal" && def.delivery !== "bubble" && def.delivery !== "none" && tier.level <= a.char.level;
+    const open = (i: number) => t.hits[i]! < ONBOARDING.HITS_PER_DUMMY;
+    const i = !attacks ? -1 : def.delivery === "melee" ? this.meleeTarget(a, m, def.range, def.arc ?? 90, open) : this.rayTarget(a, m, def.falloffTo ?? def.range, open);
+    const was = i >= 0 ? t.hits[i]! : 0;
+    if (i >= 0) t.hits[i] = ONBOARDING.HITS_PER_DUMMY;
     a.youDirty = true;
-    if (t.hits[i]! < ONBOARDING.HITS_PER_DUMMY || was >= ONBOARDING.HITS_PER_DUMMY) {
-      c.send("train", { dummy: i, hits: t.hits[i], down: t.hits[i]! >= ONBOARDING.HITS_PER_DUMMY });
-      if (was >= ONBOARDING.HITS_PER_DUMMY && this.allDown(t)) this.complete(a, t); // retry a failed completion
-      return;
-    }
-    // This hit knocks the dummy down: pay it (and the completion, if it was the last) or undo the hit.
-    const done = this.allDown(t);
-    const r = this.payout(a, i, done);
+    const r = this.payout(a, i >= 0 ? i : null, true);
     if (!r) {
-      t.hits[i] = was;
-      c.send("train", { dummy: i, hits: was, down: false });
+      // Nothing persisted: undo the hit; the next swing retries.
+      if (i >= 0) {
+        t.hits[i] = was;
+        c.send("train", { dummy: i, hits: was, down: false });
+      }
       return;
     }
     // Committed. A finished trainee is retired before anything that could still go wrong.
-    if (done) this.retire(a, t);
+    this.retire(a, t);
     r.show();
-    c.send("train", { dummy: i, hits: t.hits[i], down: true });
-    if (r.dummyXp) c.send("toast", { text: `Training dummy down · +${r.dummyXp} XP`, kind: "xp" });
-    if (done) this.ended(a, t, "done");
+    if (i >= 0) c.send("train", { dummy: i, hits: t.hits[i], down: true });
+    this.ended(a, t, "done");
   }
 
   /**

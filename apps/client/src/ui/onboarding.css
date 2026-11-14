@@ -7,7 +7,6 @@
 .fl-onb__step p .fl-key { vertical-align: 1px; }
 .fl-onb__step-k b { color: var(--hero-gold); }
 .fl-onb__done { display: flex; flex-wrap: wrap; gap: calc(.5 * var(--u)); }
-.fl-onb .fl-callout[hidden] { display: none; }
 
 /* Live HUD and gallery share the compact variant; the static kit example keeps its original layout. */
 /* Only the checklist scrolls: the current card stays whole above it while the list follows the step. */
@@ -35,13 +34,9 @@
 .fl-onb__st.is-moved > i { border-style: dashed; }
 .fl-onb__st.is-moved > i::after { content: ""; width: 6px; height: 1.5px; background: var(--fog-4); }
 
-/* World callout pinned to the screen edge (or beside the panel): an arrow towards its target. */
-.fl-callout__arrow { display: none; }
-.fl-onb .fl-callout.is-edge .fl-callout__line, .fl-onb .fl-callout.is-edge .fl-callout__dot { display: none; }
-.fl-onb .fl-callout.is-edge .fl-callout__arrow { display: block; position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; background: var(--photon-2); clip-path: polygon(0 15%, 100% 50%, 0 85%, 25% 50%); transform: rotate(var(--a, 0rad)); }
-.fl-onb .fl-callout.is-edge .fl-callout__box { left: 16px; top: -24px; }
-.fl-onb .fl-callout.is-edge.is-flip .fl-callout__box { left: auto; right: 16px; }
-.fl-onb .fl-callout.is-flip:not(.is-edge) .fl-callout__box { left: auto; right: 10px; }
-/* On a narrow screen a label that can't fit on either side wraps instead of running off the edge. */
-.fl-onb .fl-callout__box { width: max-content; white-space: normal; max-width: max(9rem, calc(100vw - var(--x) - 40px)); }
-.fl-onb .fl-callout.is-flip .fl-callout__box { max-width: max(9rem, calc(var(--x) - 40px)); }
+/* The way (#68): an arrow turned by the target's bearing (up = straight ahead), the place and its distance,
+   inside the card. The compass carries the same target. */
+.fl-onb__way { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: calc(.55 * var(--u)); padding: calc(.45 * var(--u)) calc(.6 * var(--u)); border: 1px solid rgba(196, 241, 255, .28); border-radius: var(--r-2); background: rgba(5, 10, 15, .45); }
+.fl-onb__way b { color: var(--photon); font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-onb__way .num { color: var(--paper); font: 600 var(--t-sm)/1 var(--font-mono); }
+.fl-onb__arrow { display: block; width: calc(1.5 * var(--u)); height: calc(1.5 * var(--u)); background: var(--photon); clip-path: polygon(50% 0, 100% 100%, 50% 74%, 0 100%); transform: rotate(var(--a, 0deg)); transition: transform 120ms linear; }

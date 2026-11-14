@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { attackDeniedText, holsteredText, immuneText, NoticeGate } from "./notices.ts";
-import { dummyCalloutSub, dummyTargets, nextDummy } from "./onboardingTargets.ts";
+import { dummyTargets, nextDummy } from "./onboardingTargets.ts";
 import { dummyDir } from "@firstlight/shared/content/onboarding";
 
 describe("attack refusal notices", () => {
@@ -69,14 +69,5 @@ describe("the dummy step's world marker (#31, Codex review)", () => {
     expect(nextDummy([false, false, true], near(2))).toBe(1);
     expect(nextDummy([true, false, true], near(0))).toBe(1);
     expect(nextDummy([true, true, true], near(1))).toBeNull();
-  });
-});
-
-describe("the dummy callout says how far the next dummy is (#31)", () => {
-  it("only the rules up close; the distance, rounded to 5 m, once the player is off", () => {
-    expect(dummyCalloutSub(4)).toBe("10 XP each. Three hits knock one down.");
-    expect(dummyCalloutSub(13)).toBe("15 m away · 10 XP each. Three hits knock one down.");
-    expect(dummyCalloutSub(88)).toBe("90 m away · 10 XP each. Three hits knock one down.");
-    expect(dummyCalloutSub(Number.NaN)).toBe("10 XP each. Three hits knock one down.");
   });
 });
