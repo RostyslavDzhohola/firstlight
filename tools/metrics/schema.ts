@@ -17,7 +17,7 @@
 // comparison refuses to call a partial, incompatible or busy-machine result better or worse.
 
 export const SCHEMA_VERSION = 2;
-export const GROUPS = ["static", "health", "tests", "load", "frame", "passes", "server"] as const;
+export const GROUPS = ["static", "health", "tests", "load", "frame", "passes", "server", "funnel"] as const;
 export type Group = (typeof GROUPS)[number];
 export type Better = "lower" | "higher";
 

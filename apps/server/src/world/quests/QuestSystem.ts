@@ -738,6 +738,7 @@ export class QuestSystem implements RoomSystem {
     a.youDirty = true;
     this.toast(a, `Mission accepted: ${def.name} — ${def.objective}`, "info");
     this.room.saveActor(a);
+    emitGameEvent(this.room, { type: "missionAccepted", playerId: a.id, missionId: id });
   }
 
   activeMissions(a: PlayerActor): { m: CharacterMission; def: MissionDef }[] {

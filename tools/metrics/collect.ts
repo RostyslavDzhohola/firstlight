@@ -8,7 +8,9 @@
 //   pnpm metrics --frame               + ?bench on every body at Medium (METRICS_TIER / --tier high)
 //   pnpm metrics --passes              + ?bench=passes per-pass GPU cost (WebGPU, ~15 min)
 //   pnpm metrics --server              + server tick time, CPU, memory, bytes at 1/25/50/80 bots
-//   pnpm metrics --all                 everything above
+//   pnpm metrics --funnel              + the #85 launch KPIs from a game.db (--funnel-db <path>, default
+//                                      apps/server/data/game.db, opened read-only) or a saved /stats?format=json (--funnel-json <file>)
+//   pnpm metrics --all                 everything above (the funnel only with --funnel-db/--funnel-json)
 //   pnpm metrics --only frame          just the named group(s), comma-separated
 //   pnpm metrics --repeat 3            run each group 3 times: medians, and noise from the spread
 //   pnpm metrics --compare a.json b.json [--skip <regex>] [--session-minutes 30]
@@ -187,6 +189,58 @@ function machine(): MetricsRun["machine"] {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------------------------------ groups
+
+interface FunnelKpiJson { id: string; unit: "share" | "s" | "ms"; value: number | null; den?: number }
+
+/**
+ * The #85 launch KPIs (docs/metrics.md §8): `funnel.<day|week|all>.<kpi>` from the server's own funnel
+ * (apps/server/src/db/funnel.ts). Shares are percent, times seconds or minutes. A KPI with no data is
+ * left out (and noted). Exact numbers: noise 0, but they move with real players, so never climb on them.
+ */
+export async function funnelGroup(ctx: Ctx): Promise<GroupResult> {
+  const o = new Out();
+  let kpis: Record<string, FunnelKpiJson[]>;
+  const jsonFile = ctx.args.opt("--funnel-json");
+  if (jsonFile) {
+    const j = ctx.readJson(jsonFile) as { funnel?: { kpis?: Record<string, FunnelKpiJson[]> } } | null;
+    if (!j?.funnel?.kpis) {
+      o.errors.push(`${jsonFile}: no funnel in it (save /stats?format=json from a server with the funnel)`);
+      return o.result();
+    }
+    kpis = j.funnel.kpis;
+  } else {
+    const dbPath = path.resolve(ctx.args.opt("--funnel-db", path.join(ROOT, "apps/server/data/game.db")));
+    if (!existsSync(dbPath)) {
+      o.errors.push(`funnel: ${dbPath} not found`);
+      return o.result();
+    }
+    const { createRequire } = await import("node:module");
+    const Database = createRequire(path.join(ROOT, "apps/server/package.json"))("better-sqlite3") as new (p: string, o: object) => { close(): void };
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const { funnelWindows } = (await import(path.join(ROOT, "apps/server/src/db/funnel.ts"))) as { funnelWindows: (db: unknown) => { kpis: Record<string, FunnelKpiJson[]> } };
+      kpis = funnelWindows(db).kpis;
+    } catch (e) {
+      o.errors.push(`funnel: ${(e as Error).message} (a game.db from before migration 11?)`);
+      return o.result();
+    } finally {
+      db.close();
+    }
+  }
+  for (const [win, list] of Object.entries(kpis)) {
+    for (const k of list) {
+      // A KPI nobody has reached yet has no value: it is left out, not reported as 0.
+      if (k.value === null) continue;
+      const lowerIsBetter = k.id === "crash_free" || k.id === "gets_in_s";
+      if (k.unit === "share") o.push(m("funnel", `funnel.${win}.${k.id}`, k.value * 100, "%", lowerIsBetter ? "lower" : "higher", 0));
+      else if (k.unit === "s") o.push(m("funnel", `funnel.${win}.${k.id}`, k.value, "s", "lower", 0));
+      else o.push(m("funnel", `funnel.${win}.${k.id.replace(/_ms$/, "_min")}`, k.value / 60_000, "min", "higher", 0));
+      if (k.den !== undefined) o.push(m("funnel", `funnel.${win}.${k.id}.n`, k.den, "subjects", "higher", 0));
+    }
+  }
+  if (!o.metrics.length) o.errors.push("funnel: no data yet");
+  return o.result();
+}
 
 /** Build time, every chunk's raw/gzip/brotli size, assets by kind, first-visit bytes, typecheck time. */
 export function staticGroup(ctx: Ctx): GroupResult {
@@ -617,6 +671,7 @@ async function runGroup(g: Group, ctx: Ctx): Promise<GroupResult> {
   if (g === "load") return loadGroup(ctx);
   if (g === "frame") return frameGroup(ctx);
   if (g === "passes") return passesGroup(ctx);
+  if (g === "funnel") return funnelGroup(ctx);
   return serverGroup(ctx);
 }
 
@@ -733,6 +788,7 @@ async function main() {
     if (has("--frame") || has("--all")) groups.push("frame");
     if (has("--passes") || has("--all")) groups.push("passes");
     if (has("--server") || has("--all")) groups.push("server");
+    if (has("--funnel") || (has("--all") && (has("--funnel-db") || has("--funnel-json")))) groups.push("funnel");
   }
   const repeat = Math.max(1, Number(opt("--repeat", "1")));
   const ctx = realCtx(args);

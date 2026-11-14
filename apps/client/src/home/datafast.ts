@@ -57,6 +57,7 @@ export function privacyText(s: DataFastScript | null): string[] | null {
       : "The home page counts visits with DataFast analytics, which sets cookies in your browser.",
     "We use the counts only to see how many people visit and how many are online now. No ads, nothing sold.",
     "The game itself keeps your guest character in this browser's storage so you can come back to it.",
+    "The game also tells our own server, never a third party, which first steps a visit reached (Play pressed, the world loaded and how long it took, the tutorial's steps) and any error the page hits, under a random id this browser keeps: nothing personal, only so we can fix what stops new players.",
     "Opting out below stops DataFast counting this browser, on this device, from your next visit on.",
   ];
 }

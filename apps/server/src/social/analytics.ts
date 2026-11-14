@@ -4,7 +4,9 @@
 // are never recorded.
 
 import type { PlayerActor } from "../world/actors.ts";
-import { sessionClient, sessionEnd, sessionStart, sessionUpdate } from "./store.ts";
+import { ACCOUNT_STEPS, accountSubject, recordStep, stepAt, type FunnelKind } from "../db/funnel.ts";
+import { funnelKind } from "../world/funnel.ts";
+import { currentDb, sessionClient, sessionEnd, sessionStart, sessionUpdate } from "./store.ts";
 
 export const ANALYTICS = {
   /** A player who comes back within this window continues the same session. */
@@ -28,6 +30,9 @@ interface Tracker {
   lastLeftAt: number | null;
   current: { sessionId: string; body: string; since: number; actor: PlayerActor; baseDeaths: number } | null;
   endTimer: ReturnType<typeof setTimeout> | null;
+  /** When the session started, and whose it is for the funnel (#85). */
+  startedAt: number;
+  kind: FunnelKind;
 }
 
 const trackers = new Map<string, Tracker>();
@@ -42,8 +47,9 @@ export function trackJoin(actor: PlayerActor, body: string, now = Date.now()): v
   }
   if (t?.current) closeCurrent(t, now);
   if (!t) {
-    t = { key: userId, logId: sessionStart(userId, now, !!actor.identity.agent), bodyTime: {}, deaths: 0, maxLevel: actor.char.level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null };
+    t = { key: userId, logId: sessionStart(userId, now, !!actor.identity.agent), bodyTime: {}, deaths: 0, maxLevel: actor.char.level, lastFlush: now, lastLeftAt: null, current: null, endTimer: null, startedAt: now, kind: funnelKind(actor.identity) };
     trackers.set(userId, t);
+    funnelReturn(t, now);
   }
   t.lastLeftAt = null;
   t.current = { sessionId: actor.id, body, since: now, actor, baseDeaths: actor.char.deaths };
@@ -142,5 +148,31 @@ function endTracker(t: Tracker, now = Date.now()): void {
   if (t.endTimer) clearTimeout(t.endTimer);
   t.endTimer = null;
   if (trackers.get(t.key) === t) trackers.delete(t.key);
-  sessionEnd(t.logId, { ...progress(t, now), endedAt: t.current ? now : (t.lastLeftAt ?? now) });
+  const endedAt = t.current ? now : (t.lastLeftAt ?? now);
+  sessionEnd(t.logId, { ...progress(t, now), endedAt });
+  // The funnel (#85): the account's first session and its length (the first one recorded wins).
+  funnelWrite(() => ({ subject: accountSubject(t.key), step: ACCOUNT_STEPS.firstSession, at: endedAt, value: Math.max(0, endedAt - t.startedAt), kind: t.kind }));
+}
+
+const DAY = 86_400_000;
+
+/** A new session on a later UTC day than the account's first join: it came back (value: days after). */
+function funnelReturn(t: Tracker, now: number): void {
+  funnelWrite((db) => {
+    const joined = stepAt(db, accountSubject(t.key), ACCOUNT_STEPS.join);
+    const days = joined === null ? 0 : Math.floor(now / DAY) - Math.floor(joined / DAY);
+    return days >= 1 ? { subject: accountSubject(t.key), step: ACCOUNT_STEPS.back, at: now, value: days, kind: t.kind } : null;
+  });
+}
+
+/** Funnel rows never break play: no database, no row; a failure is a warning. */
+function funnelWrite(row: (db: NonNullable<ReturnType<typeof currentDb>>) => Parameters<typeof recordStep>[1] | null): void {
+  const db = currentDb();
+  if (!db) return;
+  try {
+    const r = row(db);
+    if (r) recordStep(db, r);
+  } catch (err) {
+    console.warn(`funnel: ${(err as Error).message}`);
+  }
 }

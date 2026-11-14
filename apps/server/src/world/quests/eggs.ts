@@ -9,7 +9,8 @@
 // go dark, so nobody can block someone else's run by shooting a lamp first.
 
 import type { Client } from "@colyseus/core";
-import { EGG_RULES, type EggId } from "@firstlight/shared/content/secrets";
+import type { EggId } from "@firstlight/shared/content/secrets";
+import { EGG_RULES } from "./eggRules.ts";
 import { placeDir } from "@firstlight/shared/content/places";
 import { inReach, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { WEAPONS } from "@firstlight/shared/content/weapons";

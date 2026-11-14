@@ -12,7 +12,14 @@ export const config = {
   /** Sound-effect samples (ElevenLabs, never in git): a versioned set with a manifest on the asset Worker. */
   sfxBase: (import.meta.env.VITE_SFX_BASE as string | undefined) ?? "https://firstlight-assets.rosty-build.workers.dev/v/sfx-1",
   publicRepo: import.meta.env.VITE_PUBLIC_REPO === "true",
+  /** This bundle's build id (vite.config.ts): client error reports carry it (#85). */
+  buildId: (import.meta.env.VITE_BUILD_ID as string | undefined) ?? "dev",
   repoUrl: "https://github.com/RostyslavDzhohola/firstlight",
+  /**
+   * Issue #11: the maker's portfolio, which the home page's "Made by Rostyslav Dzhohola" credit links
+   * to (new tab). Empty: the name shows unlinked. Fill this one line when the URL is known.
+   */
+  ownerPortfolio: "",
   /** The owner's X handle for "Follow on X" in the share row; unset hides the button (6e). */
   xHandle: (import.meta.env.VITE_X_HANDLE as string | undefined) ?? "",
   /** DataFast's script as vite.config.ts puts it in the page (null: none), for the privacy note (6f). */

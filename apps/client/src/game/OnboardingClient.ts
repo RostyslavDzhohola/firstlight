@@ -26,7 +26,8 @@ import { DoneCardTimer } from "./doneCardTimer.ts";
 import type { Game } from "./Game.ts";
 import { OnboardingProgress } from "./onboardingProgress.ts";
 import { dummyTargets, guideTargets, nextDummy, type GuideTarget } from "./onboardingTargets.ts";
-import type { StepId } from "./onboardingSteps.ts";
+import { STEPS, type StepId } from "./onboardingSteps.ts";
+import { funnelStep } from "../net/beacon.ts";
 import type { ClientSystem } from "./systems.ts";
 
 /** Time the end card stays up, counted only while the game is on screen and playable (doneCardTimer.ts). */
@@ -280,9 +281,12 @@ export class OnboardingClient implements ClientSystem {
       inPortal: false, // no portal step since #68
     });
     if (completed.length) this.progress.save();
+    // The funnel (#85): each step the first time this browser does it, with its place in this build's tutorial.
+    for (const id of completed) funnelStep(`tutorial:${id}`, STEPS.findIndex((s) => s.id === id));
     this.phrased = false;
     if (completed.length) g.audio.play("ui");
     if (steps.allDone) {
+      funnelStep("tutorial_done");
       this.hud.showDone(this.xpPaid || ONBOARDING.DONE_XP + down * ONBOARDING.DUMMY_XP);
       this.doneTimer.start();
       this.finish();

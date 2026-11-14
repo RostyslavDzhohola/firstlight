@@ -283,6 +283,26 @@ The cheapest missing piece is one client beacon at session end, carrying the Pla
 tutorial step reached, frames over 33 ms and the mean fps. With it, eight of the eleven rows become
 real-visit numbers.
 
+### The funnel, measured since lane ship (D-ship-1)
+
+The server now keeps the first-session funnel itself, so most rows above are real-visit numbers.
+`/stats` leads with them (last day, 7 days, all time, each against its #85 target), and
+`pnpm metrics --funnel --funnel-db <game.db>` (read-only) or `--funnel-json <saved /stats?format=json>`
+turns them into `funnel.<day|week|all>.<kpi>` metrics.
+
+| KPI (#85) | now measured from |
+|---|---|
+| 80 % of Play presses reach the world; median under 30 s | the page's `play` and `world` steps (with the seconds since Play) |
+| 60 % finish the tutorial | the server's tutorial completion per new character (each tutorial step per visit too) |
+| 40 % take a mission | the server's first mission accepted per new character |
+| median first session over 10 min | the length of each account's first session |
+| 25 % reach level 5 | the server's level 5 per new character |
+| 15 % back within a week | a session on a later UTC day, over accounts at least 7 days old |
+| 30 % of level-2 players save | level 2 and saved on the same account |
+| no crash | client error reports (`/api/client-error`) per visit that reached the world |
+
+Still lab-only: frame rate on real visits (the beacon carries no frame times yet) and soft-locks.
+
 ## Baseline (2026-11-13, `night/integration` head)
 
 The full baseline is `docs/metrics/baseline-2026-11-13.json` (schema v2, 245 metrics). Each group

@@ -192,6 +192,13 @@ export interface SpellCastEvent {
   spell: string;
 }
 
+/** A player took a mission from its giver (quests/QuestSystem.ts; the funnel's first mission, #85). */
+export interface MissionAcceptedEvent {
+  type: "missionAccepted";
+  playerId: string;
+  missionId: string;
+}
+
 export type GameEvent =
   | SpellCastEvent
   | KillEvent
@@ -209,7 +216,8 @@ export type GameEvent =
   | MissionDoneEvent
   | MedalEvent
   | SpawnRequestEvent
-  | SiteDiscoveredEvent;
+  | SiteDiscoveredEvent
+  | MissionAcceptedEvent;
 
 export type GameEventHandler = (e: GameEvent) => void;
 

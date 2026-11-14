@@ -10,6 +10,7 @@ import { STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import { SPELLS } from "@firstlight/shared/content/spells";
+import { WILD_SITES } from "@firstlight/shared/content/wildSites";
 import { starterStats } from "@firstlight/shared/content/starters";
 import type { HomeOnline, HomeVisits } from "@firstlight/shared/net/home";
 
@@ -235,7 +236,7 @@ export function heroLive(online: HomeOnline | null): string | null {
 // ------------------------------------------------------------------------------------- what is new
 
 export interface NewsTile {
-  id: "spells" | "hunt" | "starters";
+  id: NewsId;
   title: string;
   text: string;
   /** Sprites shown on the tile (ui/sprites.ts), each with a short label under it. */
@@ -253,13 +254,35 @@ export function huntState(hall: readonly HallLine[] | null): { text: string; cla
   return first ? { text: `First opened by ${first.name} · ${fmtDate(first.foundAt)}`, claimed: true } : { text: "The vault has never been opened. Be the first.", claimed: false };
 }
 
-/** The three tiles of "New in the worlds", written from the shared content so they can't go stale. */
+export type NewsId = "sites" | "spells" | "hunt" | "starters";
+
+/**
+ * Which tiles "New in the worlds" shows, in order (three to a row on a desktop). The 2026-11-13 run
+ * leads with the wild sites. LEAD: as the later lanes of the run merge (play: tutorial, missions panel,
+ * compass; sky: orbiting planets and a moon to visit; weapons: the new weapon models), add a tile for
+ * each in newsTiles() below and list it here, newest first, keeping a multiple of three.
+ */
+export const NEWS_ORDER: readonly NewsId[] = ["sites", "spells", "hunt"];
+
+/** The tiles of "New in the worlds", written from the shared content so they can't go stale. */
 export function newsTiles(hall: readonly HallLine[] | null): NewsTile[] {
+  const all = allNewsTiles(hall);
+  return NEWS_ORDER.map((id) => all.find((t) => t.id === id)!).filter(Boolean);
+}
+
+function allNewsTiles(hall: readonly HallLine[] | null): NewsTile[] {
   const hunt = huntState(hall);
   const levels = SPELLS.map((s) => s.level);
   const trials = GLEAMS.trials.map((id) => MISSION_BY_ID.get(id)!);
   const traits = (i: number) => starterStats(i).traits[0] ?? "";
+  const planets = [...new Set(WILD_SITES.map((s) => s.body))];
   return [
+    {
+      id: "sites", title: `${numberWord(WILD_SITES.length)} wild places to find`,
+      text: `Off the paths on ${planets.map((b) => BODIES[b].name).join(", ").replace(/, ([^,]*)$/, " and $1")}: watchtowers, ruins, a shrine, a cave and a landmark you can see from far away. Each has a guardian and a chest that opens when it falls, and finding one pays XP.`,
+      icons: planets.map((b) => ({ sprite: "chest", label: BODIES[b].name })),
+      state: null,
+    },
     {
       id: "spells", title: "A spellbook for everyone",
       text: `Four spells on ${SPELLS.map((s) => s.keycap).join(" ")}, next to whatever weapon you carry: a blink, a ring of frost, a falling star, a glass ward. They open at levels ${levels.slice(0, -1).join(", ")} and ${levels.at(-1)}.`,
@@ -281,6 +304,8 @@ export function newsTiles(hall: readonly HallLine[] | null): NewsTile[] {
     },
   ];
 }
+const NUMBER_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+const numberWord = (n: number) => NUMBER_WORDS[n] ?? String(n);
 const HEAD_SPRITES = ["head-hexwick", "head-ash", "head-kappa", "head-unit7", "head-ninja"];
 
 /** The agents guide in the public repo (shown only once the repo is public). */
