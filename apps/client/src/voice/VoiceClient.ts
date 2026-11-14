@@ -440,8 +440,9 @@ export class VoiceRoom implements ClientSystem {
   private keys(me: any): void {
     const vc = this.vc;
     const input = this.game.input;
-    // Typing in a field counts as both talk keys released (never stay on air).
-    const typing = this.typing();
+    // Typing in a field counts as both talk keys released (never stay on air), and so does photo mode:
+    // its K steps the time of day and must never open the microphone (review finding 2, D-fix-view-2).
+    const typing = this.typing() || !!this.game.photo?.active;
     const vPressed = !typing && input.pressed.has(HOTKEYS.pushToTalk.code);
     if (vPressed && !vc.enabled) {
       if (vc.optedIn) void vc.enableFromGesture();
