@@ -22,8 +22,10 @@ AUTH_DB_PATH=/tmp/fl-e2e/auth.db GAME_DB_PATH=/tmp/fl-e2e/game.db pnpm dev
 - `GET http://127.0.0.1:2611/healthz` answers `{"ok":true,…}` when the server is up.
 - Sign-in codes: with no `RESEND_API_KEY` outside production, `DEV_MAIL_LOG=1` prints
   `[dev-mail] FIRSTLIGHT code for <email>: <code>` on the server's stdout. Each address gets 3 codes
-  an hour, so use a new address per run. `DEV_SIGNIN_CODES=1` (which `pnpm dev` sets) also lets a
-  dev build's save and sign-in cards fetch and fill the code, for callers on this machine only.
+  an hour, so use a new address per run. `DEV_SIGNIN_CODES=1` plus the per-run
+  `DEV_SIGNIN_KEY` (the root `pnpm dev` sets both) also let the dev client's save and sign-in cards
+  fetch and fill the code, on this machine only (D-sec2-1). Started another way, set the same
+  `DEV_SIGNIN_KEY` (43+ random characters) for the server and Vite, or read the code from the log.
 - **Admins** (T6): start the server with `ADMIN_CLAIM_TOKEN` set to `openssl rand -base64 32` (shorter
   tokens, under 32 random bytes, switch the claim off; D-admin-2), play once in the browser
   (guest or saved), then open `http://127.0.0.1:5611/admin/claim` there, paste the token into the
