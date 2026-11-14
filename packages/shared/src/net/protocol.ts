@@ -38,7 +38,11 @@ export const NET = {
 // corrected as Hinoko, Kappa or Brother Ash), the spellbook (`cast`, Skipstep moves the body on the
 // server), trials (`trial` messages, wave creatures), new world objects, the agent flag in the synced
 // player state, and play tokens bound to their session (D-security).
-export const PROTOCOL_VERSION = 6;
+// 7: the 2026-11-13 run, shared by all of its lanes: the wild sites (D-world-1..3: nine sites whose
+// walls and steps the server blocks movement, shots and NPC sight at, which an older client neither
+// has nor draws, and `you.sites`), out-of-combat regeneration decided by the server, the relaxed
+// tutorial's steps, and the residents' `speak` / `speech` messages.
+export const PROTOCOL_VERSION = 7;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
 

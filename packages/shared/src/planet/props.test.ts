@@ -185,7 +185,7 @@ describe("props", () => {
         }
       }
     }
-    expect(PROPS_VERSION).toBe(6);
+    expect(PROPS_VERSION).toBe(7);
   });
 
   it("grows forest undergrowth close to trees and keeps the original collider dimensions", () => {
