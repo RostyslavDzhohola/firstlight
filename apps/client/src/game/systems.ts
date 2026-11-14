@@ -23,6 +23,7 @@ import { createTownLights } from "../world/townLights.ts";
 import { createControlsClient } from "./controls.ts";
 import { createMomentsClient } from "./MomentsClient.ts";
 import { createNextSteps } from "./NextStepsClient.ts";
+import { createTreeClient } from "./TreeClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -71,3 +72,5 @@ CLIENT_SYSTEMS.push(createNextSteps);
 CLIENT_SYSTEMS.push(createMissionObjects);
 // World lane: undiscovered wild sites within sight as "?" on the compass.
 CLIENT_SYSTEMS.push(createSiteCompass);
+// Progress lane (#81): the build tree panel (U, the pause menu), the level-up point toast and refusals.
+CLIENT_SYSTEMS.push(createTreeClient);

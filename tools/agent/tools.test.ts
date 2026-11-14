@@ -35,8 +35,9 @@ describe("tool schemas", () => {
         if (p.enum) expect(p.enum.length, `${t.name}.${k}`).toBeGreaterThan(0);
       }
     }
-    // The whole tool list is small enough to sit in a model's context (about 3k tokens, sixteen tools).
-    expect(Buffer.byteLength(JSON.stringify(TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }))))).toBeLessThan(13_500);
+    // The whole tool list is small enough to sit in a model's context (about 3.5k tokens, seventeen tools:
+    // firstlight_build, #81, added ~420 bytes).
+    expect(Buffer.byteLength(JSON.stringify(TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }))))).toBeLessThan(14_000);
     expect(Buffer.byteLength(PLAYBOOK)).toBeLessThan(1600);
   });
 

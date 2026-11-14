@@ -5,7 +5,7 @@
 import type { Room } from "@colyseus/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { newCharacter } from "@firstlight/shared/content/character";
-import { lookId, STARTER_LOOKS, STARTERS, starterLook } from "@firstlight/shared/content/weapons";
+import { lookId, PLAIN_STARTER, STARTER_LOOKS, STARTERS, starterLook } from "@firstlight/shared/content/weapons";
 import type { Game } from "../src/app.ts";
 import { characterRepo } from "../src/world/characters.ts";
 import { joinAs, safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -37,8 +37,9 @@ const actorOf = (r: Room) => serverRoom(r).actors.get(r.sessionId)!;
 describe("starter looks: content", () => {
   it("lists every starter, with its original first and unique ids", () => {
     expect(STARTER_LOOKS).toHaveLength(STARTERS.length);
-    STARTERS.forEach((s, i) => expect(STARTER_LOOKS[i]![0]!.id).toBe(s.id));
-    const ids = STARTER_LOOKS.flat().map((l) => l.id);
+    // The plain Traveller (#80) wears Brother Ash's body for now; every other starter's original is its own model.
+    STARTERS.forEach((s, i) => expect(STARTER_LOOKS[i]![0]!.id).toBe(i === PLAIN_STARTER ? "ash" : s.id));
+    const ids = STARTER_LOOKS.filter((_, i) => i !== PLAIN_STARTER).flat().map((l) => l.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(STARTER_LOOKS[KAPPA]!.map((l) => l.id)).toEqual(["kappa", "kappa_b"]);
     expect(STARTER_LOOKS[UNIT7]!.map((l) => l.id)).toEqual(["unit7", "unit7_b"]);

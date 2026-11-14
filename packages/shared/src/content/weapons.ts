@@ -229,7 +229,15 @@ export const STARTERS = [
   { id: "kappa", name: "Kappa", weapon: "riverstaff" },
   { id: "unit7", name: "Unit 7", weapon: "carbine" },
   { id: "ninja", name: "Hinoko", weapon: "kunai" },
+  // #80, the careful version: an ordinary traveller with a basic blade and no special stats. Appended so
+  // every saved character keeps its index; listed first and picked by default (STARTER_ORDER, PLAIN_STARTER).
+  { id: "traveller", name: "Traveller", weapon: "sunbrand" },
 ] as const;
+
+/** The plain starter (#80): base numbers everywhere, a Sunbrand I. New players start as it unless they pick another. */
+export const PLAIN_STARTER = 5;
+/** The order starters are offered in (the pick screen, the home page): the plain one first, then the five by index. */
+export const STARTER_ORDER: readonly number[] = [PLAIN_STARTER, 0, 1, 2, 3, 4];
 
 /** A starter's look: `id` names the client's model and art (assets-dev/characters/<id>.glb). */
 export interface StarterLook {
@@ -245,6 +253,8 @@ export const STARTER_LOOKS: readonly (readonly StarterLook[])[] = [
   [{ id: "kappa", name: "River ninja" }, { id: "kappa_b", name: "Wayfarer" }],
   [{ id: "unit7", name: "Trooper" }, { id: "unit7_b", name: "Scout" }],
   [{ id: "ninja", name: "Hinoko" }],
+  // The Traveller wears Brother Ash's hooded body for now (no new model tonight; D-progress-4).
+  [{ id: "ash", name: "Traveller" }],
 ];
 
 /** A requested or stored look for this starter; anything it doesn't have is the original (0). */

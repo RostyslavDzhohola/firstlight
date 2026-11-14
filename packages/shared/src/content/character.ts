@@ -36,6 +36,8 @@ export interface CharacterData {
   worn?: Partial<Record<CosmeticSlot, string>>;
   /** Per-life progress for life-scoped medals and once-per-life eggs (quests lane). */
   life?: LifeProgress;
+  /** Build-tree nodes taken this life (content/tree.ts ids, in the order taken; #81). Absent = none. */
+  tree?: string[];
 }
 
 export interface LifeProgress {

@@ -17,6 +17,7 @@ import { easeShare, stepsFor } from "./frameClock.ts";
 import { mountedSpeed, rideCamera } from "./mount.ts";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 import { BASE_MOVE, starterMove } from "@firstlight/shared/content/starters";
+import { buildStats, rollReady } from "@firstlight/shared/content/tree";
 import { EyeFollow, smoothBlend, stepBlend, VIEW, viewFor, wheelView, type ViewMode } from "./view.ts";
 
 /** Solid things the player can't walk through (intact breakable props). */
@@ -48,6 +49,8 @@ export const MOVE = {
   dodgeDistance: 4.5,
   dodgeTime: 0.3,
   dodgeCooldown: BASE_MOVE.dodgeCooldown,
+  /** Rolls held at once (Second Roll in the build tree, #81): setStarterMove. */
+  dodgeCharges: 1,
   /** A press this early still rolls (the cooldown ending, landing): content §0's input buffer. */
   dodgeBuffer: 0.1,
   /** Stepping off an edge (or a low frame rate losing the ground on a slope) still rolls this long after. */
@@ -67,16 +70,22 @@ export const MOVE = {
  * NpcRenderer scales these for chill, slow and Cease-and-Desist.
  */
 export const MOVE_BASE = { run: MOVE.run, sprint: MOVE.sprint, dodgeDistance: MOVE.dodgeDistance, dodgeCooldown: MOVE.dodgeCooldown };
-let appliedStarter = -1;
+let applied = "";
 
-/** Use this starter's run, sprint and dodge cooldown (the server's `starter` for the local player). */
-export function setStarterMove(starter: number) {
-  if (starter === appliedStarter) return;
-  appliedStarter = starter;
+/**
+ * Use this starter's run, sprint and dodge cooldown (the server's `starter` for the local player) and
+ * the build tree's pace and roll charges (#81: Long Stride, Second Roll), as movement.ts allows them.
+ */
+export function setStarterMove(starter: number, tree?: readonly string[]) {
+  const key = `${starter}|${tree?.join(",") ?? ""}`;
+  if (key === applied) return;
+  applied = key;
   const m = starterMove(starter);
-  MOVE_BASE.run = MOVE.run = m.run;
-  MOVE_BASE.sprint = MOVE.sprint = m.sprint;
+  const b = buildStats(tree);
+  MOVE_BASE.run = MOVE.run = m.run * b.pace;
+  MOVE_BASE.sprint = MOVE.sprint = m.sprint * b.pace;
   MOVE_BASE.dodgeCooldown = MOVE.dodgeCooldown = m.dodgeCooldown;
+  MOVE.dodgeCharges = b.dodgeCharges;
 }
 
 /** Collision substep limits (m): sideways under half a fence's blocking depth, vertically under a top's landing band. */
@@ -211,8 +220,8 @@ export class PlayerController {
   swimming = false;
   anim: number = ANIM.IDLE;
   private dodgeT = 0;
-  /** Wall-clock time (ms, the `now` update gets) when the next roll may start (D-combat-3). */
-  private dodgeReadyAt = -Infinity;
+  /** Wall-clock times (ms, the `now` update gets) of the rolls still cooling down (D-combat-3; two with Second Roll). */
+  private dodgeTimes: number[] = [];
   /** The clock when no `now` is given (tests, tools): the sum of the simulation steps. */
   private simMs = 0;
   /** Seconds a C press stays wanted (MOVE.dodgeBuffer), so a press a moment early isn't lost. */
@@ -453,10 +462,10 @@ export class PlayerController {
     // reads as a roll (the clip tumbles forward).
     if (input.pressed.has("KeyC") && !this.adminFly) this.dodgeWanted = MOVE.dodgeBuffer; // flying: C goes down
     const footing = this.onGround || (!this.jumped && this.airTime <= MOVE.dodgeGroundGrace);
-    if (this.dodgeWanted > 0 && !this.frozen && !this.mounted && now >= this.dodgeReadyAt && footing && !this.swimming) {
+    if (this.dodgeWanted > 0 && !this.frozen && !this.mounted && rollReady(this.dodgeTimes, now, MOVE.dodgeCooldown * 1000, MOVE.dodgeCharges) && footing && !this.swimming) {
       this.dodgeWanted = 0;
       this.dodgeT = MOVE.dodgeTime;
-      this.dodgeReadyAt = now + MOVE.dodgeCooldown * 1000;
+      this.dodgeTimes = [...this.dodgeTimes.filter((t) => now - t < MOVE.dodgeCooldown * 1000), now].slice(-MOVE.dodgeCharges);
       this.dodgeDir.copy(wish.lengthSq() > 0 ? wish : this.facing);
       this.facing.copy(this.dodgeDir);
     }

@@ -99,6 +99,8 @@ export interface SpellsYou {
   regenAt: number;
   /** When each spell is ready again, by SPELLS index (0 = ready). */
   ready: number[];
+  /** Refill multiplier on AETHER.regenPerS (Deep Well in the build tree); absent = 1. */
+  rate?: number;
   /** A Glasswing Ward that is up: shell HP left and when it ends. */
   ward?: { hp: number; max: number; until: number };
   /**
@@ -108,10 +110,10 @@ export interface SpellsYou {
   req?: number;
 }
 
-/** Aether at `now` from a stored value: it refills from max(t, regenAt) at AETHER.regenPerS up to the max. */
-export function aetherAt(s: { aether: number; t: number; regenAt: number }, now: number): number {
+/** Aether at `now` from a stored value: it refills from max(t, regenAt) at AETHER.regenPerS × `rate` up to the max. */
+export function aetherAt(s: { aether: number; t: number; regenAt: number; rate?: number }, now: number): number {
   const since = Math.max(0, now - Math.max(s.t, s.regenAt));
-  return Math.min(AETHER.max, s.aether + (since / 1000) * AETHER.regenPerS);
+  return Math.min(AETHER.max, s.aether + (since / 1000) * AETHER.regenPerS * (s.rate ?? 1));
 }
 
 /** Why a cast can't happen right now, from the state the client can see, or null. The server decides. */

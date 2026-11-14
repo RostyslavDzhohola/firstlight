@@ -10,6 +10,7 @@ import { AgentError, FirstlightAgent, type ActionResult, type ConnectOptions, ty
 import { BODY_IDS, type BodyId } from "@firstlight/shared";
 import { MISSIONS, isTrialType } from "@firstlight/shared/content/missions";
 import { SPELL_IDS, SPELLS } from "@firstlight/shared/content/spells";
+import { RESPEC } from "@firstlight/shared/content/tree";
 import { STARTERS } from "@firstlight/shared/content/weapons";
 import { PHRASES } from "@firstlight/shared/net/protocol";
 
@@ -223,7 +224,7 @@ export const TOOLS: readonly ToolDef[] = [
         url: { type: "string", description: "Game server origin. Default: $FL_URL, else http://localhost:2567.", maxLength: 200 },
         authUrl: { type: "string", description: "Sign-in origin, when it differs from url (the site origin on a hosted game). Default: $FL_AUTH_URL, else url.", maxLength: 200 },
         name: { type: "string", description: "Display name to ask for: 3-16 letters, digits or _. The server may refuse it (taken, not allowed); you then get a generated one.", minLength: 3, maxLength: 16 },
-        starter: { type: "string", description: "A new character's class: hexwick (magic bolts), ash (sword), kappa (staff), unit7 (carbine, default), ninja (thrown kunai). Ignored when the character already exists.", enum: STARTER_IDS },
+        starter: { type: "string", description: "A new character's class: hexwick (magic bolts), ash (sword), kappa (staff), unit7 (carbine, default), ninja (thrown kunai), traveller (the plain start: a sword and base numbers, built up through the tree). Ignored when the character already exists.", enum: STARTER_IDS },
         body: { type: "string", description: "World to join. Leave out to arrive wherever the character is.", enum: BODY_IDS },
         dev: { type: "boolean", description: "Use a dev guest token instead of the sign-in flow (local servers started with ALLOW_DEV_GUESTS=1). Default: $FL_DEV=1." },
       },
@@ -453,6 +454,24 @@ export const TOOLS: readonly ToolDef[] = [
     },
   },
   {
+    name: "firstlight_build",
+    description: `Build tree: each level past the first gives a point. action=spend with node (self.tree.open in firstlight_observe lists them and what each does); action=respec takes all points back, in a safe zone, for ${RESPEC.coinsPerPoint} coins a point.`,
+    needsAgent: true,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["action"],
+      properties: {
+        action: { type: "string", description: "spend a point, or respec.", enum: ["spend", "respec"] },
+        node: { type: "string", description: "spend: a node id from self.tree.open.", minLength: 1, maxLength: 40 },
+      },
+    },
+    async run(s, a) {
+      if (a.action === "spend" && !a.node) return { ok: false, reason: "bad arguments", hint: "spend needs node (see self.tree.open)" };
+      return act(s, a.action === "spend" ? s.agent!.spendPoint(a.node) : s.agent!.respec());
+    },
+  },
+  {
     name: "firstlight_trial",
     description:
       "Play a race, defend or collect mission you hold, start to finish, on the body you stand on. race: sprints through the rings in order (ring 1 starts the clock). collect: walks over every piece. defend: lights the beacon, stays in its ring and fights what comes. Returns when done, failed (\"failed: time\", \"failed: left\", \"dead\"), blocked, or out of seconds; call again to retry.",
@@ -513,6 +532,6 @@ export const PLAYBOOK = [
   "To level up: on Portus walk to a portal (firstlight_move target=portal:arcadia) and firstlight_travel portal=arcadia. On the planet: firstlight_move target=guide, firstlight_missions action=take, leave the outpost, fight creatures of about your level, pick up loot piles, heal with tonics, return to safety (firstlight_move target=safe) when hurt.",
   "Spells (firstlight_cast) cost aether and unlock by level: skipstep 1 (a blink out of a bad fight), frostbloom 3 (when surrounded), wishfall 6, glasswing 9 (a shell when hurt).",
   "Race, defend and collect missions are played with firstlight_trial. The public hunt: Sela Marchbank in Portus (target=curator) gives trials T1 (Arcadia, levels 4-7), T2 (Hollowmere, 9-12), T3 (Meridian, 14-17); all three open the Gleam Vault beside her.",
-  "Dying costs the character: a new life starts at level 1 (firstlight_respawn). Retreat early.",
+  "Death costs the character and its build points: new life at level 1 (firstlight_respawn). Spend level points with firstlight_build. Retreat early.",
   "Be a good neighbour: don't attack players unless one attacked you first, don't take loot piles that aren't yours while their owner is near, don't crowd people at the guide or the shop.",
 ].join("\n");

@@ -20,7 +20,7 @@ import {
   AETHER, aetherAt, FROSTBLOOM, GLASSWING, SKIPSTEP, SPELL_BY_ID, SPELL_IDS, SPELL_INDEX, SPELLS, spellDamage, wardShell, WISHFALL,
   type SpellDef, type SpellId,
 } from "@firstlight/shared/content/spells";
-import { starterSpellPower } from "@firstlight/shared/content/starters";
+import { buildStats, casterPower, spellCooldownS } from "@firstlight/shared/content/tree";
 import type { CastMsg, SpellEvent, YouState } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { sandboxed } from "../../sandbox.ts";
@@ -50,6 +50,8 @@ interface Book {
   t: number;
   regenAt: number;
   ready: number[];
+  /** Aether refill multiplier (Deep Well, build tree); absent = 1. */
+  rate?: number;
 }
 
 const books = sandboxed(new Map<string, Book>(), () => new Map<string, Book>());
@@ -121,6 +123,13 @@ export class SpellSystem implements RoomSystem {
     let b = all.get(a.identity.userId);
     if (!b) all.set(a.identity.userId, (b = { aether: AETHER.max, t: now, regenAt: 0, ready: SPELLS.map(() => 0) }));
     while (b.ready.length < SPELLS.length) b.ready.push(0);
+    // Deep Well (build tree): the refill rate follows the tree; a change counts from now, not back to `t`.
+    const rate = buildStats(a.char.tree).aetherRegen;
+    if ((b.rate ?? 1) !== rate) {
+      b.aether = aetherAt(b, now);
+      b.t = now;
+      b.rate = rate;
+    }
     return b;
   }
 
@@ -134,6 +143,7 @@ export class SpellSystem implements RoomSystem {
       t: now,
       regenAt: b.regenAt,
       ready: b.ready.map((r) => (r > now ? r : 0)),
+      ...(b.rate !== undefined && b.rate !== 1 ? { rate: b.rate } : {}),
       ...(w && w.until > now ? { ward: { hp: Math.round(w.hp), max: w.max, until: w.until } } : {}),
       // Which of the client's casts this state includes: it shows the later ones on top of it.
       ...(req !== undefined ? { req } : {}),
@@ -179,7 +189,7 @@ export class SpellSystem implements RoomSystem {
     b.aether = aetherAt(b, now) - def.cost;
     b.t = now;
     b.regenAt = now + AETHER.regenDelayMs;
-    b.ready[SPELL_INDEX.get(def.id)!] = now + def.cooldownS * 1000;
+    b.ready[SPELL_INDEX.get(def.id)!] = now + spellCooldownS(def, a.char.tree) * 1000; // Quickened (tree)
     a.logoutEndsAt = null; // casting cancels a logout countdown
     if (def.harmful) a.combatUntil = now + COMBAT_TAG_MS;
     a.youDirty = true;
@@ -204,7 +214,8 @@ export class SpellSystem implements RoomSystem {
   private skipstep(a: PlayerActor, d: V3, now: number): true | string {
     const from = actorPos(a);
     // Looking straight up or down has no ground direction: the way the body faces.
-    const path = skipstepPath(this.room.moveWorld, from, d) ?? skipstepPath(this.room.moveWorld, from, [a.state.fx, a.state.fy, a.state.fz]);
+    const range = buildStats(a.char.tree).skipstepM; // Far Step (tree)
+    const path = skipstepPath(this.room.moveWorld, from, d, range) ?? skipstepPath(this.room.moveWorld, from, [a.state.fx, a.state.fy, a.state.fz], range);
     if (!path || path.dist < SKIPSTEP.minM) return "blocked";
     const to = path.to;
     a.serverMove = { x: a.lastX, y: a.lastY, z: a.lastZ, until: now + SPELL_NET.staleInputMs };
@@ -226,7 +237,7 @@ export class SpellSystem implements RoomSystem {
    * ward's shell. Every spell number that depends on who casts goes through here and `damage`.
    */
   private power(a: PlayerActor): number {
-    return starterSpellPower(a.char.starter);
+    return casterPower(a.char);
   }
 
   /** What a spell of `base` damage deals for this caster: the level curve and the starter's spell power. */

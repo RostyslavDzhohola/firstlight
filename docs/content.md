@@ -163,6 +163,49 @@ make them a coin faucet (F12 review).
 | The horse | Never a target, never saved. Leaves 30 s after you get off, and at once when you die, log out, drop your connection, travel (portal or pad fast travel; any teleport), or lose the whistle (sold, dropped). A rider who leaves outside a safe zone lingers on foot |
 | Coats | Six (chestnut, bay, grey, palomino, black, white), each with its own blanket colour; your coat is fixed by your account id |
 
+### 1.7 Build tree (issue #81; code: `packages/shared/src/content/tree.ts`) (new)
+
+Every level past the first gives **one point** (19 at level 20). Points go into five open branches in any
+mix; inside a branch the nodes are taken top-down (a node needs the one above it) and cost **1, 2, 3, 3**
+points by row, so the whole tree (39 points) is about twice what a level-20 character has: two branches to
+the bottom, or the top of everything. Points are lost with the level when you die (a rebirth has none).
+The server decides every spend and respec and saves the tree with the character (migration 13, table
+`character_tree`). Panel: **U**, or Esc → Build on any device.
+
+| Branch | Row | Node | Cost | Effect |
+|---|---|---|---|---|
+| Body | 1 | Hardy | 1 | Max HP ×1.06 (on the starter's level curve) |
+| Body | 2 | Second Roll | 2 | Hold **two** dodge rolls; each comes back one dodge cooldown after it was used (the movement budget holds a roll per charge); two rolls start at least 400 ms apart (`ROLL_GAP_MS`), so a roll's own packets spend one charge |
+| Body | 3 | Tonic Craft | 3 | Tonics heal ×1.2 and **end a running slow/chill and a burn** |
+| Body | 4 | Last Breath | 3 | A blow from someone that would kill leaves 1 HP instead, once per 90 s (falls are not saved). Regeneration is untouched: no Body node heals inside a fight (§1.1) |
+| Blade | 1 | Keen Edge | 1 | Melee damage ×1.08 |
+| Blade | 2 | Cleave | 2 | Each swing hits **one more** target, arc +30° |
+| Blade | 3 | Iron Guard | 3 | Block +5 points (a T1 Sunbrand blocks 75% instead of 70%, T2 80% instead of 75%), capped at 90% |
+| Blade | 4 | Riposte | 3 | Heavy-attack cooldowns ×0.65 (the axe's chop and the hammer's slam: 6 s → 3.9 s) |
+| Bow and gun | 1 | Steady Hands | 1 | Ranged-class damage ×1.08 (guns, bows, crossbow, kunai, launcher; not magic weapons) |
+| Bow and gun | 2 | Quick Hands | 2 | Reloads ×0.7, bow draw ×0.75 |
+| Bow and gun | 3 | Far Sight | 3 | Gun falloff starts ×1.4 farther and the hitscan reach stretches with it |
+| Magic | 1 | Attuned | 1 | Spell power ×1.08 (Frostbloom, Wishfall, the ward's shell), on top of the starter's |
+| Magic | 2 | Quickened | 2 | Spell cooldowns ×0.75 |
+| Magic | 3 | Deep Well | 3 | Aether refill ×1.4 (6 → 8.4 a second) |
+| Magic | 4 | Cool Head | 3 | Magic weapons fire ×1.5 shots before overheating (rounded) |
+| Travel | 1 | Long Stride | 1 | Run and sprint ×1.06 on foot |
+| Travel | 2 | Far Step | 2 | Skipstep reaches 15 m (base 10 m) |
+| Travel | 3 | Featherfall | 3 | Falls do no damage up to 14 m (base 8 m), then 8% a metre as before |
+
+**Respec:** in a safe zone (the Portus town or a pad ring, out of combat), **10 ◎ per point spent**;
+every point comes back at once. **Balance** (`pnpm balance`, "Build tree"): a plain build, a build focused on
+each branch first and a spread build, at levels 5, 10 and 20, each hold the D-balance-4 hard floor (no
+kill of the most fragile plain starter in under 0.75 s or in one hit, server cadence, heavies, specials and
+headshots) and a fight edge over plain of 1.00–1.45, in PvP (a plain attacker with each weapon family) and
+PvE (the level's creatures, packs as their attack tokens allow): best class damage × effective HP, with every
+defensive node counted (max HP, roll charges, the guard with each blocking weapon's tier, Last Breath as half
+a hit absorbed, the share of a large tonic that lands before the plain character would fall, a cleanse ending
+half a burn). Through a guard, the block nodes let at least half of what a plain guard lets through. Attuned
+keeps the spell one-shot and opening-pair checks. Hardy, Tonic Craft, Iron Guard, Keen Edge, Steady Hands and
+Attuned were cut (from ×1.12, ×1.4, +15 points and ×1.1) when the model first counted the defensive nodes
+(build tree review 4): the full Body branch with a guard weapon reached a 1.68 edge at level 20.
+
 ---
 
 ## 2. Weapons
@@ -326,6 +369,7 @@ Heat = shots until a 1.5 s overheat lockout. Explosions fall off linearly from t
 | Kappa | Riverstaff I (bo staff) | Fists |
 | Unit 7 | Pocket Carbine I (the blaster family) | Fists |
 | Hinoko (the ninja, 5th starter) | Ember Kunai I (with the Ember Seal) | Fists |
+| Traveller (the plain start, #80; listed first, a new player's default) | Sunbrand I | Fists |
 
 On rebirth: level 1, the chosen starter's T1 weapon, 0 coins (D).
 
@@ -1113,6 +1157,7 @@ spell numbers are in §2.7). Magic pips: Hexwick 5, Hinoko 4, Kappa 3, Unit 7 2,
 | Kappa | 1.00 (100 / 290) | 6.24 / 9.36 | 1.0 s | 1.00 | Balanced, Best dodge | crowd clear, evasion |
 | Unit 7 | 1.00 (100 / 290) | 6 / 9 | 1.25 s | 0.95 | Steady aim, Slow roll | duels (the reference body; pays with the roll, crowd clear and spell power) |
 | Hinoko | 0.88 (88 / 255) | 6.6 / 9.9 | 1.1 s | 1.05 | Fast, Fragile | mobility |
+| Traveller (#80) | 1.00 (100 / 290) | 6 / 9 | 1.2 s | 1.00 | Plain, Build it up | none by design: the base numbers, built up through the tree (#81); Brother Ash's body until it has its own |
 
 The calls made for issue #9's open questions (the owner hasn't answered; D-balance-4): (1) max HP, run/sprint
 and dodge cooldown vary (no stamina exists; carry slots, jump and fall damage stay shared); (2) a light layer,
@@ -1223,6 +1268,7 @@ not a trademark search.
 |---|---|---|
 | Decided (D) | FIRSTLIGHT, Portus, Arcadia, Hollowmere, Meridian, Hall of Firsts, Hexwick, Brother Ash, Unit 7, Hexquill, Sunbrand, Pocket Carbine, Woolback, Dusk Wolf, Tidewrath, The Receiver, Meridian Oversight, Hollow Court | OK, with flags: **Hollow King** is one word from *Hollow Knight* (Team Cherry); keep, with fallback "the Barrow King". **Kappa** is folklore (fine), but also an apparel trademark and a Twitch emote; low risk in games. **Tidewrath** is flagged Y in [r2-04] because of the kaiju archetype; mitigated by the design rules in 4.2 |
 | Starter looks (new, round 2) | River ninja, Wayfarer (Kappa); Trooper, Scout (Unit 7) | OK (generic words) |
+| Plain starter (new, #80) | Traveller | OK (a generic word; wears Brother Ash's existing body, no new look) |
 | Ninja starter (new, 6h) | Hinoko, Ember Kunai, Ember Seal | OK. "Hinoko" is the Japanese common noun for flying sparks (火の粉); no franchise character of that name known to us. "Ember Seal" and "Ember Kunai" are generic words (a kunai is a real tool). Rejected: "Kage", "Rin", "Hotaru", "Homura", "Hibana", "Kitsune"/fox motifs (all close to famous anime characters or the nine-tailed fox), "Wren" (already the example player name in UI copy and tests). Reasoned check only |
 | Weapons (new / [05]) | Riverstaff, Bearded Axe, Quarry Hammer, Emberglass Staff [05], Stormcoil, Scatterpipe [05], Yew Longbow, Stillshot Rifle, Comet Launcher, Scrapburst Grenade [05], Patchkit [05], Prism Bubble, Radio, Small/Large Tonic, Ferryman's Oar | OK. I rejected "Skyhammer" (Warhammer), "Boomtube" (DC's "Boom Tube"), "Farsight" (Warhammer 40k) and "Stonemaul" (WoW) |
 | Arcadia creatures (new) | Brightbits (faction), Hopbit, Golden Hopbit, Sparkfly, Linewyrm, Bomblet, Pixel Lancer, Cabinet Golem | OK, except "Hopbit": one letter from a franchise word, which this section's own rule bans; owner decision, still open (display name only, the id can stay). Silhouettes must follow the avoid list in 3.2 |

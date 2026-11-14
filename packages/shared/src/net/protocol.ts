@@ -6,6 +6,7 @@ import type { BodyId } from "../planet/bodies.ts";
 import type { CosmeticSlot } from "../content/items.ts";
 import type { HallLine } from "../content/secrets.ts";
 import type { SpellId, SpellsYou } from "../content/spells.ts";
+import type { TreeYou } from "../content/tree.ts";
 
 export const NET = {
   TICK_MS: 50, // 20 Hz simulation and patches
@@ -43,7 +44,8 @@ export const NET = {
 // has nor draws, and `you.sites`), out-of-combat regeneration decided by the server, the relaxed
 // tutorial's steps, the tracked mission (`track`), the residents' `speak` / `speech` messages, the moon
 // Lumen (D-sky-1..3: a fifth body id in travel, its own gravity the server validates jumps and falls
-// against, three creature kinds, mission L1) and three weapon families appended to the catalogue.
+// against, three creature kinds, mission L1), three weapon families appended to the catalogue, and the
+// build tree (#81: `tree` messages, movement bonuses the server derives from the saved nodes).
 export const PROTOCOL_VERSION = 7;
 
 // ---- HTTP: entering the world -------------------------------------------------------------
@@ -177,6 +179,12 @@ export type ClientMessages = {
   speak: SpeakMsg;
   /** The mission the player tracks (#69; null: none chosen). The hunt pointer's `huntTargets` follow it. Session-only, at most 5 quest ops a second. */
   track: { id: string | null };
+  /**
+   * The build tree (content/tree.ts, #81; at most 5 a second): take a node, or clear the tree for
+   * coins in a safe zone. Refusals answer `denied {action: "tree", reason}`: "unknown", "taken",
+   * "locked" (the node above isn't taken), "points", "dead", "nothing", "safe zone", "coins", "try again" (the save failed; nothing changed).
+   */
+  tree: { action: "spend"; node: string } | { action: "respec" };
 };
 
 export interface SpeakMsg {
@@ -378,6 +386,8 @@ export interface YouState {
   spells?: SpellsYou;
   /** Wild sites this life has found (content/wildSites.ts ids, every body): the map and journal show them. */
   sites?: string[];
+  /** The build tree (content/tree.ts, #81): nodes taken, points left, what a respec costs. Set by the tree system. */
+  tree?: TreeYou;
 }
 
 export interface InvItem {

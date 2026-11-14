@@ -91,10 +91,12 @@ describe("the pad layout (D-controls-5)", () => {
     // L / Shift+L (#69): inside the journal (its Missions tab: Track buttons and "Fold the missions
     // panel"), reached by the pad's focus navigator; ui/missionsReach.test.ts drives both.
     const viaJournal = ["KeyL"];
+    // U (#81): the build tree has its own pause-menu row on every device (game/TreeClient.ts).
+    const viaPauseRow = ["KeyU"];
     // Keyboard-only by choice: photo, screenshot, perf/admin overlays, the phrase wheel, invites, voice.
     const keyboardOnly = ["KeyP", "Backquote", "KeyG", "KeyY", "KeyN", "KeyK", "KeyB", "KeyW", "KeyA", "KeyS", "KeyD"];
     for (const b of BINDINGS) {
-      const ok = codes.has(b.code) || viaContext.includes(b.code) || viaMenu.includes(b.code) || viaJournal.includes(b.code) || keyboardOnly.includes(b.code);
+      const ok = codes.has(b.code) || viaContext.includes(b.code) || viaMenu.includes(b.code) || viaJournal.includes(b.code) || viaPauseRow.includes(b.code) || keyboardOnly.includes(b.code);
       expect(ok, `${b.code} (${b.what})`).toBe(true);
     }
   });

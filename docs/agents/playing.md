@@ -261,6 +261,7 @@ cancels the request it names, and the bridge cancels a call whose caller hangs u
 | `say` | `phrase` | One of the game's fixed phrases (there is no free chat). |
 | `respawn` | `starter?` | After death: a new life in Portus. |
 | `cast` | `spell` (`skipstep`, `frostbloom`, `wishfall`, `glasswing`); one of `target`, `bearing` (+ `distance`), `pos`; `pvp?` | Cast a spell (see [Spells](#spells)). |
+| `build` | `action` (`spend`, `respec`); `node` for `spend` | Spend a build point, or take them all back (see [Build tree](#build-tree)). |
 | `leave` | `logout?` | Leave the game. |
 
 On the gateway, `join` takes only `name`, `starter` and `body` (the server picks where it signs in),
@@ -364,6 +365,7 @@ throws for a game reason.
 | `respawn({ starter? })` | `respawn({ starter: "ash" })` | Only while dead. |
 | `skipTutorial()` | | Skips the Portus training dummies (which pay 50 XP when done). |
 | `cast(spell, { targetId?, bearing?, distance?, pos?, pvp? })` | `cast("wishfall", { targetId: "n14" })` | A spell from the spellbook. Result: `aether` left, and per spell `moved`, `slowed`, `landsIn`, `shell`. Reasons: `locked`, `cooldown`, `aether`, `safe zone`, `protected`, `swimming`, `blocked`, `players in range`. |
+| `spendPoint(node)` / `respec()` | `spendPoint("blade_edge")` | The build tree (below). Result: `points` left, `taken`, `coins`. Reasons: `points`, `locked`, `taken`, `safe zone`, `coins`, `nothing`. |
 | `close({ logout? })` | `close({ logout: true })` | In a safe zone the body leaves at once; elsewhere it stays 30 s unless you log out (about 10 s standing still). |
 
 `agent.events` holds the last 60 events, `agent.corrections` counts movement the server refused
@@ -384,6 +386,19 @@ by the same row, read from the character the server seated: Hinoko sprints at 9.
 every 1.1 s, Brother Ash at 8.3 m/s and 1.35 s, Unit 7 at 9 m/s and 1.25 s. A slow the server puts
 on the body (a chill, grave hands, another player's Frostbloom) is walked by too, and no roll is
 tried while it lasts.
+
+## Build tree
+
+Every level past the first gives one point (issue #81; numbers in `docs/content.md` §1.7). Points go
+into five branches in any mix: `body`, `blade`, `aim` (bow and gun), `magic`, `travel`. Inside a branch
+nodes are taken top-down and cost 1, 2, 3, 3. `observe().self.tree` has `points`, `taken`, `open` (what
+you can take now, with what each does for you at your numbers) and `respec` (its coin cost: only in a
+safe zone). The summary says when points are waiting. Points are lost with the level on death.
+
+```ts
+await agent.spendPoint("blade_edge");   // { ok: true, points: 2, taken: ["blade_edge"] }
+await agent.spendPoint("blade_riposte"); // { ok: false, reason: "locked", hint: "take the node above it in the same branch first" }
+```
 
 ## Spells
 

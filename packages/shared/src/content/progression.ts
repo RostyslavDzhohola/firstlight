@@ -62,11 +62,14 @@ export function killCoins(tier: EnemyTier, enemyLevel: number): number {
   return Math.round(TIER_COINS[tier] * (2 + 0.8 * enemyLevel));
 }
 
-/** Fall damage as a fraction of max HP: 0 up to 8 m, then 8% per metre (lethal at ≥ 20.5 m). */
-export function fallDamageFraction(dropMetres: number, gravity = BASE_GRAVITY): number {
+/**
+ * Fall damage as a fraction of max HP: 0 up to `safeM` (8 m; Featherfall in the build tree: 14 m),
+ * then 8% per metre (lethal at ≥ 20.5 m past the base).
+ */
+export function fallDamageFraction(dropMetres: number, gravity = BASE_GRAVITY, safeM = 8): number {
   // The landing speed is what hurts: under a weaker pull the same drop lands softer (Lumen, #6).
   const drop = (dropMetres * gravity) / BASE_GRAVITY;
-  return drop <= 8 ? 0 : Math.min(1, (drop - 8) * 0.08);
+  return drop <= safeM ? 0 : Math.min(1, (drop - safeM) * 0.08);
 }
 
 /** Linear falloff between full-damage range and falloffTo, down to falloffMin. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { SPELL_BY_ID, spellDamage, FROSTBLOOM } from "@firstlight/shared/content/spells";
+import { SPELL_BY_ID, SPELLS, spellDamage, FROSTBLOOM } from "@firstlight/shared/content/spells";
 import { starterSpellPower } from "@firstlight/shared/content/starters";
-import { spellEffect, spellGains, spellPower, spellTooltip } from "./spellInfo.ts";
+import { spellCost, spellEffect, spellGains, spellPower, spellTooltip } from "./spellInfo.ts";
 
 const s = (id: string) => SPELL_BY_ID.get(id)!;
 
@@ -24,5 +24,16 @@ describe("spell numbers at your level (#79)", () => {
     expect(spellTooltip(s("frostbloom"), 1, 0)).toMatch(/unlocks at level 3/);
     expect(spellTooltip(s("frostbloom"), 4, 0)).toMatch(/damage in a 5 m ring · slows 40% for 3 s\. 30 aether · 10 s cooldown\./);
     expect(spellEffect(s("glasswing"), 9, 2)).toMatch(/^A \d+ HP shell for 4 s$/);
+  });
+});
+
+describe("spell numbers follow the build tree (#81)", () => {
+  it("Attuned raises the damage and the shell, Quickened cuts the cooldowns, Far Step stretches Skipstep", () => {
+    const frost = SPELLS.find((s) => s.id === "frostbloom")!;
+    const skip = SPELLS.find((s) => s.id === "skipstep")!;
+    expect(spellPower(frost, 5, 3, ["magic_attuned"])!.value).toBeGreaterThan(spellPower(frost, 5, 3)!.value);
+    expect(spellCost(frost)).toBe(`${frost.cost} aether · ${frost.cooldownS} s cooldown`);
+    expect(spellCost(frost, ["magic_attuned", "magic_quickened"])).toBe(`${frost.cost} aether · ${frost.cooldownS * 0.75} s cooldown`);
+    expect(spellEffect(skip, 5, 3, ["travel_stride", "travel_far_step"])).toBe("Blink up to 15 m the way you look");
   });
 });

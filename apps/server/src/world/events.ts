@@ -199,6 +199,13 @@ export interface MissionAcceptedEvent {
   missionId: string;
 }
 
+/** A build-tree node was taken (`node`) or the tree was cleared by a respec (`node` null; #81). */
+export interface TreeEvent {
+  type: "tree";
+  playerId: string;
+  node: string | null;
+}
+
 export type GameEvent =
   | SpellCastEvent
   | KillEvent
@@ -217,7 +224,8 @@ export type GameEvent =
   | MedalEvent
   | SpawnRequestEvent
   | SiteDiscoveredEvent
-  | MissionAcceptedEvent;
+  | MissionAcceptedEvent
+  | TreeEvent;
 
 export type GameEventHandler = (e: GameEvent) => void;
 

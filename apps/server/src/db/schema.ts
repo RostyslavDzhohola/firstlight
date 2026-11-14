@@ -296,6 +296,23 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE funnel_step ADD COLUMN folded INTEGER NOT NULL DEFAULT 0;
   `,
+  // 14 (lane progress, #81): the build tree's taken nodes, saved with the character (db/characters.ts
+  // writes and reads it beside the row). A side table so the migration stays idempotent and can be
+  // renumbered; triggers keep it with its character, like medal_count: a death or prune deletes it,
+  // a link moves it. Characters saved before this have no row: no nodes taken.
+  `
+  CREATE TABLE IF NOT EXISTS character_tree (
+    user_id     TEXT PRIMARY KEY,
+    nodes_json  TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE TRIGGER IF NOT EXISTS character_tree_delete AFTER DELETE ON character BEGIN
+    DELETE FROM character_tree WHERE user_id = OLD.user_id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS character_tree_move AFTER UPDATE OF user_id ON character BEGIN
+    DELETE FROM character_tree WHERE user_id = NEW.user_id;
+    UPDATE character_tree SET user_id = NEW.user_id WHERE user_id = OLD.user_id;
+  END;
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

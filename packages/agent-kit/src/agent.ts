@@ -18,6 +18,7 @@ import { SHOP, itemName } from "@firstlight/shared/content/items";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import { isTrialType as isTrial, MISSION_BY_ID, missionGoal, missionsFrom, type MissionDef } from "@firstlight/shared/content/missions";
 import { AETHER, aetherAt, castBlock, FROSTBLOOM, SPELL_BY_ID, SPELL_INDEX, SPELLS, WISHFALL } from "@firstlight/shared/content/spells";
+import { buildStats, nodeLine, reloadMs, spellCooldownS, spendRefusal, TREE, weaponHeat } from "@firstlight/shared/content/tree";
 import { STARTER_STATS, starterMove } from "@firstlight/shared/content/starters";
 import { NF, NPC_DEFS } from "@firstlight/shared/content/npcs";
 import { towardDir } from "@firstlight/shared/content/places";
@@ -30,7 +31,7 @@ import { PORTAL_REACH } from "@firstlight/shared/planet/portals";
 import { inReach } from "@firstlight/shared/content/world";
 import { shopSpotAt } from "@firstlight/shared/content/shops";
 import { AgentError, claimName, fixedToken, guestSession, type TokenSource } from "./auth.ts";
-import { summarize, type Observation, type ObservedCreature, type ObservedItem, type ObservedMission, type ObservedPlace, type ObservedSpells, type ObservedTrial } from "./observe.ts";
+import { summarize, type Observation, type ObservedCreature, type ObservedItem, type ObservedMission, type ObservedPlace, type ObservedSpells, type ObservedTree, type ObservedTrial } from "./observe.ts";
 import { attackShape, bystanderAtRisk, type Bystander } from "./collateral.ts";
 import { addScaled, bearingOfDir, bearingTo, cross, dirOfBearing, dist, dot, groundDistance, len, norm, scale, sub, tangent, turn, type V3 } from "./vec.ts";
 import { createNavigator, type Navigator } from "./nav.ts";
@@ -46,7 +47,7 @@ export interface ConnectOptions {
   authOrigin?: string;
   /** Display name to ask for (3-16 letters, digits or _). The server may refuse it; you keep a generated one. */
   name?: string;
-  /** A new character's starter: index or id (hexwick, ash, kappa, unit7, ninja). */
+  /** A new character's starter: index or id (hexwick, ash, kappa, unit7, ninja, traveller). */
   starter?: number | string;
   look?: number;
   palette?: number;
@@ -517,6 +518,12 @@ export class FirstlightAgent {
     return this.you?.selected ?? 0;
   }
 
+  /** The weapon in hand's reload time for this build (content/tree.ts reloadMs, as the server times it). */
+  private reloadMsNow(): number {
+    const w = this.weapon();
+    return reloadMs(w.def, w.tier, buildStats(this.you?.tree?.nodes));
+  }
+
   private weapon(): { def: WeaponDef; tier: TierStats; item: InvItem | null; slot: number } {
     const slot = this.selectedSlot();
     const item = this.you?.hotbar?.[slot] ?? null;
@@ -608,7 +615,7 @@ export class FirstlightAgent {
         break;
       case "denied":
         this.lastDenial = { action: m.action, reason: m.reason, at: Date.now() };
-        if (m.reason === "reloading" || m.reason === "empty") this.reloadUntil = Math.max(this.reloadUntil, Date.now() + (this.weapon().tier.reload ?? 1.5) * 1000);
+        if (m.reason === "reloading" || m.reason === "empty") this.reloadUntil = Math.max(this.reloadUntil, Date.now() + this.reloadMsNow());
         else if (m.reason === "overheated") this.overheatUntil = Math.max(this.overheatUntil, Date.now() + 1500);
         else this.note("denied", `refused: ${m.action} (${m.reason})`, { key: `denied:${m.action}:${m.reason}`, amount: 0 });
         break;
@@ -881,7 +888,8 @@ export class FirstlightAgent {
     };
     const level: number = you?.level ?? me?.level ?? 1;
     const starterIdx: number = me?.starter ?? this.starter;
-    const pace = starterMove(starterIdx);
+    const sm = starterMove(starterIdx), k = buildStats(you?.tree?.nodes).pace; // Long Stride (tree)
+    const pace = { run: sm.run * k, sprint: sm.sprint * k, dodgeCooldown: sm.dodgeCooldown };
 
     const fresh = this.events.filter((e) => e.at > this.seenEventAt).slice(-12);
     if (!o.peek && fresh.length) this.seenEventAt = fresh[fresh.length - 1]!.at;
@@ -930,6 +938,7 @@ export class FirstlightAgent {
         starter: STARTER_STATS[starterIdx]?.id ?? STARTERS[starterIdx]?.id ?? "unit7",
         speed: { run: round1(pace.run), sprint: round1(pace.sprint), dodgeCooldown: pace.dodgeCooldown },
         spells: this.observedSpells(level),
+        tree: this.observedTree(level, starterIdx),
       },
       creatures: creatures.slice(0, 8),
       players: players.slice(0, 8),
@@ -951,6 +960,13 @@ export class FirstlightAgent {
     return this.world.safeSpot(pos);
   }
 
+  private observedTree(level: number, starter: number): ObservedTree {
+    const t = this.you?.tree;
+    const taken = t?.nodes ?? [];
+    const open = TREE.filter((n) => spendRefusal(level, taken, n.id) === null).map((n) => ({ id: n.id, name: n.name, branch: n.branch, cost: n.cost, what: nodeLine(n.id, { starter, level, tree: taken }) }));
+    return { points: t?.points ?? 0, taken: [...taken], open, respec: t?.respec ?? 0 };
+  }
+
   private observedSpells(level: number): ObservedSpells {
     const book = this.you?.spells ?? null;
     const sn = this.serverNow();
@@ -962,7 +978,7 @@ export class FirstlightAgent {
       list: SPELLS.map((sp, i) => {
         const unlocked = level >= sp.level;
         const readyIn = Math.max(0, Math.round((book?.ready[i] ?? 0) - sn));
-        return { id: sp.id, name: sp.name, level: sp.level, cost: sp.cost, cooldown: sp.cooldownS, unlocked, readyIn, ready: unlocked && readyIn === 0 && aether >= sp.cost, what: sp.blurb };
+        return { id: sp.id, name: sp.name, level: sp.level, cost: sp.cost, cooldown: spellCooldownS(sp, this.you?.tree?.nodes), unlocked, readyIn, ready: unlocked && readyIn === 0 && aether >= sp.cost, what: sp.blurb };
       }),
     };
   }
@@ -1381,7 +1397,7 @@ export class FirstlightAgent {
             if (w.def.gravity && flight > 0) aim = addScaled(aim, up, 0.5 * w.def.gravity * flight * flight);
             const dir = norm(sub(aim, head));
             room.send("fire", { slot: w.slot, ox: head[0], oy: head[1], oz: head[2], dx: dir[0], dy: dir[1], dz: dir[2], t: now });
-            this.spendShot(w.tier, w.item, now);
+            this.spendShot(w.def, w.tier, w.item, now);
           }
         },
       };
@@ -1389,15 +1405,16 @@ export class FirstlightAgent {
   }
 
   /** Mirror the server's magazine and heat rules for a shot just sent (combat.ts consumeAttack). */
-  private spendShot(tier: TierStats, item: InvItem | null, now: number) {
+  private spendShot(def: WeaponDef, tier: TierStats, item: InvItem | null, now: number) {
+    const build = buildStats(this.you?.tree?.nodes);
     if (tier.mag !== undefined && item) {
       const mag = (item.mag ?? tier.mag) - 1;
       item.mag = mag <= 0 ? tier.mag : mag;
-      if (mag <= 0) this.reloadUntil = now + (tier.reload ?? 1.5) * 1000 + 120;
+      if (mag <= 0) this.reloadUntil = now + reloadMs(def, tier, build) + 120;
     }
     if (tier.heat !== undefined) {
       this.heat = Math.max(0, this.heat - (now - this.lastShotAt) / 1000) + 1;
-      if (this.heat >= tier.heat) {
+      if (this.heat >= weaponHeat(tier.heat, build)) {
         this.overheatUntil = now + 1500 + 120;
         this.heat = 0;
       }
@@ -1723,8 +1740,9 @@ export class FirstlightAgent {
     const w = this.weapon();
     if (w.tier.mag === undefined) return { ok: false, reason: "nothing to reload" };
     this.room!.send("reload", { slot: w.slot });
-    this.reloadUntil = Date.now() + (w.tier.reload ?? 1.5) * 1000 + 120;
-    return { ok: true, seconds: w.tier.reload ?? 1.5 };
+    const ms = this.reloadMsNow();
+    this.reloadUntil = Date.now() + ms + 120;
+    return { ok: true, seconds: ms / 1000 };
   }
 
   // ------------------------------------------------------------------------------------ the world's E key
@@ -1832,6 +1850,46 @@ export class FirstlightAgent {
     const coins = you?.coins ?? 0;
     const sells = SHOP.filter((e) => e.category !== "cosmetics" && e.level <= level + 2).map((e) => ({ id: e.itemId, tier: e.tier, name: e.name, price: e.price, level: e.level, ok: e.level <= level && e.price <= coins }));
     return { ok: true, shop: spot.name, keeper: spot.keeper, coins, level, sells };
+  }
+
+  // ------------------------------------------------------------------------------------ build tree (#81)
+
+  private async treeOp(msg: { action: "spend"; node: string } | { action: "respec" }): Promise<ActionResult> {
+    const no = this.notPlaying();
+    if (no) return no;
+    const before = JSON.stringify(this.you?.tree ?? null);
+    const denied = this.waitFor<{ action: string; reason: string }>("denied", (m) => m.action === "tree", 2500);
+    this.room!.send("tree", msg);
+    const changed = this.until(() => JSON.stringify(this.you?.tree ?? null) !== before, 2500);
+    const r = await Promise.race([denied.then((d) => (d ? { denied: d.reason } : null)), changed.then((ok) => (ok ? { ok: true } : null))]);
+    if (r && "denied" in r) {
+      const hint: Record<string, string> = {
+        points: "not enough points: each level gives one; see self.tree.open",
+        locked: "take the node above it in the same branch first",
+        taken: "already taken",
+        "safe zone": "respec only in a safe zone: moveTo('safety') first",
+        coins: `a respec costs ${this.you?.tree?.respec ?? 0} coins`,
+        nothing: "nothing is spent",
+      };
+      return { ok: false, reason: r.denied, ...(hint[r.denied] ? { hint: hint[r.denied] } : {}) };
+    }
+    if (!r) return { ok: false, reason: "no answer", hint: "tree messages are limited to 5 a second" };
+    const t = this.you?.tree;
+    return { ok: true, points: t?.points ?? 0, taken: t?.nodes ?? [], coins: this.you?.coins ?? 0 };
+  }
+
+  /**
+   * Spend build points on a node of the build tree (content/tree.ts): any branch, top-down; deeper nodes
+   * cost more. `self.tree.open` lists what you can take now and what each does for you. The server decides.
+   */
+  spendPoint(node: string): Promise<ActionResult> {
+    if (!TREE.some((n) => n.id === node)) return Promise.resolve({ ok: false, reason: "no such node", hint: `nodes: ${TREE.map((n) => n.id).join(", ")}` });
+    return this.treeOp({ action: "spend", node });
+  }
+
+  /** Take every build point back, in a safe zone, for coins (`self.tree.respec`). */
+  respec(): Promise<ActionResult> {
+    return this.treeOp({ action: "respec" });
   }
 
   private async trade(action: "buy" | "sell", send: () => void): Promise<ActionResult> {

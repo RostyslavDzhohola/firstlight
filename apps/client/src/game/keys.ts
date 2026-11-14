@@ -24,6 +24,8 @@ export const HOTKEYS = {
   view: { code: "KeyV", caps: ["V"] },
   /** Push to talk while voice chat is on (hidden in this build, D-controls-1); was V. */
   pushToTalk: { code: "KeyK", caps: ["K"] },
+  /** The build tree panel (#81): U, free while playing (photo mode reads U only inside photo mode). */
+  build: { code: "KeyU", caps: ["U"] },
 } as const satisfies Record<string, Hotkey>;
 
 /** Does a key press (code + Shift state) hit this hotkey? Shift must match exactly. */
@@ -80,4 +82,5 @@ export const BINDINGS: readonly Binding[] = [
   { code: HOTKEYS.view.code, what: "first / third person" },
   { code: "KeyL", what: "missions panel: collapse / expand (#69)" },
   { code: "KeyL", shift: true, what: "track the next mission (#69)" },
+  { code: HOTKEYS.build.code, what: "build tree (#81)" },
 ];

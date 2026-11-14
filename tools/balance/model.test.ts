@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { WEAPONS } from "../../packages/shared/src/content/weapons.ts";
 import { npcDef } from "../../packages/shared/src/content/npcs.ts";
 import { STARTER_STATS, starterMaxHp } from "../../packages/shared/src/content/starters.ts";
-import { checks } from "./bands.ts";
+import { buildChecks, checks } from "./bands.ts";
 import { clampHits, closingTime, creatureTimeline, damageBy, dodgeFactor, gatedTier, hitTimeline, novaHeadshotLevels, progression, pvpCell, SERVER_CHARGE_ALLOWANCE, SERVER_RATE_ALLOWANCE, SITE_TRIP_S, siteVisits, spellPeaks, spellRows, timeToKill } from "./model.ts";
 import { siteDiscoveryXp, WILD_SITES } from "../../packages/shared/src/content/wildSites.ts";
+import { buildStats, NEUTRAL_BUILD, TREE_BY_ID, type BuildStats } from "../../packages/shared/src/content/tree.ts";
 
 const w = (id: string) => WEAPONS.find((x) => x.id === id)!;
 
@@ -265,5 +266,41 @@ describe("regeneration against bosses and trials (D-fixplay-2)", () => {
     expect(gaps.find((g) => g.id === "tidewrath")!.gapS).toBeGreaterThanOrEqual(REGEN.DELAY_S);
     expect(gaps.find((g) => g.id === "T2")!.gapS).toBe(25);
     for (const g of gaps) if (g.gapS >= REGEN.DELAY_S) expect(REGEN.PAUSED_IN as readonly string[], g.id).toContain(g.kind);
+  });
+});
+
+describe("the build tree's defensive nodes are in the checks (build tree review 4)", () => {
+  /** Run the checks with one node's effect replaced; the node is put back whatever happens. */
+  function failingWith(id: string, apply: (s: BuildStats) => void): string[] {
+    const node = TREE_BY_ID.get(id)! as { apply: (s: BuildStats) => void };
+    const real = node.apply;
+    node.apply = apply;
+    try {
+      return buildChecks().filter((c) => !c.ok).map((c) => c.id);
+    } finally {
+      node.apply = real;
+    }
+  }
+
+  it("the shipped tree is in band", () => {
+    expect(buildChecks().filter((c) => !c.ok).map((c) => c.id)).toEqual([]);
+  }, 30_000);
+
+  it("a node pushed far out of range fails a check: Iron Guard +90 points (the review's mutation), Tonic Craft, Hardy, Second Roll", () => {
+    expect(failingWith("blade_guard", (s) => void (s.block += 0.9))).toEqual(expect.arrayContaining(["build.guard.riverstaff.t1", "build.guard.sunbrand.t2"]));
+    expect(failingWith("blade_guard", (s) => void (s.block += 0.9)).some((id) => /^build\..*\.(edge|pve)$/.test(id))).toBe(true);
+    expect(failingWith("body_tonic_craft", (s) => void ((s.tonicHeal *= 4), (s.tonicCleanse = true))).some((id) => /^build\..*\.(edge|pve)$/.test(id))).toBe(true);
+    expect(failingWith("body_hardy", (s) => void (s.hp *= 1.5)).some((id) => /^build\..*\.(edge|pve)$/.test(id))).toBe(true);
+    expect(failingWith("body_second_roll", (s) => void (s.dodgeCharges = 6)).some((id) => /^build\..*\.(edge|pve)$/.test(id))).toBe(true);
+  }, 120_000);
+
+  it("each defensive node changes the effective HP the model gives a build", async () => {
+    const { defense, effectiveHp, stream, hitTimeline: tl } = await import("./model.ts");
+    const s = stream(tl(w("carbine"), 2, 20, "full", 120, { cadence: "server" }), 290)!;
+    const plain = effectiveHp(s, defense(NEUTRAL_BUILD, 290, 1.25, 0.8));
+    for (const id of ["body_second_roll", "body_tonic_craft", "body_last_breath", "blade_guard"]) {
+      expect(effectiveHp(s, defense(buildStats([id]), 290, 1.25, 0.8)), id).toBeGreaterThan(plain);
+    }
+    expect(effectiveHp(s, defense(buildStats(["blade_guard"]), 290, 1.25, 0)), "no guard weapon: Iron Guard does nothing").toBeCloseTo(effectiveHp(s, defense(NEUTRAL_BUILD, 290, 1.25, 0)), 9);
   });
 });

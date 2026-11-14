@@ -12,6 +12,7 @@ import { AuthError, devCode, getAccountInfo, invalidatePlayToken, NAME_PATTERN, 
 import { button, el, icon, isolateKeys, overlayClosed, overlayOpened, sprite } from "./dom.ts";
 import { codeFromText, firstSaveStep, mayOpenSaveCard, SAVE_MIN_LEVEL, type SaveStatus, type SaveStep as FlowStep } from "./saveOffer.ts";
 import { installSprites, portraitSprite } from "./sprites.ts";
+import { PLAIN_STARTER } from "@firstlight/shared/content/weapons";
 
 const RESEND_SECONDS = 60;
 const RING_C = 50.3; // 2π × 8
@@ -472,7 +473,7 @@ export function openSaveProgress(opts: { name?: string; level?: number; starter?
     m.card.classList.add("fl-acct--save");
     m.card.dataset.e2e = "save-card";
     m.card.setAttribute("aria-label", "Save your progress");
-    const starter = () => opts.starter ?? (Number(localStorage.getItem("fl.starter") ?? 0) || 0);
+    const starter = () => opts.starter ?? (Number(localStorage.getItem("fl.starter") ?? PLAIN_STARTER) || 0);
     const run = (start: FlowStep, info: AccountInfo | null) =>
       emailFlow(m.card, {
         kind: "save",

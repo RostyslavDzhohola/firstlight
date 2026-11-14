@@ -17,6 +17,15 @@ function fxOf(a: PlayerActor): NpcMoveFx {
   return a.npcFx;
 }
 
+/** End a chill or slow at once (Tonic Craft, build tree). Returns whether one was running. */
+export function clearSlow(a: PlayerActor, now: number): boolean {
+  const fx = a.npcFx;
+  if (!fx || now >= fx.slowUntil) return false;
+  fx.slow = 0;
+  fx.slowUntil = now;
+  return true;
+}
+
 /** Apply a movement effect to a player (other effect kinds are ignored here). */
 export function applyMoveEffect(a: PlayerActor, e: StatusEffect, now: number) {
   if (e.kind === "chill" || e.kind === "slow") {

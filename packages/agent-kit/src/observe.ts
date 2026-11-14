@@ -51,6 +51,19 @@ export interface ObservedSelf {
   speed: { run: number; sprint: number; dodgeCooldown: number };
   /** The spellbook: aether and the four spells (cast them with `cast`). */
   spells: ObservedSpells;
+  /** The build tree (#81): points to spend, nodes taken, and what can be taken now (spend with `spendPoint`). */
+  tree: ObservedTree;
+}
+
+export interface ObservedTree {
+  /** Points not spent yet (one per level past the first). */
+  points: number;
+  /** Node ids taken, in order. */
+  taken: string[];
+  /** Nodes that can be taken with the points you have: id, branch, cost and what it does for you. */
+  open: { id: string; name: string; branch: string; cost: number; what: string }[];
+  /** Coins a respec costs (in a safe zone; `respec`). */
+  respec: number;
 }
 
 export interface ObservedSpell {
@@ -205,6 +218,7 @@ export function summarize(o: Omit<Observation, "summary">, maxBytes = 1500): str
   const sp = s.spells;
   const spell = (x: ObservedSpell) => `${x.id} ${!x.unlocked ? `L${x.level}` : x.readyIn > 0 ? `${Math.ceil(x.readyIn / 1000)}s` : x.ready ? "ready" : `needs ${x.cost}`}`;
   lines.push([70, `Aether ${Math.round(sp.aether)}/${sp.max}${sp.ward ? `, ward ${sp.ward.hp}hp ${Math.ceil(sp.ward.left)}s` : ""}. Spells: ${sp.list.map(spell).join(", ")}.`]);
+  if (s.tree.points > 0) lines.push([65, `Build: ${s.tree.points} point(s) to spend (spendPoint): ${s.tree.open.map((n) => `${n.id} ${n.cost}pt`).join(", ") || "none affordable yet"}.`]);
   if (o.creatures.length) {
     const list = o.creatures.slice(0, 5).map((c) => `${c.id} ${c.name} L${c.level} ${c.hp}/${c.maxHp}hp ${where(c.dist, c.bearing)}${c.onMe ? " ATTACKING YOU" : c.hostile ? " hostile" : ""}${c.boss ? " BOSS" : ""}${c.mission ? " *mission" : ""}${c.claimedBy ? ` (${c.claimedBy.name}'s fight)` : ""}`);
     lines.push([80, `Creatures (${o.creatures.length}): ${list.join("; ")}.`]);
