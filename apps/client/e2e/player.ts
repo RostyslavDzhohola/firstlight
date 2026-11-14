@@ -163,6 +163,29 @@ const LOAD_MS = Number(process.env.E2E_LOAD_MS ?? 180_000);
 const ATTACK_ECHOES = new Set(["shot", "projectile", "swing"]);
 const SAFE_NOTICE = /safe zone|holstered/i;
 
+/** Bearings (degrees from the camera) that walk into a portal ring within `within` m: within 30° of one. */
+function intoPortal(s: Snap, within: number): (bearing: number) => boolean {
+  const near = (s.portals ?? []).filter((p) => p.surface < within);
+  return (b) => near.some((p) => Math.abs(wrap180(b - p.bearing)) <= 30);
+}
+
+/**
+ * The bearing furthest (in angle) from every portal within `within` m, or null with none near: straight
+ * away from a lone portal, square to the line through two on either side of a pad. Ties go to the
+ * bearing away from the first (home) portal.
+ */
+function awayFromPortals(s: Snap, within: number): number | null {
+  const near = (s.portals ?? []).filter((p) => p.surface < within);
+  if (!near.length) return null;
+  const home = wrap180(near[0]!.bearing + 180);
+  let best = { b: home, score: -1 };
+  for (let b = -180; b < 180; b += 15) {
+    const score = Math.min(...near.map((p) => Math.abs(wrap180(b - p.bearing))));
+    if (score > best.score + 1e-6 || (Math.abs(score - best.score) < 1e-6 && Math.abs(wrap180(b - home)) < Math.abs(wrap180(best.b - home)))) best = { b, score };
+  }
+  return best.b;
+}
+
 export class Player {
   /** Where Playwright's mouse is. Under pointer lock only the movement matters, so it may leave the viewport. */
   private mouse = { x: 640, y: 360 };
@@ -479,8 +502,8 @@ export class Player {
     const offsets = [0, 15, 30, 45, 60, 80, 100, 125, 150];
     const cands = offsets.flatMap((o) => (o === 0 ? [0] : [o * this.lastSide, -o * this.lastSide])).map((o) => wrap180(want + o));
     const got = (await this.clearance(cands)) ?? cands.map((b) => ({ bearing: b, clear: 12 }));
-    const portal = avoidPortal ? (s ?? (await this.snap())).portals?.find((p) => p.surface < 10) : undefined;
-    const ok = (c: { bearing: number }) => !portal || Math.abs(wrap180(c.bearing - portal.bearing)) > 30;
+    const into = avoidPortal ? intoPortal(s ?? (await this.snap()), 10) : () => false;
+    const ok = (c: { bearing: number }) => !into(c.bearing);
     const pick = got.find((c) => c.clear >= need && ok(c)) ?? [...got].filter(ok).sort((a, b) => b.clear - a.clear)[0] ?? got[0]!;
     const side = Math.sign(wrap180(pick.bearing - want));
     if (side) this.lastSide = side; // keep going round the same side of an obstacle
@@ -507,7 +530,7 @@ export class Player {
       // leaves through the nearest gate (once per walk), then goes on from outside.
       const now = Date.now();
       if (t.surface < best.d - 2) best = { d: t.surface, at: now };
-      else if (!leftTown && now - best.at > 8000 && (s.gates?.length ?? 0) > 0 && s.zone?.server === "safe") {
+      else if (!leftTown && !this.leavingTown && now - best.at > 8000 && (s.gates?.length ?? 0) > 0 && s.zone?.server === "safe") {
         leftTown = true;
         await this.walkOutOfTown(Math.max(20_000, until - now));
         best = { d: Infinity, at: Date.now() };
@@ -540,7 +563,16 @@ export class Player {
   async unstick(want: number, attempt: number): Promise<number> {
     if (attempt > 1 && attempt % 2 === 1) this.lastSide = -this.lastSide;
     await this.hold(["KeyS"], 500);
-    const offs = [70, 90, 110, 130].map((o) => wrap180(want + this.lastSide * o));
+    // The sprint goes ~10 m: never along a line into a portal ring (Arcadia's pad has two since Lumen, #6).
+    const into = intoPortal(await this.snap(), 16);
+    const side = (k: number) => [70, 90, 110, 130].map((o) => wrap180(want + k * o)).filter((b) => !into(b));
+    let offs = side(this.lastSide);
+    if (!offs.length) {
+      this.lastSide = -this.lastSide;
+      offs = side(this.lastSide);
+    }
+    if (!offs.length) offs = [wrap180(want + 180)].filter((b) => !into(b));
+    if (!offs.length) return 0; // boxed in by portals: no sprint at all
     const got = (await this.clearance(offs, 12)) ?? [];
     const heading = got.find((c) => c.clear >= 6)?.bearing ?? offs[1]!;
     await this.turn(heading);
@@ -566,10 +598,11 @@ export class Player {
       const s = await this.snap();
       expect(s.body, "still on the same body (didn't walk into the portal)").toBe(body);
       if (s.zone?.server === "danger" && s.zone.local === "danger" && (s.zone.toSafe ?? s.zone.padDist - s.zone.safeRadius) > 1.5 && !s.player?.swimming) return s;
-      const home = s.portals?.[0];
-      // Near the portal: away from it, with any recovery turn added on top (±70° keeps it ≥ 110° off
-      // the portal); elsewhere the recovery turn alone (relative to where we face).
-      const want = home && home.surface < 25 ? wrap180(home.bearing + 180 + recovery) : recovery;
+      // Near the portals (one home, and on Arcadia a second across the pad up to Lumen, #6): the way
+      // furthest from all of them, with any recovery turn on top (steer keeps it out of their rings);
+      // elsewhere the recovery turn alone (relative to where we face).
+      const away = awayFromPortals(s, 25);
+      const want = away !== null ? wrap180(away + recovery) : recovery;
       const go = await this.steer(want, 4, s);
       if (Math.abs(go.bearing) > 8) await this.turn(go.bearing);
       recovery = 0;
@@ -593,6 +626,20 @@ export class Player {
    * plaza and try again (a player who got lost does the same).
    */
   async walkOutOfTown(timeoutMs = 75_000) {
+    // Its own walks (to the plaza, the gate, out of it) never start another way out of town: nested,
+    // the innermost one's failure ended the walk before this loop could try the next attempt.
+    if (this.leavingTown) throw new Error("walkOutOfTown is already running");
+    this.leavingTown = true;
+    try {
+      return await this.leaveTown(timeoutMs);
+    } finally {
+      this.leavingTown = false;
+    }
+  }
+
+  private leavingTown = false;
+
+  private async leaveTown(timeoutMs: number) {
     const until = Date.now() + timeoutMs;
     const s0 = await this.snap();
     expect(s0.gates?.length ?? 0, "Portus has town gates").toBeGreaterThan(0);
