@@ -90,19 +90,19 @@ export const WILDLIFE: Record<BodyId, WildSpecies[]> = {
   portus: [],
   lumen: [],
   arcadia: [
-    { id: "hedge_finch", name: "Hedge Finch", behaviour: "bird", parts: bird(0x7a5536, 0xe0a060, 0xf0c040), count: [4, 7], regions: ["meadow", "heath", "marsh"], size: 1 },
-    { id: "clover_kit", name: "Clover Kit", behaviour: "grazer", parts: kit(0xb08a64, 0xeadcc4), count: [2, 4], regions: ["meadow", "heath"], size: 1 },
+    { id: "hedge_finch", name: "Hedge Finch", behaviour: "bird", parts: bird(0x7a5536, 0xe0a060, 0xf0c040), count: [4, 7], regions: ["meadow", "heath", "marsh"], size: 1.5 },
+    { id: "clover_kit", name: "Clover Kit", behaviour: "grazer", parts: kit(0xb08a64, 0xeadcc4), count: [2, 4], regions: ["meadow", "heath"], size: 1.25 },
     { id: "lake_darter", name: "Lake Darter", behaviour: "fish", parts: ring(0xdff4ff), count: [1, 1], size: 1 },
     { id: "lamp_beetle", name: "Lamplight Beetle", behaviour: "glow", parts: glow(0xfff08a), count: [9, 14], regions: ["wood", "marsh", "meadow"], night: true, size: 1 },
   ],
   hollowmere: [
-    { id: "fen_crow", name: "Fen Crow", behaviour: "bird", parts: bird(0x2a2633, 0x4a4458, 0x8a8070), count: [3, 6], regions: ["fen", "ashwood", "mire"], size: 1.25 },
+    { id: "fen_crow", name: "Fen Crow", behaviour: "bird", parts: bird(0x2a2633, 0x4a4458, 0x8a8070), count: [3, 6], regions: ["fen", "ashwood", "mire"], size: 1.7 },
     { id: "bog_hopper", name: "Bog Hopper", behaviour: "grazer", parts: hopper(0x5d7048, 0xc8e070), count: [2, 4], regions: ["fen", "mire", "glowcap"], size: 1 },
     { id: "mere_eel", name: "Mere Eel", behaviour: "fish", parts: ring(0xc8c0e8), count: [1, 1], size: 1 },
     { id: "ghost_moth", name: "Ghost Moth", behaviour: "glow", parts: glow(0xc8b0ff), count: [8, 12], regions: ["glowcap", "mire", "fen", "ashwood"], night: true, size: 1.3 },
   ],
   meridian: [
-    { id: "dust_lark", name: "Dust Lark", behaviour: "bird", parts: bird(0xc09a6a, 0xf0dcb8, 0x5a3a20), count: [4, 7], regions: ["flats", "rust", "dunes"], size: 1 },
+    { id: "dust_lark", name: "Dust Lark", behaviour: "bird", parts: bird(0xc09a6a, 0xf0dcb8, 0x5a3a20), count: [4, 7], regions: ["flats", "rust", "dunes"], size: 1.5 },
     { id: "rock_skink", name: "Rock Skink", behaviour: "grazer", parts: skink(0xa8552e, 0xf0b060), count: [2, 3], regions: ["flats", "rust", "salt"], size: 1.2 },
     { id: "brine_minnow", name: "Brine Minnow", behaviour: "fish", parts: ring(0xf0f8ff), count: [1, 1], size: 1 },
     { id: "ember_mite", name: "Ember Mite", behaviour: "glow", parts: glow(0xff9a40), count: [8, 12], regions: ["rust", "flats"], night: true, size: 1 },
