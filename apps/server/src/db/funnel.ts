@@ -7,12 +7,23 @@
 //
 // Bounded by construction (D-ship-6): every write goes through a daily budget per side (visits,
 // accounts, errors) and a bounded queue that one timer flushes in a single transaction, off the room
-// tick and the request; raw rows are kept FUNNEL_LIMITS.retentionDays and then folded into
-// `funnel_day` aggregates. The raw tables therefore never hold more than the caps × retention.
+// tick and the request; raw rows are kept FUNNEL_LIMITS.retentionDays (longer than a visit lives) and
+// then folded into `funnel_day` aggregates: a visit's rows are deleted, an account's are kept and
+// marked `folded` (a character can come back any time; their number is bounded by accounts, and a
+// deleted account's go). The raw tables therefore never hold more than the caps × retention plus a
+// few rows per existing account.
 
+import { VISIT_TOKEN } from "../auth/visitToken.ts";
 import { stmt, type Db } from "./game-db.ts";
 
 const DAY = 86_400_000;
+
+/**
+ * The longest a visit can still take steps after its first row (review round two, #8): renewable for
+ * RENEW_MS after it began, each token live for TOKEN_TTL_MS, plus the minute of clock slack visitLive
+ * allows. Raw rows are kept at least this long, so a visit whose rows are folded can never act again.
+ */
+export const VISIT_LIFE_DAYS = Math.ceil((VISIT_TOKEN.RENEW_MS + VISIT_TOKEN.TOKEN_TTL_MS + 60_000) / DAY);
 
 export type FunnelKind = "person" | "test" | "agent";
 
@@ -69,18 +80,20 @@ export function pageStepAllowed(step: string): boolean {
 /**
  * The funnel's hard limits (D-ship-6). Per UTC day: visits issued, raw rows on each side, error
  * reports; past a cap the write is dropped (and /stats says the day was capped). Raw rows are kept
- * `retentionDays` (enough for the 7-day return check), error reports `errorRetentionDays`. The
- * queue holds at most `maxPending` writes between flushes. Worst case under a sustained flood the
- * raw table holds (visitRowsPerDay + accountRowsPerDay) × (retentionDays + 1) rows (~1.8 M, a few
- * hundred MB at most) and client_error errorsPerDay × errorRetentionDays; `funnel_day` grows by about
- * a hundred small rows a day. Mutable for tests.
+ * `retentionDays` (longer than a visit can act, VISIT_LIFE_DAYS), error reports `errorRetentionDays`.
+ * The queue holds at most `maxPending` writes between flushes. Worst case under a sustained flood the
+ * raw table holds visitRowsPerDay × (retentionDays + 1) visit rows (~1.3 M) plus the account rows,
+ * which stay while the account exists (at most one per account and step, ~10 per account), and
+ * client_error errorsPerDay × errorRetentionDays; `funnel_day` grows by about a hundred small rows a
+ * day. Mutable for tests.
  */
 export const FUNNEL_LIMITS = {
   visitsPerDay: 5_000,
   visitRowsPerDay: 40_000,
   accountRowsPerDay: 40_000,
   errorsPerDay: 1_000,
-  retentionDays: 21,
+  /** Longer than a visit lives (VISIT_LIFE_DAYS); rollupFunnel never uses less whatever this says. */
+  retentionDays: VISIT_LIFE_DAYS + 1,
   errorRetentionDays: 30,
   maxPending: 5_000,
   flushMs: 1_000,
@@ -312,7 +325,10 @@ export function flushFunnel(only?: Db, opts: { final?: boolean } = {}): number {
     clearTimeout(timer);
     timer = null;
   }
-  if (!pending.length) return 0;
+  if (!pending.length) {
+    failures = 0;
+    return 0;
+  }
   const final = !!opts.final;
   const started = performance.now();
   const gone = new Set<Pending>();
@@ -331,7 +347,8 @@ export function flushFunnel(only?: Db, opts: { final?: boolean } = {}): number {
     if (wait !== null) db.pragma("busy_timeout = 0");
     try {
       for (let i = 0; i < mine.length; i += FUNNEL_LIMITS.flushSlice) {
-        if (!final && performance.now() - started >= FUNNEL_LIMITS.flushBudgetMs) {
+        // At least one slice per attempt, however slow the machine is; then the time budget.
+        if (!final && written + gone.size > 0 && performance.now() - started >= FUNNEL_LIMITS.flushBudgetMs) {
           outOfTime = true;
           break;
         }
@@ -442,6 +459,14 @@ export function moveFunnel(db: Db, fromUserId: string, toUserId: string): void {
 /** The effective kind on read: an account our tools flagged after its rows were written is a test one. */
 const KIND_SQL = `CASE WHEN f.subject LIKE 'u:%' AND EXISTS (SELECT 1 FROM test_account t WHERE t.user_id = substr(f.subject, 3)) THEN 'test' ELSE f.kind END`;
 
+const hasFoldedColumn = new WeakMap<Db, boolean>();
+/** `f.folded`, or 0 on a game.db from before migration 13 (`pnpm metrics --funnel-db` opens old copies read-only). */
+function foldedSql(db: Db): string {
+  let has = hasFoldedColumn.get(db);
+  if (has === undefined) hasFoldedColumn.set(db, (has = !!db.prepare("SELECT 1 FROM pragma_table_info('funnel_step') WHERE name = 'folded'").get()));
+  return has ? "f.folded" : "0";
+}
+
 export interface FunnelStepCount {
   step: string;
   n: number;
@@ -496,16 +521,18 @@ const PAIR_IDS = ["gets_in", "gets_in_page", "tutorial", "mission", "level5", "b
  */
 export function funnelReport(db: Db, since = 0, now = Date.now(), until = Number.MAX_SAFE_INTEGER): FunnelReport {
   flushFunnel(db); // queued rows count too
+  // Subjects whose cohort day was folded (funnel_day holds them) are left out, whatever they did since.
   const rows = stmt(
     db,
-    `WITH f AS (SELECT subject, step, at, value, detail, ${KIND_SQL} AS kind FROM funnel_step f),
-          cohort AS (SELECT subject FROM f GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MIN(kind = 'person') = 1)
+    `WITH f AS (SELECT subject, step, at, value, detail, ${KIND_SQL} AS kind, ${foldedSql(db)} AS folded FROM funnel_step f),
+          cohort AS (SELECT subject FROM f GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MIN(kind = 'person') = 1 AND MAX(folded) = 0)
      SELECT f.subject, f.step, f.at, f.value, f.detail FROM f JOIN cohort USING (subject)`,
   ).all(since, until) as { subject: string; step: string; at: number; value: number | null; detail: string | null }[];
   const apartRows = stmt(
     db,
-    `WITH f AS (SELECT subject, at, ${KIND_SQL} AS kind FROM funnel_step f)
-     SELECT kind, COUNT(DISTINCT subject) AS n FROM f WHERE at >= ? AND at < ? AND kind != 'person' GROUP BY kind`,
+    `WITH f AS (SELECT subject, at, ${KIND_SQL} AS kind, ${foldedSql(db)} AS folded FROM funnel_step f),
+          live AS (SELECT subject FROM f GROUP BY subject HAVING MAX(folded) = 0)
+     SELECT kind, COUNT(DISTINCT subject) AS n FROM f JOIN live USING (subject) WHERE at >= ? AND at < ? AND kind != 'person' GROUP BY kind`,
   ).all(since, until) as { kind: string; n: number }[];
   const out: FunnelReport = {
     since,
@@ -594,14 +621,21 @@ export function funnelReport(db: Db, since = 0, now = Date.now(), until = Number
 const dayKey = (day: number) => new Date(day * DAY).toISOString().slice(0, 10);
 
 /**
- * Fold every cohort day older than the retention into `funnel_day` and delete its raw rows (daily
- * housekeeping). A subject belongs to the day of its first row; its later rows go with it.
+ * Fold every cohort day older than the retention into `funnel_day` (daily housekeeping). A subject
+ * belongs to the day of its first row; its later rows go with it. A subject that can still act is
+ * never forgotten (review round two, #8), by construction: raw rows are kept longer than a visit can
+ * take steps (VISIT_LIFE_DAYS, whatever FUNNEL_LIMITS says), so a folded visit's rows are deleted;
+ * an account can come back any time, so a folded account's rows stay, marked `folded` (its first
+ * join and steps stay known, and reports leave it out: its day is in funnel_day). Their number is
+ * bounded by accounts: when an account is deleted (guest pruning) its rows go here too.
  */
 export function rollupFunnel(db: Db, now = Date.now()): number {
   flushFunnel(db);
-  const cutoff = Math.floor(now / DAY) * DAY - FUNNEL_LIMITS.retentionDays * DAY;
-  const days = (stmt(db, "SELECT DISTINCT first / 86400000 AS d FROM (SELECT MIN(at) AS first FROM funnel_step GROUP BY subject) WHERE first < ? ORDER BY d").all(cutoff) as { d: number }[]).map((r) => Math.floor(r.d));
+  const keepDays = Math.max(FUNNEL_LIMITS.retentionDays, VISIT_LIFE_DAYS);
+  const cutoff = Math.floor(now / DAY) * DAY - keepDays * DAY;
+  const days = (stmt(db, "SELECT DISTINCT first / 86400000 AS d FROM (SELECT MIN(at) AS first FROM funnel_step GROUP BY subject HAVING MAX(folded) = 0) WHERE first < ? ORDER BY d").all(cutoff) as { d: number }[]).map((r) => Math.floor(r.d));
   const put = stmt(db, "INSERT INTO funnel_day (day, metric, num, den, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT (day, metric) DO UPDATE SET num = num + excluded.num, den = den + excluded.den, value = COALESCE(excluded.value, value)");
+  const cohort = "SELECT subject FROM funnel_step GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ? AND MAX(folded) = 0";
   for (const d of days) {
     const since = d * DAY;
     const r = funnelReport(db, since, now, since + DAY);
@@ -615,9 +649,12 @@ export function rollupFunnel(db: Db, now = Date.now()): number {
       if (r.firstSessionN) put.run(key, "median:first_session", r.firstSessionN, 0, r.medianFirstSessionMs);
       if (r.apart.test) put.run(key, "apart:test", r.apart.test, 0, null);
       if (r.apart.agent) put.run(key, "apart:agent", r.apart.agent, 0, null);
-      stmt(db, "DELETE FROM funnel_step WHERE subject IN (SELECT subject FROM funnel_step GROUP BY subject HAVING MIN(at) >= ? AND MIN(at) < ?)").run(since, since + DAY);
+      stmt(db, `DELETE FROM funnel_step WHERE subject LIKE 'v:%' AND subject IN (${cohort})`).run(since, since + DAY);
+      stmt(db, `UPDATE funnel_step SET folded = 1 WHERE subject LIKE 'u:%' AND subject IN (${cohort})`).run(since, since + DAY);
     })();
   }
+  // A folded account that no longer exists can't come back: its rows go.
+  stmt(db, "DELETE FROM funnel_step WHERE subject IN (SELECT DISTINCT subject FROM funnel_step f WHERE f.folded = 1 AND f.subject LIKE 'u:%' AND NOT EXISTS (SELECT 1 FROM account a WHERE a.user_id = substr(f.subject, 3)))").run();
   return days.length;
 }
 

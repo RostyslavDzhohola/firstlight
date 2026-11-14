@@ -289,6 +289,13 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (day, metric)
   );
   `,
+  // 13 (fix-sec2, review round two #8): a folded account subject keeps its raw rows, marked here, so
+  // a character that comes back after its cohort day was folded is still known (its first join, its
+  // steps) and is never counted as a new subject. Visits are deleted when folded (they can't act by
+  // then: db/funnel.ts keeps raw rows longer than a visit lives).
+  `
+  ALTER TABLE funnel_step ADD COLUMN folded INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */

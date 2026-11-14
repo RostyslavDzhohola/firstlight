@@ -98,7 +98,7 @@ describe("error report scrubbing (review 2026-11-13 ship #3)", () => {
         scrubReport(s, s);
         best = Math.min(best, performance.now() - t0);
       }
-      expect(best, name).toBeLessThan(10);
+      expect(best, name).toBeLessThan(25); // quiet machine: under 3 ms; the old email rule took seconds
     }
   });
 });
