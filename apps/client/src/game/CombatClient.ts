@@ -16,6 +16,7 @@ import { zoneInfo } from "../ui/zoneLabel.ts";
 import { PhraseWheel } from "../ui/phraseWheel.ts";
 import type { Game } from "./Game.ts";
 import { setStarterMove } from "./PlayerController.ts";
+import { buildStats } from "@firstlight/shared/content/tree";
 import { easeShare } from "./frameClock.ts";
 import { openSaveProgress } from "../ui/account.ts";
 import { closeDeath, type DeathInfo } from "../ui/death.ts";
@@ -342,7 +343,7 @@ export class CombatClient {
     if (meState) {
       g.hud.setHp(meState.hp, meState.maxHp);
       g.hud.setIdentity(meState.name, meState.starter, meState.palette, meState.look ?? 0);
-      setStarterMove(meState.starter); // predict the pace and roll the server validates (content/starters.ts)
+      setStarterMove(meState.starter, g.hud.you?.tree?.nodes); // predict the pace and roll the server validates (starters.ts, tree.ts)
       // The label shows what the server enforces (its flag); the shared zone function says where.
       const p = g.player.pos;
       g.hud.setZone(zoneInfo(g.bodyId, zoneAt(BODIES[g.bodyId], p.x, p.y, p.z), !!(meState.flags & PF.SAFE)));
@@ -452,7 +453,7 @@ export class CombatClient {
           room.send("melee", { slot: g.hud.you?.selected ?? 0, t: Date.now(), heavy: true });
           g.self?.trigger("heavy"); // own avatar animates now; remote views follow the server's swing
           this.lastFire = now;
-          if (t.cooldown) this.special.started(now, t.cooldown);
+          if (t.cooldown) this.special.started(now, t.cooldown * buildStats(g.hud.you?.tree?.nodes).heavyCooldown); // Riposte (tree), as combat.ts
         }
       }
     } else {
@@ -521,7 +522,7 @@ export class CombatClient {
     }
     const origin = cam.getWorldPosition(new THREE.Vector3());
     const dir = cam.getWorldDirection(new THREE.Vector3());
-    const charge = def.delivery === "arrow" ? Math.min(1, (now - this.chargeStart) / ((t.draw ?? 1) * 1000)) : 1;
+    const charge = def.delivery === "arrow" ? Math.min(1, (now - this.chargeStart) / ((t.draw ?? 1) * 1000 * buildStats(g.hud.you?.tree?.nodes).draw)) : 1;
     room.send("fire", { slot, ox: origin.x, oy: origin.y, oz: origin.z, dx: dir.x, dy: dir.y, dz: dir.z, t: Date.now(), charge });
     if (def.delivery === "arrow" && rmb) {
       // Still holding the draw: the server's timer restarts after each shot, so restart ours too.

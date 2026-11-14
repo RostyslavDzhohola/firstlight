@@ -12,7 +12,8 @@ import { SPELLS, type SpellDef } from "@firstlight/shared/content/spells";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { SoundName } from "../audio/sounds.ts";
 import { spellGains } from "../game/spellInfo.ts";
-import { starterMaxHp } from "@firstlight/shared/content/starters";
+import { playerMaxHp } from "@firstlight/shared/content/tree";
+import { HOTKEYS } from "../game/keys.ts";
 
 export type MomentKind = "level" | "spell" | "mission" | "trial" | "gleam" | "vault" | "medal";
 
@@ -57,14 +58,18 @@ export function nextSpell(level: number): SpellDef | null {
  * A level-up from `prev` to `level`: one banner for the level, and one for each spell it unlocks
  * (with its key). The level banner says what comes next when nothing unlocked.
  */
-export function levelMoments(prev: number, level: number, starter = 0): Moment[] {
+export function levelMoments(prev: number, level: number, starter = 0, tree?: readonly string[]): Moment[] {
   if (level <= prev) return [];
   const next = nextSpell(level);
   // #79: the banner says what the level changed in the spells you know ("Frostbloom 26 → 27").
-  const gains = spellGains(prev, level, starter);
+  const gains = spellGains(prev, level, starter, tree);
+  const hp = (l: number) => playerMaxHp({ starter, level: l, tree });
+  // #81: each level is a build point; the banner names the key (the pause menu has it too), never a card to click.
+  const points = level - prev;
+  const build = `+${points} build point${points === 1 ? "" : "s"} (${HOTKEYS.build.caps.join(" ")} or the menu)`;
   const out: Moment[] = [{
     kind: "level", kicker: "Level up", title: `Level ${level}`, sprite: "star", ms: HOLD_MS, merge: "level",
-    reward: [`+${starterMaxHp(starter, level) - starterMaxHp(starter, prev)} max HP, +${(level - prev) * 3}% damage`, gains, next ? `${next.name} at level ${next.level}` : ""].filter(Boolean).join(" · "),
+    reward: [`+${hp(level) - hp(prev)} max HP, +${(level - prev) * 3}% damage`, build, gains, next ? `${next.name} at level ${next.level}` : ""].filter(Boolean).join(" · "),
   }];
   for (const s of spellUnlocks(prev, level)) {
     out.push({ kind: "spell", kicker: "New spell", title: s.name, reward: s.blurb, sprite: `spell-${s.id}`, key: s.keycap, ms: HOLD_LONG_MS });

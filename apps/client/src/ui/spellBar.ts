@@ -38,14 +38,14 @@ export class SpellBar {
 
   private numbersKey = "";
 
-  /** Tooltips with each spell's numbers at `level` for this starter (#79); DOM only when they change. */
-  setNumbers(level: number, starter: number) {
-    const key = `${level}|${starter}`;
+  /** Tooltips with each spell's numbers at `level` for this starter and build tree (#79, #81); DOM only when they change. */
+  setNumbers(level: number, starter: number, tree?: readonly string[]) {
+    const key = `${level}|${starter}|${tree?.join(",") ?? ""}`;
     if (key === this.numbersKey) return;
     this.numbersKey = key;
     SPELLS.forEach((s, i) => {
       const slot = this.slots[i];
-      if (slot) slot.root.title = spellTooltip(s, level, starter);
+      if (slot) slot.root.title = spellTooltip(s, level, starter, tree);
     });
   }
 

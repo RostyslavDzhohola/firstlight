@@ -82,7 +82,8 @@ export function loadCharacter<I = unknown, M = unknown>(db: Db, userId: string):
   const r = stmt(db, "SELECT * FROM character WHERE user_id = ?").get(userId) as CharacterRow | undefined;
   if (!r) return null;
   const t = stmt(db, "SELECT nodes_json FROM character_tree WHERE user_id = ?").get(userId) as { nodes_json: string } | undefined;
-  return { ...toCharacter<I, M>(r), tree: parseJson<string[]>(t?.nodes_json ?? "[]", []) };
+  const c = toCharacter<I, M>(r);
+  return t ? { ...c, tree: parseJson<string[]>(t.nodes_json, []) } : c; // no row: no nodes taken (saved before #81)
 }
 
 const SAVE_TREE_SQL = "INSERT INTO character_tree (user_id, nodes_json) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET nodes_json = excluded.nodes_json";

@@ -18,7 +18,7 @@ import { deepWater, SWIM_FLOAT } from "@firstlight/shared/planet/water";
 import { ADMIN_MODE } from "@firstlight/shared/content/admin";
 import { BASE_GRAVITY } from "@firstlight/shared/planet/bodies";
 import { starterMove } from "@firstlight/shared/content/starters";
-import { buildStats } from "@firstlight/shared/content/tree";
+import { buildStats, rollReady } from "@firstlight/shared/content/tree";
 import { adminSwitch, inSaddle, type PlayerActor } from "./actors.ts";
 import type { V3 } from "./geometry.ts";
 import { activeMoveFx, movementLimits } from "./npc/effects.ts";
@@ -99,10 +99,9 @@ export interface MoveLimits {
   fly?: boolean;
 }
 
-/** May a roll start now? One charge: a cooldown since the last roll. More: fewer than `charges` rolls in the last cooldown. */
+/** May a roll start now (content/tree.ts rollReady)? One charge: a cooldown since the last roll; Second Roll: two out at once. */
 export function dodgeReady(a: { lastDodgeAt: number; dodgeTimes?: number[] }, now: number, dodgeMs: number, charges: number): boolean {
-  if (charges <= 1) return now - a.lastDodgeAt >= dodgeMs;
-  return (a.dodgeTimes ?? [a.lastDodgeAt]).filter((t) => now - t < dodgeMs).length < charges;
+  return rollReady(charges <= 1 ? [a.lastDodgeAt] : (a.dodgeTimes ?? [a.lastDodgeAt]), now, dodgeMs, charges);
 }
 
 /**

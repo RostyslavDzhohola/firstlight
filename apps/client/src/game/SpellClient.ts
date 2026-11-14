@@ -59,7 +59,7 @@ export class SpellClient implements ClientSystem {
     this.bar = new SpellBar(game.hud.spellSlot, game.hud.aetherSlot);
     const you = game.hud.you;
     if (you) this.book.setYou(you.spells, you.level);
-    this.bar.setNumbers(you?.level ?? 1, game.hud.starterIndex);
+    this.bar.setNumbers(you?.level ?? 1, game.hud.starterIndex, you?.tree?.nodes);
     const room = game.net.room;
     if (!room) return; // offline: the bar shows a full book; nothing to cast at
     const on = (type: string, cb: (m: never) => void) => {
@@ -68,7 +68,7 @@ export class SpellClient implements ClientSystem {
     };
     on("you", (m: YouState & { level: number }) => {
       this.book.setYou(m.spells, m.level);
-      this.bar.setNumbers(m.level, this.game.hud.starterIndex);
+      this.bar.setNumbers(m.level, this.game.hud.starterIndex, m.tree?.nodes);
     });
     on("denied", (m: { action: string; reason: string; req?: number }) => {
       if (m.action !== "cast") return;

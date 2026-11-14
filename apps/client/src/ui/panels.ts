@@ -12,6 +12,7 @@ import { trackerRows } from "./trackerRows.ts";
 import { trialWay } from "../game/nextSteps.ts";
 import { missionTrack } from "../game/missionTrack.ts";
 import { MISSIONS_KEY } from "./missionsPanel.ts";
+import { HOTKEYS } from "../game/keys.ts";
 import { uiSettings } from "./uiSettings.ts";
 import { spellCost, spellEffect, spellPower } from "../game/spellInfo.ts";
 import { SPELLS } from "@firstlight/shared/content/spells";
@@ -273,7 +274,8 @@ export class JournalPanel extends Panel {
   private renderSpells(body: HTMLElement, you: YouPlus | null) {
     const level = you?.level ?? 1;
     const starter = this.game.hud.starterIndex;
-    el("p", "sub", body, `At level ${level}. Spell damage grows 3% a level (and with your starter's spell power); cooldowns and costs stay the same.`);
+    const tree = you?.tree?.nodes;
+    el("p", "sub", body, `At level ${level}. Spell damage grows 3% a level (and with your starter's spell power); the Magic branch of your build tree (${HOTKEYS.build.caps.join(" ")}) raises the power and cuts the cooldowns.`);
     for (const s of SPELLS) {
       const row = el("div", "row", body);
       row.dataset.e2e = `journal-spell-${s.id}`;
@@ -283,10 +285,10 @@ export class JournalPanel extends Panel {
         el("div", "meta", left, `Unlocks at level ${s.level}. ${s.blurb}`);
         continue;
       }
-      el("div", "", left, spellEffect(s, level, starter));
-      const now = spellPower(s, level, starter);
-      const next = level < LEVEL_CAP ? spellPower(s, level + 1, starter) : null;
-      el("div", "meta", left, `${spellCost(s)}${now && next && next.value !== now.value ? ` · level ${level + 1}: ${next.value} ${now.unit}` : ""}`);
+      el("div", "", left, spellEffect(s, level, starter, tree));
+      const now = spellPower(s, level, starter, tree);
+      const next = level < LEVEL_CAP ? spellPower(s, level + 1, starter, tree) : null;
+      el("div", "meta", left, `${spellCost(s, tree)}${now && next && next.value !== now.value ? ` · level ${level + 1}: ${next.value} ${now.unit}` : ""}`);
     }
   }
 

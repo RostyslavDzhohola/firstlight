@@ -177,6 +177,18 @@ export function playerMaxHp(c: { starter: number; level: number; tree?: readonly
   return Math.round(maxHp(c.level) * starterStats(c.starter).hp * buildStats(c.tree).hp);
 }
 
+/**
+ * May a dodge roll start now (Second Roll)? `times`: when the rolls still counted were used. One
+ * charge: a full cooldown since the last roll. More: fewer than `charges` rolls in the last cooldown,
+ * so each charge comes back one cooldown after it was spent. The server validates with it and the
+ * client predicts with it.
+ */
+export function rollReady(times: readonly number[], now: number, cooldownMs: number, charges: number): boolean {
+  let recent = 0;
+  for (const t of times) if (now - t < cooldownMs) recent++;
+  return recent < Math.max(1, charges);
+}
+
 /** A caster's spell power: the starter's (content §8.5) times the Magic branch's. */
 export function casterPower(c: { starter: number; tree?: readonly string[] }): number {
   return starterSpellPower(c.starter) * buildStats(c.tree).spellPower;

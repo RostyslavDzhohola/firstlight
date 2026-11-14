@@ -1,0 +1,27 @@
+/* The build-tree panel (#81, ui/treePanel.ts): five branch columns of node buttons. */
+.fl-q.fl-tree { width: min(calc(78 * var(--u)), 96vw); }
+.fl-tree__pts { font: 700 var(--t-md)/1 var(--font-mono); color: var(--fog-3); white-space: nowrap; }
+.fl-tree__pts.is-ready { color: var(--dawn-3); }
+.fl-tree__grid { display: grid; grid-template-columns: repeat(5, minmax(calc(12 * var(--u)), 1fr)); gap: var(--sp-3); align-items: start; }
+.fl-tree__branch { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.fl-tree__branch > header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); padding-bottom: var(--sp-1); border-bottom: 1px solid var(--line-2); font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--paper); }
+.fl-tree__branch > header span { font: 600 var(--t-xs)/1 var(--font-mono); color: var(--dawn-3); letter-spacing: 0; }
+.fl-tree__blurb { margin: 0; min-height: calc(2.4 * var(--u)); font-size: var(--t-xs); color: var(--fog-3); }
+.fl-tree__node { display: flex; flex-direction: column; gap: calc(.2 * var(--u)); text-align: left; padding: var(--sp-2) calc(.6 * var(--u)); border: 1px solid var(--line-2); border-radius: var(--r-2); background: rgba(0, 0, 0, .28); color: var(--paper); font: inherit; cursor: default; }
+.fl-tree__node.is-open { border-color: var(--dawn-3); background: rgba(243, 174, 91, .08); cursor: pointer; }
+.fl-tree__node.is-open:hover, .fl-tree__node.is-open:focus-visible { background: rgba(243, 174, 91, .18); }
+.fl-tree__node.is-taken { border-color: rgba(140, 220, 170, .7); background: rgba(90, 190, 130, .14); }
+.fl-tree__node.is-locked, .fl-tree__node.is-dear { opacity: .62; }
+.fl-tree__top { display: flex; justify-content: space-between; gap: var(--sp-2); font: 600 var(--t-sm)/1.2 var(--font-display); letter-spacing: .03em; }
+.fl-tree__cost { flex: none; min-width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); border-radius: var(--r-pill); background: rgba(255, 255, 255, .1); font: 700 var(--t-xs)/calc(1.3 * var(--u)) var(--font-mono); text-align: center; }
+.fl-tree__line { font: 600 var(--t-xs)/1.3 var(--font-mono); color: #ffe2b0; }
+.fl-tree__what { font-size: var(--t-xs); line-height: 1.3; color: var(--fog-3); }
+.fl-tree__tag { margin-top: calc(.15 * var(--u)); font: 600 calc(.8 * var(--u))/1 var(--font-display); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fog-3); }
+.fl-tree__node.is-open .fl-tree__tag { color: var(--dawn-3); }
+.fl-tree__node.is-taken .fl-tree__tag { color: #9fe3b9; }
+.fl-tree .foot .is-confirm { border-color: var(--dawn-3); color: var(--dawn-3); }
+/* Narrow screens (phones): the branches wrap two or three across; the body scrolls. */
+@media (max-width: 900px) {
+  .fl-tree__grid { grid-template-columns: repeat(auto-fill, minmax(calc(11 * var(--u)), 1fr)); }
+  .fl-tree__blurb { min-height: 0; }
+}
