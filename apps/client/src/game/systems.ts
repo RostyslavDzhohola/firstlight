@@ -25,6 +25,7 @@ import { createMomentsClient } from "./MomentsClient.ts";
 import { createNextSteps } from "./NextStepsClient.ts";
 import { createTreeClient } from "./TreeClient.ts";
 import { createRegionCards } from "./regionCard.ts";
+import { createWildlife } from "./wildlifeClient.ts";
 
 export interface ClientSystem {
   update(dt: number, now: number): void;
@@ -77,3 +78,5 @@ CLIENT_SYSTEMS.push(createSiteCompass);
 CLIENT_SYSTEMS.push(createTreeClient);
 // Wild lane (#7): the region card when you walk from one named region into another.
 CLIENT_SYSTEMS.push(createRegionCards);
+// Wild lane (#7): ambient wildlife (birds, grazers, fish rings, night insects) through the NPC part batcher.
+CLIENT_SYSTEMS.push(createWildlife);

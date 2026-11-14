@@ -18,7 +18,7 @@ import { bossStore, type BossHud } from "./bossStore.ts";
 import { LightParticles } from "./fx.ts";
 import { buildModels, type ModelDef, type PartDef } from "./models.ts";
 import { moveEffectsAt, takeMoveEffect, type MoveEffect } from "./moveEffects.ts";
-import { PartBatcher } from "./parts.ts";
+import { PartBatcher, partDrawers } from "./parts.ts";
 import { TELEGRAPH_COLORS, Telegraphs } from "./telegraphs.ts";
 import { creepsHiddenByTown } from "./townCull.ts";
 
@@ -377,6 +377,7 @@ export class NpcRenderer implements ClientSystem {
     }
     this.drawShots(now);
     this.arena?.draw(this.batch, me, now);
+    if (!hidden) for (const d of partDrawers) d(this.batch, dt, now);
     this.batch.end();
     this.bars.end();
     this.tags?.end();

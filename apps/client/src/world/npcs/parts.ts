@@ -7,6 +7,12 @@ import * as THREE from "three/webgpu";
 import { dot, float, normalView, positionViewDirection, saturate, vec3 } from "three/tsl";
 import { atmo } from "../../render/atmosphere.ts";
 
+/**
+ * Other cosmetic layers that draw through the NPC batches (world/wildlife.ts): called every frame
+ * between begin() and end(), so they share these meshes and materials and add no draw of their own.
+ */
+export const partDrawers = new Set<(batch: PartBatcher, dt: number, now: number) => void>();
+
 export type GeoKey = "box" | "sph" | "cyl" | "cone" | "tor" | "arc";
 export type MatKey = "std" | "metal" | "glow";
 
