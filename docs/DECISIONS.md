@@ -2226,3 +2226,12 @@ Append here during the build: `- **D<n> (<time>):** <decision>. Why: <reason>.`
   positions before its flat shading. Every one of the 29,824 triangles matches the old file within
   0.6 mm with identical colours. Why: bytes before the world on a planet arrival (#85). Over brotli
   the two are within 2 %; the gain is for raw and gzip transfer and the deploy.
+- **D-perf-4 (2026-11-14):** instanced meshes and skinned bodies share their shader programs: the
+  renderer reports a uniform-buffer limit of 0 to three's node builder (`render/sharedPrograms.ts`,
+  WebGPU and WebGL2; `?uboinstancing` keeps three's choice). Below the limit three r186 puts an
+  InstancedMesh's matrices and a skeleton's bones in a uniform buffer named after the node's id and
+  sized by the count, so each instanced prop kind, its shadow, each skinned look and each trial
+  marker compiled its own vertex program. Past it, three reads interleaved per-instance attributes
+  and a bone texture, both named by position. Portus' arrival compiles 152 shader stages, not 190
+  (vertex 101 → 66), on both backends; frozen-time stills match. Why: target 2 of the perf climb,
+  fewer compiles during the arrival's warm-up with the same picture.

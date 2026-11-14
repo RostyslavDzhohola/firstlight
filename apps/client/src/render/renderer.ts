@@ -11,6 +11,7 @@ import {
 } from "./quality.ts";
 import { createFramePath } from "./frameSize.ts";
 import { startRenderer, type BackendStatus, type StartStage } from "./rendererStart.ts";
+import { shareInstancingPrograms } from "./sharedPrograms.ts";
 import { GpuTimer, ResolutionLadder } from "./timing.ts";
 import { compileForPass, passCallDepth, saveRenderState, type CompileProgress, type GuardedRenderer, type PassCompileRenderer } from "./compilePass.ts";
 import { frameCounterDraw, frameCounterTick } from "./frameCounter.ts";
@@ -139,6 +140,8 @@ export async function createRenderer(container: HTMLElement, opts: { onStage?: (
   // The sun shadow pass without its second matrix walk and its per-frame cache-key churn (#49,
   // D-framerate-2). `?oldshadowpass` keeps three's own pass (A/B runs).
   if (!flags.has("oldshadowpass")) installShadowPass();
+  // One vertex program per material shape for instanced and skinned meshes, not one per mesh (D-perf-4).
+  if (!flags.has("uboinstancing")) shareInstancingPrograms(renderer);
   // `?gltrace` (#39 diagnostics): log the WebGL calls that block on the GPU process.
   const traceGl = (renderer.backend as { gl?: object }).gl;
   if (flags.has("gltrace") && !webgpu && traceGl) traceGlCalls(traceGl);
