@@ -15,6 +15,7 @@ import { PF } from "@firstlight/shared/net/schema";
 import { installErrorCapture, recentErrors } from "./errors.ts";
 import { bars, esc, fmtDuration, fmtTime, page, PAGE_HEADERS } from "./html.ts";
 import { mountStats } from "./stats.ts";
+import { mountFunnelIngest } from "./funnel.ts";
 
 export interface OpsDeps {
   db: Db;
@@ -23,7 +24,7 @@ export interface OpsDeps {
   allowedOrigins: string[];
 }
 
-/** Mount /admin and /stats (call after express.json()). */
+/** Mount /admin, /stats and the funnel/error ingest (call after express.json()). */
 export function mountOps(app: Express, deps: OpsDeps): void {
   installErrorCapture();
   const gate = deps.requireAdmin as RequestHandler;
@@ -97,6 +98,7 @@ export function mountOps(app: Express, deps: OpsDeps): void {
   });
 
   mountStats(app, deps);
+  mountFunnelIngest(app, deps); // the page's funnel steps and error reports (#85), shown on /stats
 }
 
 function nameOf(db: Db, userId: string): string {

@@ -246,6 +246,34 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_log ADD COLUMN agent INTEGER NOT NULL DEFAULT 0;
   UPDATE session_log SET agent = 1 WHERE user_id IN (SELECT user_id FROM agent_account);
   `,
+  // 11 (lane ship, #85): the first-session funnel and client error reports (db/funnel.ts). One row
+  // per first time a subject (a character's account `u:<id>`, or a browser visit `v:<id>`) reached a
+  // step; `kind` keeps our test accounts and AI agents apart from people. Additive and idempotent,
+  // so it can be renumbered when lanes merge.
+  `
+  CREATE TABLE IF NOT EXISTS funnel_step (
+    subject  TEXT NOT NULL,
+    step     TEXT NOT NULL,
+    at       INTEGER NOT NULL,
+    value    REAL,
+    detail   TEXT,
+    kind     TEXT NOT NULL DEFAULT 'person',
+    PRIMARY KEY (subject, step)
+  );
+  CREATE INDEX IF NOT EXISTS funnel_step_at ON funnel_step(at);
+  CREATE TABLE IF NOT EXISTS client_error (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at       INTEGER NOT NULL,
+    sig      TEXT NOT NULL,
+    message  TEXT NOT NULL,
+    stack    TEXT NOT NULL,
+    build    TEXT NOT NULL,
+    tier     TEXT,
+    backend  TEXT,
+    kind     TEXT NOT NULL DEFAULT 'person'
+  );
+  CREATE INDEX IF NOT EXISTS client_error_at ON client_error(at);
+  `,
 ];
 
 /** Apply every migration newer than the database's user_version, each in its own transaction. */
