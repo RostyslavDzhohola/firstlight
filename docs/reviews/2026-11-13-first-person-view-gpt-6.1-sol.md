@@ -41,8 +41,8 @@ WebGL2 rendering, measured frame-time or allocation cost.
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
-| 4 | | |
+| 1 | First person on foot: the gameplay facing is the camera heading on the frame of a turn (only the drawn `bodyFacing` eases); `Net.flushInput` sends the held-back input before each melee, so the server's arc reads this frame's facing. Tests: `view.test.ts` (turn 90°, no settling), `Net.test.ts` (input flushed before `melee`). D-fix-view-1. | `d06559e7` |
+| 2 | Photo mode counts as both talk keys released (like typing): K/B there never open the mic or voice setup; entering photo mode with K held goes off air. Voice-enabled test `voice/pushToTalk.test.ts`. D-fix-view-2. | `d9663b22` |
+| 3 | E takes the in-reach object nearest the crosshair ray within a 40° cone (`game/interactTarget.ts`), both views; first person takes nothing outside the cone, third person falls back to the nearest. Server reach check unchanged. D-view-6. | `b52c0213` |
+| 4 | Journey `e2e/j8-first-person.spec.ts` (J8.1): V in (mode and blend at 1), a melee fight won in first person (server-confirmed hits, kill XP, camera in first person throughout), V out; passed on webgpu and webgl. Unit tests for #78: `PlayerController.resumeAfterBlink` (a jump blinked 26 ms in lasts and peaks like a plain one), `AvatarView.blinked` (no rez-in), `fallClip` (a hop keeps `jump_air`). | `94e78c1a`, `2e07fdd1` |
 | 5 | | |
