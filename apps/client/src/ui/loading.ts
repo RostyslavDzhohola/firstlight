@@ -11,7 +11,7 @@ import { config } from "../config.ts";
 import { loaderQuips, QUIP_MS, quipDeck, reportsTrouble } from "./loadingQuips.ts";
 import { STILLS, stillsSlideshow } from "./loadingStills.ts";
 
-export type BodyKey = "portus" | "arcadia" | "hollowmere" | "meridian";
+export type BodyKey = "portus" | "arcadia" | "hollowmere" | "meridian" | "lumen";
 
 export const BOOT_STEPS = [
   { name: "Renderer", note: "WebGPU or WebGL2" },
@@ -25,6 +25,7 @@ const BODY_INFO: Record<BodyKey, { name: string; blurb: string }> = {
   arcadia: { name: "Arcadia", blurb: "Green fields, a turquoise lake and the Brightbits. Levels 1–7." },
   hollowmere: { name: "Hollowmere", blurb: "Violet dusk over the marsh. The Hollow Court walks here. Levels 6–13." },
   meridian: { name: "Meridian", blurb: "Red canyons and chrome towers. Meridian Oversight is watching. Levels 12–20." },
+  lumen: { name: "Lumen", blurb: "Arcadia's moon: grey dust, a black sky, a quarter of the pull. Levels 6–9." },
 };
 
 export const TIPS = [

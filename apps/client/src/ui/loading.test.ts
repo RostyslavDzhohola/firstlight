@@ -29,6 +29,11 @@ describe("loadingPhase", () => {
     expect(loadingPhase("Something else", prev)).toBe(prev);
     expect(loadingPhase("Travelling to Nowhere…", prev).body).toBe("meridian");
   });
+
+  it("the way up to the moon names Lumen, not the planet it left (moon review sweep)", () => {
+    const prev: LoadingPhase = { step: 4, body: "arcadia", compact: false };
+    expect(loadingPhase("Travelling to Lumen…", prev).body).toBe("lumen");
+  });
 });
 
 describe("the Renderer step while WebGPU starts (D-showcase-1)", () => {
