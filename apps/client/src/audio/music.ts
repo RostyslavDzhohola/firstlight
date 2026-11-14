@@ -7,8 +7,10 @@
 // notes, slow high bells).
 //
 // Scheduling is by time, not by timer: `scheduleUntil(t)` writes every note up to `t`, so the same
-// code plays live (a 50 ms timer keeps 250 ms ahead) and renders offline (tools/voice/render-music.ts
-// renders a minute of each body into an OfflineAudioContext).
+// code plays live (a 50 ms timer keeps 250 ms ahead: `live`) and renders offline (tools/voice/render-music.ts
+// renders a minute of each body into an OfflineAudioContext). Live play never writes the past: when
+// the timer comes back late (a throttled background tab, a stalled main thread), the steps that went
+// by are skipped and the music resumes from now, at most MUSIC_MAX_SOURCES_PER_TICK sources a tick.
 
 import type { BodyId } from "@firstlight/shared";
 
@@ -98,6 +100,17 @@ interface Span {
 
 const COMBAT_TAIL_S = 5;
 
+/** Live play writes this far ahead of the audio clock. */
+const AHEAD_S = 0.25;
+
+/**
+ * The most sources one live tick may start. AHEAD_S holds at most two sixteenths at the fastest tempo
+ * (108 bpm), and the busiest pair is about 20 (a bar start with the pad chord, bass, theme and vibrato,
+ * arpeggio, a three-partial bell and the combat drums, next to a hat); measured: 15 at most per tick
+ * over ten minutes of every body in combat at night with random gaps.
+ */
+export const MUSIC_MAX_SOURCES_PER_TICK = 24;
+
 export class MusicGen {
   private timer = 0;
   private nextTime = 0;
@@ -139,7 +152,23 @@ export class MusicGen {
   start() {
     this.nextTime = this.ctx.currentTime + 0.1;
     this.out.gain.setTargetAtTime(0.9, this.ctx.currentTime, 2);
-    this.timer = window.setInterval(() => this.scheduleUntil(this.ctx.currentTime + 0.25), 50);
+    this.timer = window.setInterval(() => this.live(this.ctx.currentTime), 50);
+  }
+
+  /** One live tick at audio time `now`: skip any steps that are already past, then write AHEAD_S ahead. */
+  live(now: number) {
+    const s16 = 60 / this.mood.bpm / 4;
+    if (this.nextTime < now) {
+      const missed = Math.ceil((now - this.nextTime) / s16);
+      this.step += missed; // the bar and phrase keep their place
+      this.nextTime += missed * s16;
+    }
+    this.scheduleUntil(now + AHEAD_S);
+  }
+
+  /** Where the written notes end (tests). */
+  scheduledUntil(): number {
+    return this.nextTime;
   }
 
   /** Offline render: start at `t`, full level at once. */
