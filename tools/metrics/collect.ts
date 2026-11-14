@@ -275,7 +275,7 @@ function passesGroup(notes: string[]): Metric[] {
     "pnpm",
     ["exec", "playwright", "test", "-c", "e2e/playwright.config.ts", "--project", "webgpu", "--grep", "@bench", "--workers", "1", "--reporter", "line", "bench-passes"],
     CLIENT,
-    { ...process.env, E2E_PORT: process.env.E2E_PORT ?? "2612", E2E_CLIENT_PORT: process.env.E2E_CLIENT_PORT ?? "5212", E2E_OUT: path.join(CLIENT, "e2e/.out/metrics"), BENCH_MODE: "passes", BENCH_TIER: tier, BENCH_OUT: benchOut, BENCH_FLAGS: process.env.BENCH_FLAGS ?? "" },
+    { ...process.env, E2E_PORT: process.env.E2E_PORT ?? "2612", E2E_CLIENT_PORT: process.env.E2E_CLIENT_PORT ?? "5212", E2E_OUT: path.join(CLIENT, "e2e/.out/metrics"), BENCH_MODE: "passes", BENCH_TIER: tier, BENCH_OUT: benchOut, BENCH_FLAGS: opt("--flags", process.env.BENCH_FLAGS ?? "") },
   );
   const file = path.join(benchOut, `webgpu-passes-${tier}-1.json`);
   if (!existsSync(file)) {
@@ -291,8 +291,8 @@ function passesGroup(notes: string[]): Metric[] {
   out.push(m("passes", `passes.${tier}.noise_floor`, p.noiseMs, "ms", "lower", 0.5));
   out.push(m("passes", `passes.${tier}.valid`, p.valid ? 1 : 0, "bool", "higher", 0));
   for (const x of p.passes as { feature: string; deltaMs: { p50: number } }[]) out.push(m("passes", `passes.${tier}.${x.feature}`, x.deltaMs.p50, "ms", "lower", 0.3, 0.25));
-  for (const g of (p.gtao ?? []) as { samples: number; scale: number; costMs: { p50: number } }[]) {
-    out.push(m("passes", `passes.${tier}.gtao.s${g.samples}_x${String(g.scale).replace(".", "")}`, g.costMs.p50, "ms", "lower", 0.3, 0.25));
+  for (const g of (p.gtao ?? []) as { samples: number; scale: number; denoise?: string; costMs: { p50: number } }[]) {
+    out.push(m("passes", `passes.${tier}.gtao.s${g.samples}_x${String(g.scale).replace(".", "")}${g.denoise ? `_dn_${g.denoise}` : ""}`, g.costMs.p50, "ms", "lower", 0.3, 0.25));
   }
   return out;
 }

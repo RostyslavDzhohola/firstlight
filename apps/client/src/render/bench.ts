@@ -11,7 +11,8 @@
 //   ?bench=passes per-pass GPU cost (#52, passCost.ts): Portus (unless ?body=…), 120 s warm-up on
 //                 the path, then a fixed view rendered in uncapped batches with each feature off in
 //                 turn, plus a GTAO samples × resolution sweep. WebGPU only (WebGL2: passes null).
-//                 ?benchpasses=ao,bloom,… limits the features; ?benchrounds=N, ?benchbatch=N.
+//                 ?benchpasses=ao,bloom,… limits the features; ?benchrounds=N, ?benchbatch=N;
+//                 ?benchgtao=denoise sweeps where GTAO's denoise runs and its resolution (#66).
 // Overrides: ?benchcrowd=N, ?benchwarm=S, ?benchtime=S.
 
 import * as THREE from "three/webgpu";
@@ -444,7 +445,7 @@ export class Bench {
     let report: PassCostReport | null = null;
     try {
       // Inside the try: a failed chunk load or a changed three internal ends the run with passes null.
-      const { measurePassCosts } = await import("./passCost.ts");
+      const { measurePassCosts, GTAO_DENOISE_SWEEP } = await import("./passCost.ts");
       // three runs a pass (scene pass, GTAO, bloom, …) once per node frame, and only its animation
       // loop advances the node frame: each measured frame must advance it, or later frames in a batch
       // reuse the first one's pass textures and draw almost nothing.
@@ -497,7 +498,7 @@ export class Bench {
           shaderBuilds: () => shaderStats().total,
           visible: () => document.visibilityState === "visible",
         },
-        { rounds: p.rounds, framesPerBatch: p.framesPerBatch, gtao: true },
+        { rounds: p.rounds, framesPerBatch: p.framesPerBatch, gtao: true, ...(flags.get("benchgtao") === "denoise" ? { gtaoSweep: GTAO_DENOISE_SWEEP } : {}) },
       );
     } catch (e) {
       console.error("[bench] passes failed", e);

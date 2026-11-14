@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { measurePassCosts, type PassConfig, type PassCostHost } from "./passCost.ts";
+import { GTAO_DENOISE_SWEEP, measurePassCosts, type PassConfig, type PassCostHost } from "./passCost.ts";
 
 /**
  * A renderer stand-in with known costs: the baseline frame costs `base` ms, each feature adds its
@@ -160,6 +160,12 @@ describe("measurePassCosts", () => {
     expect(at(16, 0.5).costMs.p50).toBeCloseTo(1.6, 0);
     expect(at(16, 1).costMs.p50).toBeCloseTo(6.4, 0);
     expect(at(4, 0.5).costMs.p50).toBeCloseTo(0.4, 0);
+  });
+
+  it("sweeps the denoise variants when asked, each labelled with where its denoise ran (#66)", async () => {
+    const host = fakeHost({ costs: { ao: 1.6 } });
+    const r = await measurePassCosts(host, { rounds: 2, gtao: true, gtaoSweep: GTAO_DENOISE_SWEEP });
+    expect(r.gtao!.map((e) => `${e.samples}@${e.scale}/${e.denoise}`)).toEqual(GTAO_DENOISE_SWEEP.map((v) => `${v.samples}@${v.scale}/${v.denoise}`));
   });
 
   it("reports the CPU share so CPU-bound deltas aren't read as GPU cost", async () => {

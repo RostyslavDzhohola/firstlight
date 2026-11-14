@@ -7,7 +7,7 @@
 
 import * as THREE from "three/webgpu";
 import {
-  cdl, convertToTexture, float, fract, hue, interleavedGradientNoise, luminance, mix, mrt, output, pass, renderOutput,
+  cdl, convertToTexture, float, rtt, fract, hue, interleavedGradientNoise, luminance, mix, mrt, output, pass, renderOutput,
   screenCoordinate, smoothstep, time, uniform, vec2, vec3, vec4, velocity, renderGroup,
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
@@ -111,11 +111,22 @@ export interface PostBuild {
   dispose(): void;
 }
 
-/** Bench-only GTAO override (`?bench=passes`, #52): sample count and resolution scale. */
+/**
+ * Where GTAO's denoise runs when TRAA is off (#66): "full" inline in the full-resolution composite
+ * (three's way: 16 taps, each rebuilding a normal from depth, per screen pixel), "ao" into a target at
+ * the AO's own resolution and upsampled, "off" raw GTAO (bench only: it is noisy).
+ */
+export type AoDenoise = "full" | "ao" | "off";
+
+/** Bench-only GTAO override (`?bench=passes`, #52, #66): sample count, resolution scale, denoise. */
 export interface AoOverride {
   samples: number;
   scale: number;
+  denoise?: AoDenoise;
 }
+
+/** The denoise the tiers ship with (D-metrics-6). */
+export const AO_DENOISE: AoDenoise = "full";
 
 /** Build the pipeline's output node for the given settings. */
 export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedSettings, photo = false, aoOverride: AoOverride | null = null): PostBuild {
@@ -138,10 +149,16 @@ export function buildPost(scene: THREE.Scene, camera: THREE.Camera, s: ResolvedS
     aoNode.useTemporalFiltering = s.on.traa;
     disposables.push(aoNode);
     let occ: any = aoNode.getTextureNode().r;
-    if (!s.on.traa) {
+    const mode = aoOverride?.denoise ?? AO_DENOISE;
+    if (!s.on.traa && mode !== "off") {
       const dn = denoise(aoNode.getTextureNode(), depth, null as unknown as THREE.Node, camera);
       disposables.push(dn);
-      occ = (dn as any).r;
+      if (mode === "ao") {
+        // Denoise once per AO texel, not per screen pixel: a target at the AO's scale, sampled bilinearly.
+        const t = rtt(dn as any, null, null, { resolutionScale: aoNode.resolutionScale } as any);
+        disposables.push(t);
+        occ = (t as any).r;
+      } else occ = (dn as any).r;
     }
     color = vec4(color.rgb.mul(mix(float(1), occ, postUniforms.aoStrength)), color.a);
   }
