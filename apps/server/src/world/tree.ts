@@ -42,20 +42,27 @@ export function createTreeSystem(room: BodyRoom): RoomSystem {
     const a = room.playerById(sessionId);
     if (!a || a.superseded) return;
     const deny = (reason: string) => void a.client.send("denied", { action: "tree", reason });
-    if (m.action === "spend") {
-      if (a.dead) return deny("dead");
-      const why = spendRefusal(a.char.level, a.char.tree, m.node);
-      if (why) return deny(why);
-      a.char.tree = [...(a.char.tree ?? []), m.node];
-    } else {
-      const why = respecRefusal(a, room.safeNow(a, Date.now()));
-      if (why) return deny(why);
-      a.char.coins -= respecCost(a.char.tree);
-      a.char.tree = [];
+    const why = m.action === "spend" ? (a.dead ? "dead" : spendRefusal(a.char.level, a.char.tree, m.node)) : respecRefusal(a, room.safeNow(a, Date.now()));
+    if (why) return deny(why);
+    // A choice is durable at once, like a level-up, and all-or-nothing (review finding 3): if the save
+    // throws, persist puts the character back (tree, coins) and HP goes back to what it was before
+    // max HP moved; the player is told to try again and nothing is published.
+    const hp = a.state.hp;
+    try {
+      room.persist([a], () => {
+        if (m.action === "spend") a.char.tree = [...(a.char.tree ?? []), m.node];
+        else {
+          a.char.coins -= respecCost(a.char.tree);
+          a.char.tree = [];
+        }
+        refreshMaxHp(a);
+        room.saveActor(a);
+      });
+    } catch {
+      a.state.hp = hp;
+      return deny("try again");
     }
-    refreshMaxHp(a);
     a.youDirty = true;
-    room.saveActor(a); // a choice is durable at once, like a level-up
     emitGameEvent(room, { type: "tree", playerId: a.id, node: m.action === "spend" ? m.node : null });
   };
   room.onMessage("tree", treeSchema, (c, m) => handle(c.sessionId, m));

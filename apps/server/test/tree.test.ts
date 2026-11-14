@@ -14,6 +14,8 @@ import { dodgeReady, motionFields, moveLimits, validateMove, type MoveWorld } fr
 import type { PlayerActor } from "../src/world/actors.ts";
 import { STARTER_STATS } from "@firstlight/shared/content/starters";
 import { ANIM } from "@firstlight/shared/net/schema";
+import { characterRepo } from "../src/world/characters.ts";
+import { onGameEvent } from "../src/world/events.ts";
 import { tempDir } from "./auth-helpers.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
 import { bot, dieAndRejoin, harness, me, offPad, serverRoom, sleep, tpAndWait, until, type Bot } from "./quest-helpers.ts";
@@ -89,6 +91,62 @@ describe("build tree on a live room (#81)", () => {
     await waitFor(() => tree(b)?.nodes.length === 0);
     expect(tree(b)).toEqual({ nodes: [], points: 3, respec: 0 });
     expect(a.char.coins).toBe(5);
+  }, 20_000);
+
+  // Review finding 3: a choice is all-or-nothing. A save that throws leaves the tree, the coins, HP
+  // and max HP as they were, answers `denied`, and publishes no tree event.
+  it("a failed save undoes a spend and a respec: nothing changes, the client is denied, no event", async () => {
+    const repo = characterRepo.current;
+    const save = repo.save.bind(repo);
+    let failing = false;
+    repo.save = (uid, data) => {
+      if (failing) throw new Error("disk I/O error (test)");
+      return save(uid, data);
+    };
+    try {
+      const b = await bot("unsaved", "portus");
+      const a = actorOf(b);
+      b.send("admin", { cmd: "level", args: { level: 5 } });
+      await waitFor(() => tree(b)?.points === 4);
+      const events: unknown[] = [];
+      onGameEvent(serverRoom(b), (e) => void (e.type === "tree" && events.push(e)));
+      const snap = () => ({ tree: [...(a.char.tree ?? [])], coins: a.char.coins, hp: a.state.hp, maxHp: a.state.maxHp });
+      a.state.hp = a.state.maxHp - 30; // hurt, so a gain or a cap on HP would show
+
+      failing = true;
+      let before = snap();
+      expect(await spend(b, "body_hardy")).toBe("try again");
+      expect(snap()).toEqual(before);
+      expect(events).toHaveLength(0);
+      expect(tree(b)?.nodes).toEqual([]);
+
+      failing = false;
+      expect(await spend(b, "body_hardy")).toBeNull();
+      expect(await spend(b, "magic_attuned")).toBeNull();
+      expect(events).toHaveLength(2);
+      b.send("admin", { cmd: "coins", args: { amount: 500 } });
+      await waitFor(() => a.char.coins === 500);
+      await waitFor(() => serverRoom(b).safeNow(a, Date.now()));
+      a.state.hp = a.state.maxHp - 2; // Hardy's loss would cap this
+
+      failing = true;
+      before = snap();
+      const refused = denials(b).length;
+      b.send("tree", { action: "respec" });
+      await until("respec refused", () => denials(b).length > refused);
+      expect(denials(b).at(-1)).toBe("try again");
+      expect(snap()).toEqual(before);
+      expect(before.tree).toEqual(["body_hardy", "magic_attuned"]);
+      expect(events).toHaveLength(2);
+
+      failing = false;
+      b.send("tree", { action: "respec" });
+      await waitFor(() => tree(b)?.nodes.length === 0);
+      expect(a.char.coins).toBe(500 - 2 * RESPEC.coinsPerPoint);
+      expect(events).toHaveLength(3);
+    } finally {
+      repo.save = save;
+    }
   }, 20_000);
 
   it("loses the points with the level on death; the reborn character starts with none", async () => {

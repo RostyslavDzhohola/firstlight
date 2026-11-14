@@ -24,6 +24,7 @@ export const TREE_REFUSAL_TEXT: Record<string, string> = {
   nothing: "Nothing to respec",
   "safe zone": "Respec only in a safe zone",
   coins: "Not enough coins to respec",
+  "try again": "Couldn't save that choice; nothing changed. Try again",
   unknown: "",
 };
 

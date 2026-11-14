@@ -181,7 +181,7 @@ export type ClientMessages = {
   /**
    * The build tree (content/tree.ts, #81; at most 5 a second): take a node, or clear the tree for
    * coins in a safe zone. Refusals answer `denied {action: "tree", reason}`: "unknown", "taken",
-   * "locked" (the node above isn't taken), "points", "dead", "nothing", "safe zone", "coins".
+   * "locked" (the node above isn't taken), "points", "dead", "nothing", "safe zone", "coins", "try again" (the save failed; nothing changed).
    */
   tree: { action: "spend"; node: string } | { action: "respec" };
 };
