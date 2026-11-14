@@ -48,6 +48,15 @@ for (const [name, make] of stores) {
       expect(s.get(death2)?.kind).toBe("death");
     });
 
+    it("moves a pile and keeps the move (a pile a new solid buried: review 2026-11-13 world sites, 2)", () => {
+      const s = make(10);
+      const id = s.add(pile(1000, "death")).pile.id;
+      expect(s.move(id, 5, 6, 7)).toMatchObject({ id, x: 5, y: 6, z: 7, items: [item], kind: "death", createdAt: 1000 });
+      expect(s.get(id)).toMatchObject({ x: 5, y: 6, z: 7 });
+      expect(s.list("arcadia").find((p) => p.id === id)).toMatchObject({ x: 5, y: 6, z: 7 });
+      expect(s.move("999999", 1, 2, 3)).toBeNull();
+    });
+
     it("keeps death piles younger than 10 minutes (their owners are on the way back), up to twice the cap", () => {
       const s = make(3);
       const min = 60_000;

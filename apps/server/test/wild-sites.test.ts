@@ -4,7 +4,10 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { siteDiscoveryXp, WILD_SITE_BY_ID } from "@firstlight/shared/content/wildSites";
-import { prefabPoint, wildSitePlacements } from "@firstlight/shared/planet/wildSites";
+import { prefabPoint, wildSitePlacements, type WildSitePlacement } from "@firstlight/shared/planet/wildSites";
+import { structureCollider } from "@firstlight/shared/planet/sites";
+import { PLAYER_BODY } from "@firstlight/shared/planet/collide";
+import { RULES } from "../src/world/BodyRoom.ts";
 import { npcSystemOf, NPC_TUNING, resetTuning } from "../src/world/npc/index.ts";
 import { pileStore } from "../src/world/piles.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -18,6 +21,14 @@ afterEach(async () => {
   for (const r of harness.rooms.splice(0)) await safeLeave(r);
   await harness.game!.close();
 });
+
+/** Ground under prefab point (x, z) of a placed site. */
+function siteGround(body: "arcadia" | "meridian", p: WildSitePlacement, x: number, z: number): [number, number, number] {
+  const q = prefabPoint(p.frame, x, z, 0);
+  const l = Math.hypot(q[0], q[1], q[2]);
+  return ground(body, [q[0] / l, q[1] / l, q[2] / l]);
+}
+const dist = (a: { x: number; y: number; z: number }, b: readonly number[]) => Math.hypot(a.x - b[0]!, a.y - b[1]!, a.z - b[2]!);
 
 const watch = () => wildSitePlacements(terrain("arcadia")).find((p) => p.site.id === "bellwether_watch")!;
 
@@ -69,4 +80,44 @@ describe("wild sites", () => {
     expect(Math.hypot(pile.x - chest[0], pile.y - chest[1], pile.z - chest[2])).toBeLessThan(1.5);
     void me;
   }, 40_000);
+
+  // Review 2026-11-13 world sites, finding 2: piles are saved by position, and the sites added solids
+  // where piles may already lie. One under the Long Haul wreck's hull (prefab x 9.75) is 3.8 m inside
+  // it, the nearest clear ground beyond pickup reach.
+  it("moves a pile left under the wreck's hull before the deploy to clear ground within reach, and saves the move", async () => {
+    const hull = wildSitePlacements(terrain("meridian")).find((p) => p.site.id === "long_haul_wreck")!;
+    const at = siteGround("meridian", hull, 9.75, 0);
+    const walls = structureCollider(terrain("meridian"));
+    expect(walls.footing(at[0], at[1], at[2], PLAYER_BODY.step).inside).toBe(true);
+    const old = pileStore.current.add({
+      body: "meridian", x: at[0], y: at[1], z: at[2], owner: "Old Timer", ownerUserId: "u-old",
+      createdAt: Date.now() - 86_400_000, items: [{ id: "carbine", tier: 1, qty: 1 }], coins: 7, kind: "death",
+    }).pile;
+    const b = await bot("pile_finder", "meridian");
+    const saved = pileStore.current.get(old.id)!;
+    expect(dist(saved, at)).toBeGreaterThan(1);
+    expect(walls.isClear(saved)).toBe(true); // a player can stand on it
+    expect(saved).toMatchObject({ coins: 7, kind: "death", createdAt: old.createdAt, owner: "Old Timer" });
+    expect(dist(serverRoom(b).state.piles.get(old.id)!, [saved.x, saved.y, saved.z])).toBeLessThan(1e-6);
+    // Walk up and take it.
+    await tpAndWait(b, [saved.x, saved.y, saved.z]);
+    expect(dist(me(b), [saved.x, saved.y, saved.z])).toBeLessThan(RULES.PICKUP_RANGE);
+    const coins = b.you.coins;
+    b.send("pickup", { pileId: old.id });
+    await waitFor(() => b.you.coins === coins + 7);
+    expect(pileStore.current.get(old.id)).toBeUndefined();
+  }, 30_000);
+
+  it("drops the pile of a player who falls on a lookout where a player can reach it, not inside the tower", async () => {
+    const b = await bot("lookout_faller", "arcadia");
+    const ws = watch();
+    const room = serverRoom(b);
+    const a = [...(room as any).actors.values()].find((x: any) => x.id === b.id);
+    const pile = room.createPile(a, [{ id: "carbine", tier: 1, qty: 1 }], 3, ws.lookout, undefined, { kind: "death" })!;
+    const walls = structureCollider(terrain("arcadia"));
+    expect(walls.isClear(pile)).toBe(true);
+    expect(pileStore.current.get(pile.id)).toMatchObject({ x: pile.x, y: pile.y, z: pile.z });
+    // Next to the tower's foot, not across the site.
+    expect(dist(pile, ground("arcadia", ws.dir))).toBeLessThan(ws.prefab.foot);
+  });
 });
