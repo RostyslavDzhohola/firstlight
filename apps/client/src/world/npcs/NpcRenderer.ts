@@ -21,6 +21,7 @@ import { moveEffectsAt, takeMoveEffect, type MoveEffect } from "./moveEffects.ts
 import { PartBatcher, partDrawers } from "./parts.ts";
 import { TELEGRAPH_COLORS, Telegraphs } from "./telegraphs.ts";
 import { creepsHiddenByTown } from "./townCull.ts";
+import { showSubtitle } from "../../ui/subtitle.ts";
 
 interface Snap {
   t: number;
@@ -65,6 +66,8 @@ interface View {
   lastPos: THREE.Vector3;
   speed: number;
   walk: number;
+  /** Last afterimage puff (Granny Gust's dash, #2). */
+  trailAt?: number;
   roll: number;
   anim: number;
   animAt: number;
@@ -177,6 +180,10 @@ export class NpcRenderer implements ClientSystem {
     };
     on("npcAtk", (m: NpcAttackMsg) => this.onAttack(m));
     on("npcShot", (m: NpcShotMsg) => this.onShot(m));
+    // A named creature's line near you (Granny Gust, #2): a subtitle.
+    on("npcSay", (m: { name: string; line: string }) => {
+      if (typeof document !== "undefined") showSubtitle(m.name, m.line, 3200);
+    });
     on("npcFx", (m: { kind: StatusEffect["kind"]; ms: number; amount: number; set?: boolean }) => takeMoveEffect(this.effects, m, performance.now()));
     on("npcPull", (m: { x: number; y: number; z: number; speed: number; ms: number }) => this.pulls.push({ c: new THREE.Vector3(m.x, m.y, m.z), speed: m.speed, until: performance.now() + m.ms }));
     on("npcKill", (m: unknown) => window.dispatchEvent(new CustomEvent("fl:npcKill", { detail: m })));
@@ -354,6 +361,11 @@ export class NpcRenderer implements ClientSystem {
       v.speed += (inst - v.speed) * Math.min(1, dt * 8);
       v.walk += moved * (v.pm.model.gait ?? 1.5);
       if (v.def.family === "boss" && !v.dyingAt) boss = v;
+      // Granny Gust (#2) leaves pale afterimages when she runs faster than you can.
+      if (v.def.id === "granny_gust" && !v.dyingAt && v.speed > 8 && now - (v.trailAt ?? 0) > 60 && v.dist < 90) {
+        v.trailAt = now;
+        this.particles.burst(v.pos, 0xbfe6ff, 5, { radius: 0.35, height: 1.2, speed: 0.5, life: 0.55 });
+      }
       if (v.dist > 150 || hidden) continue;
       this.drawView(v, now, dt);
       // Health bar over NPCs being fought (bosses use the HUD bar).

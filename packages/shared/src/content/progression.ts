@@ -101,8 +101,8 @@ export const REGEN = {
    * Fights whose own rhythm leaves pauses of DELAY_S or more (a boss's plate window, where it holds its
    * attacks; a defend trial's gap between waves), so the server holds regeneration for the whole
    * encounter instead (D-fixplay-2): a boss's fighters while it is engaged, a defend attempt's runner
-   * until it ends. `pnpm balance` measures each encounter's longest pause and fails if one reaches
+   * until it ends, a roaming mini-boss's quarry while she chases them (Granny Gust, #2). `pnpm balance` measures each encounter's longest pause and fails if one reaches
    * DELAY_S without being listed here.
    */
-  PAUSED_IN: ["boss", "defend"] as readonly ("boss" | "defend")[],
+  PAUSED_IN: ["boss", "defend", "miniboss"] as readonly ("boss" | "defend" | "miniboss")[],
 } as const;

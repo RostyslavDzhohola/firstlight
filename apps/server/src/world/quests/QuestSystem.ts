@@ -1145,6 +1145,16 @@ export class QuestSystem implements RoomSystem {
     if (e.kind === "kill") {
       const credit = here(e.players);
       if (credit.length) emitGameEvent(this.room, { type: "kill", npcKind: e.def, killerId: null, creditIds: credit, level: e.npcLevel, ...(e.area ? { area: e.area } : {}) });
+      // Granny Gust (#2): everyone loot-eligible on her kill.
+      if (e.def === "granny_gust") for (const id of credit) {
+        const a = this.actor(id);
+        if (a) this.award(a, "grounded_granny");
+      }
+    } else if (e.kind === "granny") {
+      for (const id of here(e.sessionIds)) {
+        const a = this.actor(id);
+        if (a) this.award(a, "outran_granny");
+      }
     } else if (e.kind === "bossKill") {
       const credit = here(e.sessionIds);
       const bossId = BOSS_OF_NPC[e.boss];

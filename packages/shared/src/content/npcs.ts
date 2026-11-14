@@ -565,7 +565,54 @@ export const NPC_DEFS: readonly NpcDef[] = [
     ],
     drops: [weaponDrop(1 / 4)],
   },
+  // ---------------------------------------------------------------- roaming mini-boss (#2, wild lane)
+  // Granny Gust: a tiny fen-spirit grandmother on Hollowmere who runs faster than you can sprint
+  // (folklore's speeding old-woman ghost; an original design and name, IP line in issue #2). Her
+  // chase, tells, winded window and lines are in apps/server/src/world/npc/granny.ts (GRANNY tuning
+  // below); the Gale Dash is a charge the attack system runs.
+  {
+    id: "granny_gust", name: "Granny Gust", planet: "hollowmere", family: "beast", tier: "beast", temper: "hostile",
+    levels: [9, 9], hp: 620, speed: 3.2, runSpeed: 10.5, locomotion: "ground", radius: 0.55, height: 1.3, sight: 45, fov: 360, hearing: 20,
+    pack: [1, 1], steadfast: true, respawn: "beast", model: "granny_gust", coinsFixed: 140,
+    attacks: [
+      atk({ id: "gale_dash", name: "Gale Dash", shape: "charge", weight: "heavy", damage: 15, telegraph: 0.9, speed: 16, length: 26, width: 1.8, knockback: 6, range: 22, minRange: 3, cooldown: 2.2 }),
+      atk({ id: "cane_rap", name: "Cane Rap", shape: "arc", weight: "light", damage: 9, telegraph: 0.5, radius: 2.2, angle: 100, range: 2.0, cooldown: 1.4 }),
+    ],
+    drops: [weaponDrop(1 / 2, 2)],
+  },
 ];
+
+/**
+ * Granny Gust's chase (#2): she spots you from GRANNY.sight, closes at runSpeed (faster than any
+ * sprint), shows her tell (a cackle, then the dash's red line), dashes, and after `dashesBeforeRest`
+ * dashes sits down winded for `windedSeconds`, taking `windedDamage`× damage (`armour` otherwise).
+ * Survive `surviveSeconds` of one chase and she gives up on you (a medal); beat her for another.
+ */
+export const GRANNY = {
+  sight: 45,
+  /** She gives up on a target this far away (m) or out of reach this long (s). */
+  loseAt: 80,
+  loseSeconds: 5,
+  dashesBeforeRest: 3,
+  windedSeconds: 4.5,
+  windedDamage: 1.8,
+  armour: 0.6,
+  surviveSeconds: 45,
+  /** Someone she gave up on is left alone this long (s). */
+  ignoreSeconds: 90,
+  roamSpeed: 3.2,
+} as const;
+
+/** Her lines (subtitles; short, funny, hers). Keyed by moment. */
+export const GRANNY_LINES = {
+  spot: ["Ooh, a young one! Shoes tied, dear?", "Walk with me. Quickly.", "I've had my tea. Let's go!"],
+  tell: ["Ready, steady—", "Mind your heels!", "Hup!", "Catch!"],
+  winded: ["Oof. My hip.", "Give me... one... minute.", "Back in my day... hff... we had stairs."],
+  hit: ["Got your toes!", "Too slow, sweet pea!", "That's for not visiting!"],
+  gaveUp: ["Fine, fine. You're quick. Eat something!", "Go on, then. Same time tomorrow?"],
+  won: ["Off to bed with you.", "There. Nap time."],
+  beaten: ["Well! I never... ran so... well."],
+} as const;
 
 export const NPC_INDEX: ReadonlyMap<string, number> = new Map(NPC_DEFS.map((d, i) => [d.id, i]));
 
@@ -821,6 +868,8 @@ export const NPC_AREAS: readonly NpcArea[] = [
       { members: [{ kind: "gnawer", count: [2, 3] }], weight: 2 },
       { members: [{ kind: "woolback", count: [4, 6] }], weight: 2, ground: "meadow" },
     ],
+    // Granny Gust (#2) roams the fen's open ground.
+    singles: [{ kind: "granny_gust", level: 9, offset: 55, roam: 110 }],
   },
   {
     id: "saint_orrins", name: "Saint Orrin's ruin", planet: "hollowmere", at: { mid: [0, 2] }, radius: 50, levels: [7, 10], density: 0,
@@ -1111,6 +1160,8 @@ export type NpcServerMessages = {
   npcPull: { x: number; y: number; z: number; speed: number; ms: number };
   npcKill: { id: string; kind: number; xp: number; coins: number };
   boss: BossEventMsg;
+  /** A named creature's line (Granny Gust, #2), sent to players near it: a subtitle. */
+  npcSay: { id: string; name: string; line: string };
 };
 
 export const BOSS_NAME_BY_ID: Readonly<Record<string, string>> = Object.fromEntries(NPC_DEFS.filter((d) => d.family === "boss").map((d) => [d.id, d.name]));

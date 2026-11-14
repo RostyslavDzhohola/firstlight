@@ -12,7 +12,7 @@
 
 import { WEAPONS, STARTERS, type WeaponDef, type TierStats } from "../../packages/shared/src/content/weapons.ts";
 import { damageMult, killCoins, killXp, LEVEL_CAP, maxHp, ONBOARDING_XP, REGEN, xpToNext } from "../../packages/shared/src/content/progression.ts";
-import { AI_CAPS, aiHitCap, attackDamage, BOSS_DEFS, NPC_AREAS, NPC_DEFS, npcCoins, npcDef, npcMaxHp, npcShieldHp, type AttackDef, type NpcDef } from "../../packages/shared/src/content/npcs.ts";
+import { AI_CAPS, aiHitCap, attackDamage, BOSS_DEFS, GRANNY, NPC_AREAS, NPC_DEFS, npcCoins, npcDef, npcMaxHp, npcShieldHp, type AttackDef, type NpcDef } from "../../packages/shared/src/content/npcs.ts";
 import { MISSIONS } from "../../packages/shared/src/content/missions.ts";
 import { siteDiscoveryXp, WILD_SITES, type WildSiteDef } from "../../packages/shared/src/content/wildSites.ts";
 import { STARTER_STATS, starterMaxHp, starterMove, starterSpellPower } from "../../packages/shared/src/content/starters.ts";
@@ -735,8 +735,8 @@ export function regenSafety(): RegenSafety {
 const WEAPON_BY_ID_LOCAL = new Map(WEAPONS.map((w) => [w.id as string, w]));
 /** One encounter's longest pause between hits a player can take, for regeneration's delay (#77). */
 export interface EncounterGap {
-  /** "boss" or "defend" (REGEN.PAUSED_IN's names), or "race" / "collect" (no encounter of their own). */
-  kind: "boss" | "defend" | "race" | "collect";
+  /** "boss", "defend" or "miniboss" (REGEN.PAUSED_IN's names), or "race" / "collect" (no encounter of their own). */
+  kind: "boss" | "defend" | "miniboss" | "race" | "collect";
   id: string;
   /** Longest pause (s); 0 when the encounter throws nothing at the player. */
   gapS: number;
@@ -817,6 +817,12 @@ export function encounterGaps(): EncounterGap[] {
     } else if (m.trial && m.race) out.push({ kind: "race", id: m.id, gapS: 0, where: "no waves" });
     else if (m.trial && m.collect) out.push({ kind: "collect", id: m.id, gapS: 0, where: "no waves" });
   }
+  // Granny Gust (#2): her longest pause is the winded sit after her last dash (the dash's travel and
+  // recovery, the sit, then the next tell); she holds regen for her quarry anyway.
+  const granny = npcDef("granny_gust");
+  const dash = granny.attacks[0]!;
+  const dashS = (dash.length ?? 8) / (dash.speed ?? 10) + dash.recovery;
+  out.push({ kind: "miniboss", id: granny.id, gapS: Math.round((dashS + GRANNY.windedSeconds + dash.telegraph) * 10) / 10, where: `winded sit (${GRANNY.windedSeconds} s)` });
   return out;
 }
 

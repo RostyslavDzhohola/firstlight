@@ -625,6 +625,43 @@ function cratermaw(): ModelDef {
 
 // ------------------------------------------------------------------------------------ registry
 
+// ------------------------------------------------------------------------------------ Granny Gust (#2)
+
+/**
+ * A tiny fen-spirit grandmother (1.3 m): pale lavender skin and skirt, a teal knitted shawl whose
+ * tails flutter behind her, a white bun, cold cyan eyes, a walking cane in one hand and a warm lantern
+ * in the other, and a wisp of ghost-light trailing from the hem instead of feet. Original design
+ * (folklore's speeding old-woman ghost; issue #2's IP line): no headscarf-and-glasses granny look,
+ * no named character's colours or silhouette.
+ */
+function grannyGust(): ModelDef {
+  const SKIN = 0xe6def2, DRESS = 0x8f86b0, SHAWL = 0x3f8a78, HAIR = 0xf6f6ff, WOOD = 0x6b4b2b;
+  const H: V = [0, 0.96, 0.02];
+  return {
+    style: "walk", fx: 0xbfe6ff, gait: 3.2,
+    parts: [
+      cone(DRESS, [0, 0.36, 0], [0.62, 0.72, 0.62]),
+      gcone(0xbfe6ff, [0, 0.12, -0.18], [0.36, 0.5, 0.36], { r: [-2.2, 0, 0], i: 0.9, d: true }),
+      sph(DRESS, [0, 0.74, 0.03], [0.4, 0.4, 0.36]),
+      sph(SHAWL, [0, 0.86, -0.01], [0.56, 0.22, 0.5]),
+      ...pair((s, k) => [
+        box(SHAWL, [0.13 * s, 0.68, -0.25], [0.13, 0.42, 0.03], { r: [0.35, 0, 0.15 * s], a: k("wingL", "wingR"), pv: [0.13 * s, 0.9, -0.22] }),
+        cyl(DRESS, [0.24 * s, 0.76, 0.1], [0.08, 0.32, 0.08], { r: [0.7, 0, 0], a: k("armL", "armR"), pv: [0.22 * s, 0.86, 0.02] }),
+        box(0x3a3346, [0.1 * s, 0.04, 0.1], [0.09, 0.07, 0.16], { a: k("legL", "legR"), pv: [0.1 * s, 0.3, 0], d: true }),
+        gsph(0x7af0ff, [0.065 * s, 1.1, 0.2], [0.06, 0.06, 0.035], { a: "head", pv: H, i: 3.2 }),
+      ]),
+      sph(SKIN, [0, 1.06, 0.07], [0.3, 0.3, 0.29], { a: "head", pv: H }),
+      sph(SKIN, [0, 1.03, 0.22], [0.07, 0.06, 0.06], { a: "head", pv: H, d: true }),
+      sph(HAIR, [0, 1.24, -0.05], [0.18, 0.16, 0.18], { a: "head", pv: H }),
+      sph(HAIR, [0, 1.17, 0.02], [0.32, 0.12, 0.3], { a: "head", pv: H }),
+      cyl(WOOD, [0.3, 0.5, 0.2], [0.045, 1.0, 0.045], { a: "armR", pv: [0.22, 0.86, 0.02] }),
+      sph(WOOD, [0.3, 1.0, 0.2], [0.09, 0.07, 0.09], { a: "armR", pv: [0.22, 0.86, 0.02], d: true }),
+      mbox(0x4a4752, [-0.3, 0.52, 0.22], [0.15, 0.2, 0.15], { a: "armL", pv: [-0.22, 0.86, 0.02] }),
+      gsph(0xffd27a, [-0.3, 0.52, 0.22], [0.11, 0.14, 0.11], { a: "armL", pv: [-0.22, 0.86, 0.02], i: 3 }),
+    ],
+  };
+}
+
 export function buildModels(body: BodyId): ModelDef[] {
   const byId: Record<string, () => ModelDef> = {
     hopbit: () => hopbit(),
@@ -656,6 +693,7 @@ export function buildModels(body: BodyId): ModelDef[] {
     glimmerhop,
     dustmoth,
     cratermaw,
+    granny_gust: grannyGust,
   };
   return NPC_DEFS.map((d) => (byId[d.model] ?? (() => hopbit()))());
 }

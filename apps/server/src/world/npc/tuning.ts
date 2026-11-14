@@ -50,7 +50,9 @@ export function resetTuning() {
 export type NpcEvent =
   | { kind: "kill"; body: string; def: string; npcLevel: number; players: string[]; userIds: string[]; area: string | null }
   | { kind: "egg"; body: string; egg: "E3" | "E9"; sessionId: string; userId: string }
-  | { kind: "bossKill"; body: string; boss: string; sessionIds: string[]; userIds: string[]; names: string[] };
+  | { kind: "bossKill"; body: string; boss: string; sessionIds: string[]; userIds: string[]; names: string[] }
+  /** Granny Gust (#2) gave up on someone who stayed alive through her chase. */
+  | { kind: "granny"; body: string; outcome: "outran"; sessionIds: string[]; userIds: string[] };
 
 type Listener = (e: NpcEvent) => void;
 /** Process-wide, except that an admin sandbox's rooms only hear each other (D-admin-3). */

@@ -11,6 +11,7 @@ import { actorPos, npcSpeedFactor, type PlayerActor } from "../actors.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, canSee, chest, groundOnly, isMelee, leapLanding, leapStopped, meleeHeightTol, startAttack, updateAttack } from "./attacks.ts";
 import type { NpcSystem } from "./NpcSystem.ts";
+import { GRANNY_ID, grannyThink } from "./granny.ts";
 import { MODE, type Npc } from "./npc.ts";
 import { feetHeight, natureBlocks, natureNear, nearSafeRing, npcBody, slideAngle, step, type SafeAvoid } from "./steer.ts";
 import { NPC_TUNING, emitNpcEvent } from "./tuning.ts";
@@ -37,6 +38,7 @@ export function think(sys: NpcSystem, n: Npc, now: number, dt: number) {
     return;
   }
   if (n.hunt) return hunt(sys, n, now, dt);
+  if (n.def.id === GRANNY_ID) return grannyThink(sys, n, now, dt);
   if (n.def.id === "golden_hopbit") return golden(sys, n, now, dt);
   if (n.def.id === "ticket_000") return ticket(sys, n, now, dt);
   switch (n.mode) {

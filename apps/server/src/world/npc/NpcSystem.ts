@@ -23,6 +23,7 @@ import { PayoutQueue } from "./payouts.ts";
 import { activePull, applyMoveEffect, applyPull } from "./effects.ts";
 import { buildSpawnPoints, type SpawnPoint } from "./spawns.ts";
 import { ECO_RETURN_SECONDS, Ecology } from "./ecology.ts";
+import { GRANNY_ID, grannyArmour, grannySay } from "./granny.ts";
 import { ECO } from "@firstlight/shared/content/ecology";
 import { clearOfStructures, makeGround, npcBody, placeOnGround, type Ground } from "./steer.ts";
 import { NPC_TUNING } from "./tuning.ts";
@@ -577,7 +578,7 @@ export class NpcSystem implements RoomSystem {
         return 0;
       }
     }
-    return amount * (n.def.armour ?? 1);
+    return amount * (n.def.id === GRANNY_ID ? grannyArmour(n) : (n.def.armour ?? 1));
   }
 
   /** `amount` is HP actually removed (combat caps it by the HP before the hit). */
@@ -629,6 +630,7 @@ export class NpcSystem implements RoomSystem {
     if (n.summoner) this.npcs.get(n.summoner)?.raised.delete(n.id);
     this.dissolveChildren(n);
     if (byPredator) return; // the wolf's meal: nobody's kill, no drops (#15)
+    if (n.def.id === GRANNY_ID) grannySay(this, n, "beaten", now, true);
     if (n.def.family === "egg") return; // eggs pay through their own rules (brain.ts)
     rewardKill(this, n, by, now);
   }

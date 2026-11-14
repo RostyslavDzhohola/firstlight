@@ -120,16 +120,16 @@ describe("missions (content.md §5)", () => {
 });
 
 describe("medals (content.md §7)", () => {
-  it("has 21 medals plus 12 hidden egg medals, unique ids and titles", () => {
-    expect(MEDALS).toHaveLength(33);
-    expect(MEDALS.filter((m) => !m.hidden)).toHaveLength(21);
+  it("has 23 medals plus 12 hidden egg medals, unique ids and titles", () => {
+    expect(MEDALS).toHaveLength(35);
+    expect(MEDALS.filter((m) => !m.hidden)).toHaveLength(23);
     expect(MEDALS.filter((m) => m.hidden)).toHaveLength(12);
     expect(unique(MEDALS.map((m) => m.id))).toBe(true);
     for (const m of MEDALS) {
       expect(m.title.length, m.id).toBeGreaterThan(0);
       expect(m.condition.length, m.id).toBeGreaterThan(0);
     }
-    expect(MEDALS.filter((m) => !m.hidden).map((m) => Number(m.ref))).toEqual(Array.from({ length: 21 }, (_, i) => i + 1));
+    expect(MEDALS.filter((m) => !m.hidden).map((m) => Number(m.ref))).toEqual(Array.from({ length: 23 }, (_, i) => i + 1));
   });
 });
 
