@@ -5,9 +5,12 @@
 // first-time steps to our own server. The failures are made with Playwright routes and init scripts on
 // the journeys' local stack, so the real client code handles each one.
 
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
+import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
-import { API_ORIGIN, TARGET } from "./stack.ts";
+import { API_ORIGIN, OUT, TARGET } from "./stack.ts";
 
 test.skip(TARGET === "prod", "local stack only: these break the connection on purpose");
 
@@ -37,6 +40,36 @@ const dropConnection = (page: Page) =>
   });
 
 const PLAY = `${API_ORIGIN}/api/play`;
+
+/**
+ * JFAIL_FILM=1: film each test stop-motion (a screenshot every ~300 ms, as treefade.spec.ts does, so a
+ * loaded machine can't make it stutter) into $E2E_OUT/films/jfail-<n>-<project>.mp4 (needs ffmpeg).
+ */
+const FILM = !!process.env.JFAIL_FILM;
+test.beforeEach(async ({ page }, info) => {
+  if (!FILM) return;
+  const id = info.title.match(/Jfail\.\d+/)?.[0]?.replace(".", "-") ?? "jfail";
+  const dir = path.join(OUT, "films", `${id}-${info.project.name}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  let n = 0;
+  let stop = false;
+  const loop = (async () => {
+    while (!stop) {
+      await page.screenshot({ path: path.join(dir, `f${String(n).padStart(4, "0")}.jpg`), type: "jpeg", quality: 75, timeout: 10_000 }).then(() => n++, () => {});
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  })();
+  (info as unknown as { filmStop: () => Promise<void> }).filmStop = async () => {
+    stop = true;
+    await loop;
+    if (n < 2) return;
+    execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-framerate", "4", "-i", path.join(dir, "f%04d.jpg"), "-vf", "scale=1280:-2,format=yuv420p", "-r", "24", path.join(OUT, "films", `${path.basename(dir)}.mp4`)]);
+  };
+});
+test.afterEach(async ({}, info) => {
+  await (info as unknown as { filmStop?: () => Promise<void> }).filmStop?.();
+});
 
 test.describe("Jfail a stranger's worst moments", () => {
   test("Jfail.1 · the server is down at Play: the loader says so with Retry, and Retry gets in", { tag: ["@Jfail", "@Jfail.1"] }, async ({ player, page, consoleErrors }) => {
@@ -137,6 +170,28 @@ test.describe("Jfail a stranger's worst moments", () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow, "no sideways scrolling").toBeLessThanOrEqual(1);
     await player.shot("phone-home");
+    expect(realErrors(consoleErrors), "no console errors").toEqual([]);
+  });
+
+  test("Jfail.9 · the tab is frozen in the background, then comes back: the world runs on, the connection holds", { tag: ["@Jfail", "@Jfail.9"] }, async ({ player, page, consoleErrors }) => {
+    // JFAIL_BACKGROUND_S (default 60; the brief's case is 600): how long the page stays frozen, as
+    // Chrome freezes a background tab (no frames, no timers, no scripts).
+    const seconds = Number(process.env.JFAIL_BACKGROUND_S ?? 60);
+    test.setTimeout(420_000 + seconds * 1000);
+    await player.joinAsDevAdmin({ starter: "Hexwick", body: "portus" });
+    const before = await player.waitInWorld(120_000, "portus");
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Page.setWebLifecycleState", { state: "frozen" });
+    await page.waitForTimeout(seconds * 1000);
+    await cdp.send("Page.setWebLifecycleState", { state: "active" });
+    await cdp.detach();
+    const t = await player.now();
+    await expect.poll(async () => ((await page.evaluate((since) => (window as any).__fl.frames.stats(since).frames, t)) as number) > 30, { timeout: 30_000, message: "frames again after the freeze" }).toBe(true);
+    const after = await player.waitInWorld(60_000, "portus");
+    expect(after.player?.hp, "still in the world, alive").toBeGreaterThan(0);
+    expect(after.net, "still connected").toBeTruthy();
+    await player.note("background", { seconds, before: before.net, after: after.net });
+    await player.shot("after-background");
     expect(realErrors(consoleErrors), "no console errors").toEqual([]);
   });
 

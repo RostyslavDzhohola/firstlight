@@ -39,6 +39,14 @@ if (config.publicRepo) {
   $("repo")!.hidden = false;
 }
 
+// The maker's credit (#11): linked to the portfolio once config.ownerPortfolio is filled in.
+const owner = $<HTMLAnchorElement>("owner-link");
+if (owner && config.ownerPortfolio) {
+  owner.href = config.ownerPortfolio;
+  owner.target = "_blank";
+  owner.rel = "noopener";
+}
+
 $("copy-link")?.addEventListener("click", async () => {
   await navigator.clipboard.writeText(location.origin + location.pathname).catch(() => {});
   const c = $("copied");

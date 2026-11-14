@@ -8,10 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HomeOnline } from "@firstlight/shared/net/home";
 import { GLEAMS } from "@firstlight/shared/content/gleams";
 import { SPELLS } from "@firstlight/shared/content/spells";
-import { STARTERS } from "@firstlight/shared/content/weapons";
 import { STILLS } from "../ui/loadingStills.ts";
 import { paintAgentsSwitch, renderAgentCommands, renderNews, renderOnline, renderWorlds, startHeroStills } from "./home.ts";
-import { agentCommands, agentsGuideUrl, HERO_STILLS, heroLive, heroStills, huntState, newsTiles, WORLD_STILL, worldCards } from "./homeModel.ts";
+import { agentCommands, agentsGuideUrl, HERO_STILLS, heroLive, heroStills, huntState, NEWS_ORDER, newsTiles, WORLD_STILL, worldCards } from "./homeModel.ts";
 
 const online: HomeOnline = {
   total: 5,
@@ -56,16 +55,19 @@ describe("the hero's model", () => {
     expect(huntState([{ id: GLEAMS.firsts, name: "Mossback", foundAt: Date.UTC(2026, 10, 12) }])).toEqual({ text: "First opened by Mossback · Nov 12", claimed: true });
   });
 
-  it("writes the three news tiles from the shared content", () => {
+  it("writes the news tiles from the shared content, in NEWS_ORDER", () => {
     const tiles = newsTiles([]);
-    expect(tiles.map((t) => t.id)).toEqual(["spells", "hunt", "starters"]);
-    expect(tiles[0]!.icons.map((i) => i.label)).toEqual(SPELLS.map((s) => s.keycap));
-    expect(tiles[0]!.text).toContain("levels 1, 3, 6 and 9");
-    expect(tiles[1]!.title).toBe("The hunt: The Three Gleams");
-    expect(tiles[1]!.text).toContain("a ring race on Arcadia, a beacon to hold on Hollowmere, shards to gather on Meridian");
-    expect(tiles[1]!.state).toContain("never been opened");
-    expect(tiles[2]!.icons).toHaveLength(STARTERS.length);
-    expect(newsTiles(null)[1]!.state).toBeNull(); // no board: the tile says nothing it doesn't know
+    expect(tiles.map((t) => t.id)).toEqual([...NEWS_ORDER]);
+    const byId = (id: string) => tiles.find((t) => t.id === id)!;
+    expect(byId("sites").title).toBe("Nine wild places to find");
+    expect(byId("sites").text).toContain("Arcadia, Hollowmere and Meridian");
+    expect(byId("spells").icons.map((i) => i.label)).toEqual(SPELLS.map((s) => s.keycap));
+    expect(byId("spells").text).toContain("levels 1, 3, 6 and 9");
+    expect(byId("hunt").title).toBe("The hunt: The Three Gleams");
+    expect(byId("hunt").text).toContain("a ring race on Arcadia, a beacon to hold on Hollowmere, shards to gather on Meridian");
+    expect(byId("hunt").state).toContain("never been opened");
+    expect(newsTiles(null).find((t) => t.id === "hunt")!.state).toBeNull(); // no board: the tile says nothing it doesn't know
+    expect(tiles.length % 3, "full rows of three on a desktop").toBe(0);
   });
 
   it("brings an agent in with one command: Claude Code, Codex, or three curl lines", () => {
