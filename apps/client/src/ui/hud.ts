@@ -394,6 +394,11 @@ export class Hud {
   }
 
   /** Name and look shown on the player card (from the room state; cheap to call every frame). */
+  /** The character's starter (STARTERS index), for numbers that depend on it (spell power, #79). */
+  get starterIndex(): number {
+    return this.starter;
+  }
+
   setIdentity(name: string, starter: number, palette: number, look = 0) {
     const key = `${name}|${starter}|${palette}|${look}`;
     if (key === this.c.identity) return;

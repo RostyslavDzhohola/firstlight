@@ -59,13 +59,17 @@ export class SpellClient implements ClientSystem {
     this.bar = new SpellBar(game.hud.spellSlot, game.hud.aetherSlot);
     const you = game.hud.you;
     if (you) this.book.setYou(you.spells, you.level);
+    this.bar.setNumbers(you?.level ?? 1, game.hud.starterIndex);
     const room = game.net.room;
     if (!room) return; // offline: the bar shows a full book; nothing to cast at
     const on = (type: string, cb: (m: never) => void) => {
       const off = room.onMessage(type, cb as (m: unknown) => void) as unknown;
       if (typeof off === "function") this.offs.push(off as () => void);
     };
-    on("you", (m: YouState & { level: number }) => this.book.setYou(m.spells, m.level));
+    on("you", (m: YouState & { level: number }) => {
+      this.book.setYou(m.spells, m.level);
+      this.bar.setNumbers(m.level, this.game.hud.starterIndex);
+    });
     on("denied", (m: { action: string; reason: string; req?: number }) => {
       if (m.action !== "cast") return;
       // The refusal names its cast (`req`): that prediction goes, any other in flight stays.

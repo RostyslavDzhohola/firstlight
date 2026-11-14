@@ -10,6 +10,9 @@ import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type Mission
 import { trackerRows } from "./trackerRows.ts";
 import { trialWay } from "../game/nextSteps.ts";
 import { missionTrack } from "../game/missionTrack.ts";
+import { spellCost, spellEffect, spellPower } from "../game/spellInfo.ts";
+import { SPELLS } from "@firstlight/shared/content/spells";
+import { LEVEL_CAP } from "@firstlight/shared/content/progression";
 import { GLEAMS, gleamsWon } from "@firstlight/shared/content/gleams";
 import type { InvItem } from "@firstlight/shared/net/protocol";
 import type { Game } from "../game/Game.ts";
@@ -195,7 +198,7 @@ export class CuratorPanel extends Panel {
 // ---------------------------------------------------------------- journal
 
 export class JournalPanel extends Panel {
-  private tab: "missions" | "medals" | "wardrobe" = "missions";
+  private tab: "missions" | "spells" | "medals" | "wardrobe" = "missions";
   protected closeKeys = ["KeyJ"];
 
   show(tab?: JournalPanel["tab"]) {
@@ -212,7 +215,7 @@ export class JournalPanel extends Panel {
     const title = you?.title ? MEDALS.find((m) => m.id === you.title)?.title : null;
     el("div", "sub", head, title ? `Title: ${title}` : "No title worn");
     const tabs = el("div", "tabs", b);
-    for (const t of ["missions", "medals", "wardrobe"] as const) {
+    for (const t of ["missions", "spells", "medals", "wardrobe"] as const) {
       const x = el("button", `tab${this.tab === t ? " on" : ""}`, tabs, t[0]!.toUpperCase() + t.slice(1));
       x.onclick = () => {
         this.tab = t;
@@ -221,6 +224,7 @@ export class JournalPanel extends Panel {
     }
     const body = el("div", "body", b);
     if (this.tab === "missions") this.renderMissions(body, you);
+    else if (this.tab === "spells") this.renderSpells(body, you);
     else if (this.tab === "medals") this.renderMedals(body, you);
     else this.renderWardrobe(body, you);
     const foot = el("div", "foot", b);
@@ -250,6 +254,27 @@ export class JournalPanel extends Panel {
       });
     }
     el("div", "rw", body, `${mine.filter((m) => m.done).length} of ${MISSIONS.length} missions done this life.`).style.marginTop = "8px";
+  }
+
+  /** #79: each spell's numbers at your level, and what the next level adds. */
+  private renderSpells(body: HTMLElement, you: YouPlus | null) {
+    const level = you?.level ?? 1;
+    const starter = this.game.hud.starterIndex;
+    el("p", "sub", body, `At level ${level}. Spell damage grows 3% a level (and with your starter's spell power); cooldowns and costs stay the same.`);
+    for (const s of SPELLS) {
+      const row = el("div", "row", body);
+      row.dataset.e2e = `journal-spell-${s.id}`;
+      const left = el("div", "", row);
+      el("div", "nm", left, `${s.keycap} · ${s.name}`);
+      if (level < s.level) {
+        el("div", "meta", left, `Unlocks at level ${s.level}. ${s.blurb}`);
+        continue;
+      }
+      el("div", "", left, spellEffect(s, level, starter));
+      const now = spellPower(s, level, starter);
+      const next = level < LEVEL_CAP ? spellPower(s, level + 1, starter) : null;
+      el("div", "meta", left, `${spellCost(s)}${now && next && next.value !== now.value ? ` · level ${level + 1}: ${next.value} ${now.unit}` : ""}`);
+    }
   }
 
   private renderMedals(body: HTMLElement, you: YouPlus | null) {
