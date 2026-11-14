@@ -23,8 +23,14 @@ export async function emailCodeFlow(player: Player, card: Locator, email: string
   // Six digits submit by themselves (ui/account.ts); press the button only if the field is still there.
   const submitted = await codeInput.waitFor({ state: "hidden", timeout: 4000 }).then(() => true, () => false);
   if (!submitted) {
+    // A disabled button is the six digits' own submit still in flight (a slow machine): clicking would
+    // wait on a button that leaves when the card moves on. Callers check the outcome (saved, signed in).
     const confirm = card.getByRole("button", { name: /^(save|verify|confirm|sign in)$/i }).first();
-    if (await confirm.isVisible().catch(() => false)) await confirm.click();
+    if ((await confirm.isVisible().catch(() => false)) && (await confirm.isEnabled().catch(() => false))) {
+      await confirm.click({ timeout: 5000 }).catch(async (e: Error) => {
+        if (await confirm.isVisible().catch(() => false)) throw e; // still there and not clickable: a real failure
+      });
+    }
   }
   return code;
 }
