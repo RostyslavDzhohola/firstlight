@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeThrown, scrubReport, scrubStack, scrubText } from "./scrub.ts";
+import { describeThrown, SCRUB_INPUT, scrubReport, scrubStack, scrubText } from "./scrub.ts";
 
 describe("error report scrubbing (review 2026-11-13 ship #3)", () => {
   it("a URL keeps its origin and, for a script, its file and position; never its query, fragment, path token or credentials", () => {
@@ -33,5 +33,72 @@ describe("error report scrubbing (review 2026-11-13 ship #3)", () => {
     expect(describeThrown(42).message).toBe("Unhandled rejection (number)");
     expect(describeThrown(Object.assign(new RangeError("bad"), { stack: "x" }))).toEqual({ message: "RangeError: bad", stack: "x" });
     expect(scrubReport("x".repeat(1000), "").message).toHaveLength(300);
+  });
+
+  // Review round two, finding 3: a bracketed IPv6 authority slipped past the URL rule and kept its path secret.
+  it("any URL shape keeps no path secret: IPv6, userinfo, ports, upper-case or unknown schemes, percent-encoding", () => {
+    expect(scrubText("https://[::1]/reset/shortsecret?token=secret")).toBe("https://[::1]/…");
+    expect(scrubText("GET https://[2001:db8::7]:8443/invite/abc123 failed")).toBe("GET https://[2001:db8::7]:8443/… failed");
+    expect(scrubText("at https://[::1]:5173/assets/main-abc.js:1:2")).toBe("at https://[::1]:5173/…/main-abc.js:1:2");
+    expect(scrubText("HTTPS://User:Pw@Host.Test/Reset/abc")).toBe("https://host.test/…");
+    expect(scrubText("https://alice:hunter2@x.test:444/reset/abc")).toBe("https://x.test:444/…");
+    expect(scrubText("ftp://bob:pw@files.test/token/abc and chrome-extension://abcdef/secret/x")).toBe("[url] and [url]");
+    expect(scrubText("https%3A%2F%2Fx.test%2Freset%2Fsupersecret")).toBe("https://x.test/…");
+    expect(scrubText("https%253A%252F%252Fx.test%252Freset%252Fsupersecret")).toBe("https://x.test/…");
+    expect(scrubText("(https://x.test/reset/abc)")).toBe("(https://x.test/…)");
+    expect(scrubText("[https://x.test/reset/abc]")).not.toContain("abc");
+  });
+
+  it("paths without a scheme or a leading slash lose what follows a sensitive segment too", () => {
+    expect(scrubText("open x.test/reset/abc123 now")).toBe("open x.test/reset/[redacted] now");
+    expect(scrubText("//x.test/invite/abc?y=1")).toBe("//x.test/invite/[redacted]");
+    expect(scrubText("[::1]/reset/abc")).toBe("[::1]/reset/[redacted]");
+    expect(scrubText("access_token=abc123xyz&id_token=qwe456rty")).not.toMatch(/abc123xyz|qwe456rty/);
+  });
+
+  it("text past the input bound is cut before any rule runs, with the word the cut split dropped", () => {
+    const long = `${"word ".repeat(SCRUB_INPUT / 5)}alice@example.com tail`;
+    const out = scrubText(long);
+    expect(out.length).toBeLessThanOrEqual(SCRUB_INPUT + 2);
+    expect(out).not.toMatch(/alice|exam/);
+    // A cut through the middle of an email leaves no part of it.
+    const cut = `${"y".repeat(SCRUB_INPUT - 8)} alice@example.com`;
+    expect(scrubText(cut)).not.toMatch(/ali|@/);
+  });
+
+  // Review round two, finding 4: the email rule was quadratic on a long run without "@" (16,000
+  // characters took about 780 ms), on public ingestion and on the page before truncation.
+  it("finishes in a few milliseconds on a 100,000-character hostile string of every shape", () => {
+    const shapes: Record<string, string> = {
+      "x…": "x".repeat(100_000),
+      "@…": "@".repeat(100_000),
+      "a@a@a…": "a@".repeat(50_000),
+      "://…": "://".repeat(33_334),
+      "a.…": `a@${"a.".repeat(50_000)}`,
+      "eyJ…": "eyJ".repeat(33_334),
+      "%…": "%25".repeat(33_334),
+      "http://….": `http://x.test/${".".repeat(100_000)}x`,
+      "spaces": `at ${" ".repeat(100_000)}x`,
+      "gecko": `f@${" ".repeat(100_000)}x`,
+      "token=…": `token${" ".repeat(100_000)}`,
+      "a-a-…": "a-".repeat(50_000),
+      "?a?a…": "?a".repeat(50_000),
+      "https://https://…": "https://".repeat(12_500),
+      "[[[…": "https://[".repeat(11_112),
+      "lines": "at f (https://x.test/a.js:1:1)\n".repeat(4000),
+    };
+    // Each shape through every public entry point, best of three (a busy machine adds pauses to
+    // single runs; a super-linear pattern would be slow on every run: the old email rule took seconds).
+    for (const [name, s] of Object.entries(shapes)) {
+      let best = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const t0 = performance.now();
+        scrubText(s);
+        scrubStack(s);
+        scrubReport(s, s);
+        best = Math.min(best, performance.now() - t0);
+      }
+      expect(best, name).toBeLessThan(10);
+    }
   });
 });
