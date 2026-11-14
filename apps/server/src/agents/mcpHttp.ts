@@ -59,7 +59,7 @@ function headerValue(req: Request, name: string): string | undefined {
   const v = req.headers[name];
   const s = Array.isArray(v) ? v[0] : v;
   if (s === undefined) return undefined;
-  const m = /^=\?base64\?([A-Za-z0-9+/=]*)\?=$/.exec(s);
+  const m = s.match(/^=\?base64\?([A-Za-z0-9+/=]*)\?=$/);
   return m ? Buffer.from(m[1]!, "base64").toString("utf8") : s;
 }
 
