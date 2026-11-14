@@ -24,8 +24,12 @@ export interface MissionDef {
   objective: string;
   recLevel: [number, number];
   reward: { xp: number; coins: number; items: InvItem[] };
-  /** hunt: kills that count (by any credited player), optionally only inside a place. */
-  hunt?: { targets: HuntTarget[]; place?: string };
+  /**
+   * hunt: kills that count (by any credited player), optionally only inside a place. `site`: the wild
+   * site (content/wildSites.ts) the hunt leads to when none of its creatures is in view (L1: the
+   * Quietfall Wreck, where the Cratermaw nests); it doesn't limit which kills count.
+   */
+  hunt?: { targets: HuntTarget[]; place?: string; site?: string };
   /** find: interact with this world object (only visible while the mission is active). */
   find?: { object: string; itemName: string };
   /** reach: enter the trigger radius around a place. */
@@ -221,7 +225,7 @@ export const MISSIONS: readonly MissionDef[] = [
     id: "L1", body: "lumen", guide: "Lark", giver: "guide_arcadia", type: "hunt", name: "The Thing in the Wreck",
     objective: "On Lumen, put down the Cratermaw in the Quietfall wreck and 4 Glimmerhops", recLevel: [6, 9],
     reward: { xp: 650, coins: 110, items: items(["tonic_large", 1]) },
-    hunt: { targets: [{ npcKind: "cratermaw", count: 1, label: "Cratermaw" }, { npcKind: "glimmerhop", count: 4, label: "Glimmerhops" }] },
+    hunt: { targets: [{ npcKind: "cratermaw", count: 1, label: "Cratermaw" }, { npcKind: "glimmerhop", count: 4, label: "Glimmerhops" }], site: "quietfall_wreck" },
     pitch: "See the moon? There's a hauler crashed up there, and something's nesting in it. The moon portal is right behind me.",
     routes: "Through the moon portal by Dawnpad; on Lumen, follow the crater rims to the broken hauler.",
   },
