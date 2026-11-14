@@ -15,6 +15,7 @@ import { inReach } from "@firstlight/shared/content/world";
 import type { TrialMsg } from "@firstlight/shared/net/protocol";
 import { PF } from "@firstlight/shared/net/schema";
 import { actorPos, type PlayerActor } from "../actors.ts";
+import { holdRegen } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { npcSystemOf } from "../npc/index.ts";
 import type { QuestSystem } from "./QuestSystem.ts";
@@ -361,6 +362,7 @@ export class TrialLogic {
     const run = this.runs.get(a.id);
     if (!run || run.id !== def.id) return;
     if (run.complete) return this.finish(a, m, def, run);
+    holdRegen(a, "defend", now); // D-fixplay-2: the gaps between waves outlast regen's delay
     const dt = Math.max(0, now - run.lastAt);
     run.lastAt = now;
     const inside = inReach(this.q.pos(d.beacon), p, d.radius, 0);

@@ -239,3 +239,16 @@ describe("the shipped catalogues", () => {
     expect(failed).toEqual([]);
   });
 });
+
+describe("regeneration against bosses and trials (D-fixplay-2)", () => {
+  it("covers every boss and trial, and every encounter whose pauses reach the delay is held", async () => {
+    const { encounterGaps } = await import("./model.ts");
+    const { REGEN } = await import("../../packages/shared/src/content/progression.ts");
+    const gaps = encounterGaps();
+    expect(gaps.map((g) => g.id)).toEqual(expect.arrayContaining(["tidewrath", "hollow_king", "the_receiver", "T1", "T2", "T3", "H4"]));
+    // The plate window (8 s kneel + the attack spacing) reaches the delay: the reason for the hold.
+    expect(gaps.find((g) => g.id === "tidewrath")!.gapS).toBeGreaterThanOrEqual(REGEN.DELAY_S);
+    expect(gaps.find((g) => g.id === "T2")!.gapS).toBe(25);
+    for (const g of gaps) if (g.gapS >= REGEN.DELAY_S) expect(REGEN.PAUSED_IN as readonly string[], g.id).toContain(g.kind);
+  });
+});

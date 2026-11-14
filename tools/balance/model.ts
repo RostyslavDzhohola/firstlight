@@ -718,6 +718,93 @@ export function regenSafety(): RegenSafety {
 }
 
 const WEAPON_BY_ID_LOCAL = new Map(WEAPONS.map((w) => [w.id as string, w]));
+/** One encounter's longest pause between hits a player can take, for regeneration's delay (#77). */
+export interface EncounterGap {
+  /** "boss" or "defend" (REGEN.PAUSED_IN's names), or "race" / "collect" (no encounter of their own). */
+  kind: "boss" | "defend" | "race" | "collect";
+  id: string;
+  /** Longest pause (s); 0 when the encounter throws nothing at the player. */
+  gapS: number;
+  /** Where it happens, for the report. */
+  where: string;
+}
+
+/** The boss attack loop's slowest spacing between attacks (BossController: 1.2–2.4 s), s. */
+const BOSS_ATTACK_SPACING_S = 2.4;
+
+/**
+ * The longest a boss goes without an attack at a player who stays in reach of at least one attack
+ * (any distance, any phase), by its rotation (cooldowns, phases, ranges, the slowest spacing), its
+ * timed mechanics (`every`), and its plate window (it holds its attacks the whole window). Cover and
+ * dodges only lengthen it, so it is a floor: a boss whose floor reaches the delay needs the rule.
+ */
+export function bossGap(bossId: string): { gapS: number; where: string } {
+  const def = npcDef(bossId);
+  const boss = BOSS_DEFS.find((b) => b.id === bossId)!;
+  let worst = 0;
+  let where = "";
+  const note = (g: number, w: string) => {
+    if (g > worst) {
+      worst = g;
+      where = w;
+    }
+  };
+  for (const phase of [1, 2, 3]) {
+    const regular = def.attacks.filter((a) => !a.timed && a.damage > 0 && (!a.phases || a.phases.includes(phase)));
+    const timed = def.attacks.filter((a) => a.timed && a.damage > 0 && (a.every?.[phase - 1] ?? 0) > 0);
+    const reachMax = Math.max(...regular.map((a) => a.range));
+    for (let d = 0; d <= reachMax; d += 0.5) {
+      const inReach = regular.filter((a) => d <= a.range && d >= (a.minRange ?? 0));
+      if (!inReach.length) continue;
+      // Simulate the rotation for 120 s: the boss attacks whenever one in reach is off cooldown and
+      // its spacing has passed; timed mechanics land on their own clock (range 999).
+      const hits: number[] = [];
+      const cd = inReach.map(() => 0);
+      let t = 0;
+      for (let guard = 0; guard < 2000 && t < 120; guard++) {
+        const ready = cd.findIndex((c) => c <= t + 1e-9);
+        if (ready < 0) {
+          t = Math.min(...cd);
+          continue;
+        }
+        hits.push(t);
+        cd[ready] = t + inReach[ready]!.cooldown;
+        t += BOSS_ATTACK_SPACING_S;
+      }
+      for (const a of timed) for (let k = a.every![phase - 1]!; k < 120; k += a.every![phase - 1]!) hits.push(k);
+      hits.sort((x, y) => x - y);
+      for (let i = 1; i < hits.length; i++) note(hits[i]! - hits[i - 1]!, `phase ${phase}, ${d} m`);
+    }
+  }
+  // A plate window: the boss kneels for the whole window and attacks again after its spacing.
+  if (boss.plates) note(boss.plates.window + BOSS_ATTACK_SPACING_S, `plate window (${boss.plates.window} s)`);
+  return { gapS: worst, where };
+}
+
+/**
+ * Every boss and every trial (and other defend missions) as regeneration sees them: the boss gaps
+ * above; a defend attempt's longest gap between waves (or from the last wave to the end of the hold),
+ * counted as if each wave died the moment it arrived; race and collect trials raise no encounter.
+ */
+export function encounterGaps(): EncounterGap[] {
+  const out: EncounterGap[] = BOSS_DEFS.map((b) => ({ kind: "boss" as const, id: b.id, ...bossGap(b.id) }));
+  for (const m of MISSIONS) {
+    if (m.defend) {
+      const at = [...m.defend.waves.map((w) => w.atS), m.defend.holdS].sort((x, y) => x - y);
+      let gapS = 0;
+      let where = "";
+      for (let i = 1; i < at.length; i++)
+        if (at[i]! - at[i - 1]! > gapS) {
+          gapS = at[i]! - at[i - 1]!;
+          where = `${at[i - 1]} s → ${at[i]} s`;
+        }
+      out.push({ kind: "defend", id: m.id, gapS, where });
+    } else if (m.trial && m.race) out.push({ kind: "race", id: m.id, gapS: 0, where: "no waves" });
+    else if (m.trial && m.collect) out.push({ kind: "collect", id: m.id, gapS: 0, where: "no waves" });
+  }
+  return out;
+}
+
 
 // ------------------------------------------------------------------------------------ bosses
 

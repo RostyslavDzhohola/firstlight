@@ -9,7 +9,7 @@ import { gatedTier } from "./model.ts";
 import { checks } from "./bands.ts";
 import {
   affordability, bossRows, COMBAT_FAMILIES, creatureRows, duelWins, frailHp, novaHeadshotLevels, progression, pvpCell, PVP_LEVELS, roleLeaders,
-  regenSafety, SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
+  encounterGaps, regenSafety, SPELL_LEVELS, spellPeaks, spellRows, starterRoles, weaponTable,
 } from "./model.ts";
 import { REGEN } from "../../packages/shared/src/content/progression.ts";
 
@@ -59,6 +59,11 @@ if (args.has("--json")) {
     ["Slowest starter weapon's time between attacks", `${f(rg.starterSwingS)} s`, `< ${REGEN.DELAY_S} s`],
     ["0 to full health", `${f(rg.fullS, 0)} s`, "≥ 60 s"],
     ["HP it would add while the quickest regular kills an idle player (if it ran)", `${f(rg.regenInFightShare * 100, 0)}% of max`, "never runs in a fight"],
+    ...encounterGaps().map((e) => [
+      `Longest pause in ${e.kind} ${e.id} (${e.where})`,
+      `${f(e.gapS)} s`,
+      e.kind === "race" || e.kind === "collect" ? "no encounter" : REGEN.PAUSED_IN.includes(e.kind) ? "regen held for the encounter" : `< ${REGEN.DELAY_S} s`,
+    ]),
   ]);
   const prog = progression();
   table("Progression along the intended route (20 s between kills; missions credited at their usual level)",

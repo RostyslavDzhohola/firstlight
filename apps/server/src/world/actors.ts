@@ -37,6 +37,8 @@ export interface PlayerActor {
   overheatUntil: number;
   blocking: boolean;
   combatUntil: number;
+  /** Regeneration held until then (a boss fight or a defend attempt, REGEN.PAUSED_IN; combat.ts holdRegen). */
+  noRegenUntil?: number;
   protectedUntil: number;
   /** Heals over time; `left` (HP still to come) makes the total exact regardless of tick timing. */
   heals: { perSec: number; until: number; left?: number }[];

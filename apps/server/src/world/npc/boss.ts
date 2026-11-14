@@ -19,7 +19,7 @@ import {
 } from "@firstlight/shared/content/npcs";
 import { partyOf } from "../../social/parties.ts";
 import { actorPos, type ImmuneWhy, type NpcActor, type PlayerActor } from "../actors.ts";
-import { dealDamage, type BreakableHost } from "../combat.ts";
+import { dealDamage, holdRegen, type BreakableHost } from "../combat.ts";
 import type { V3 } from "../geometry.ts";
 import { cancelAttack, chest, playersInCircle, playersInLine, startAttack, updateAttack } from "./attacks.ts";
 import { aggro } from "./brain.ts";
@@ -189,6 +189,7 @@ export class BossController {
     }
     this.engagement(n, now);
     if (!this.engaged) return;
+    for (const lp of this.fighters) holdRegen(lp.a, "boss", now); // D-fixplay-2: the plate window outlasts regen's delay
     this.plates(n, now, dt);
     this.regen(n, now, dt);
     this.phases(n, now);
