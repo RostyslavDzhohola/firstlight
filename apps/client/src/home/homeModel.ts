@@ -132,7 +132,8 @@ export function progressView(me: MeInfo, fallbackStarter = 0, fallbackLook = 0):
   const into = Math.max(0, (c?.xp ?? 0) - xpAtLevel(level));
   const need = xpToNext(level);
   const starter = starterIndex(c?.starter ?? fallbackStarter);
-  const padsTotal = HOME_WORLDS.reduce((s, b) => s + (PADS[BODIES[b].padLayout] ?? 0), 0);
+  // Every body's pads, Lumen's too (the count includes them: pads found up there).
+  const padsTotal = BODY_IDS.reduce((s, b) => s + (PADS[BODIES[b].padLayout] ?? 0), 0);
   return {
     name: me.displayName || me.name || "You",
     guest: me.guest,

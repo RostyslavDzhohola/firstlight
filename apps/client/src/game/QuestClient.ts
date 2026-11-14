@@ -6,7 +6,7 @@
 import { SHOP_SPOT_BY_ID } from "@firstlight/shared/content/shops";
 import { EGG_BY_ID } from "@firstlight/shared/content/secrets";
 import * as THREE from "three/webgpu";
-import { PLANET_IDS, type BodyId } from "@firstlight/shared";
+import type { BodyId } from "@firstlight/shared";
 import type { HallLine } from "@firstlight/shared/content/secrets";
 import { inReach, objectPos, objectsOn, surfaceDistance, type WorldObjectDef } from "@firstlight/shared/content/world";
 import { PF } from "@firstlight/shared/net/schema";
@@ -15,7 +15,7 @@ import type { AvatarView } from "../render/Avatars.ts";
 import { CosmeticRig, Nameplates } from "../render/Cosmetics.ts";
 import { PlateBars } from "../render/plates.ts";
 import { MapPanel } from "../ui/map.ts";
-import { AdminConsole, CuratorPanel, GuidePanel, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
+import { AdminConsole, CuratorPanel, GuidePanel, guideBody, JournalPanel, KeypadPanel, MissionTracker, Panel } from "../ui/panels.ts";
 import { gleamsWon } from "@firstlight/shared/content/gleams";
 import { ShopPanel } from "../ui/shop.ts";
 import { QuestWorld } from "../world/QuestWorld.ts";
@@ -81,7 +81,7 @@ export class QuestClient implements ClientSystem {
       .filter((o) => o.trigger === "interact")
       .map((def) => ({ item: def, def, pos: objectPos(def, (x, y, z) => terrain.groundHeight(x, y, z)), dist: 0 }));
     this.shop = new ShopPanel(game);
-    this.guide = (PLANET_IDS as readonly BodyId[]).includes(body) ? new GuidePanel(game, body as Exclude<BodyId, "portus">) : null;
+    this.guide = guideBody(body) ? new GuidePanel(game, body) : null;
     this.curator = body === "portus" ? new CuratorPanel(game) : null;
     this.journal = new JournalPanel(game);
     this.keypad = new KeypadPanel(game);

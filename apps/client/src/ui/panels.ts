@@ -4,10 +4,10 @@
 
 import { WILD_SITES } from "@firstlight/shared/content/wildSites";
 import "./quests.css";
-import type { BodyId } from "@firstlight/shared";
+import { BODIES, BODY_IDS, type BodyId } from "@firstlight/shared";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
 import { MEDALS } from "@firstlight/shared/content/medals";
-import { GUIDES, MISSION_BY_ID, MISSIONS, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
+import { GUIDES, MISSION_BY_ID, MISSIONS, missionGiver, missionsFrom, missionsOn, type MissionDef } from "@firstlight/shared/content/missions";
 import { trackerRows } from "./trackerRows.ts";
 import { trialWay } from "../game/nextSteps.ts";
 import { missionTrack } from "../game/missionTrack.ts";
@@ -126,6 +126,22 @@ function missionCard(parent: HTMLElement, def: MissionDef, you: YouPlus | null, 
   actions(row);
 }
 
+/** Bodies with a guide at the main pad (every planet and the moon; Portus has Sela instead). */
+export function guideBody(body: BodyId): body is Exclude<BodyId, "portus"> {
+  return body !== "portus" && !!GUIDES[body as Exclude<BodyId, "portus">];
+}
+
+/** Who gives a mission and where, for a "given by" line ("Lark on Arcadia"). */
+function giverWhere(id: string): string {
+  const g = Object.values(GUIDES).find((x) => x.id === id);
+  return g ? `${g.name} on ${BODIES[g.body].name}` : id === GLEAMS.curator.id ? `${GLEAMS.curator.name} in Portus` : id;
+}
+
+/**
+ * A guide's panel: the missions this guide hands out (accept / abandon), then the missions on this
+ * body that someone else gives (Lark sends players to Lumen with L1), read-only with their progress,
+ * so Surveyor Odile can tell you how the hunt is going.
+ */
 export class GuidePanel extends Panel {
   private readonly body: Exclude<BodyId, "portus">;
   constructor(game: Game, body: Exclude<BodyId, "portus">) {
@@ -142,7 +158,7 @@ export class GuidePanel extends Panel {
     el("p", "sub", b, `${g.role[0]!.toUpperCase()}${g.role.slice(1)} at the main pad`);
     el("p", "quote", b, `“${g.greeting}”`);
     const body = el("div", "body", b);
-    for (const def of missionsOn(this.body)) {
+    for (const def of missionsFrom(g.id)) {
       missionCard(body, def, you, (row) => {
         el("span", "quote", row, `“${def.pitch}”`).style.margin = "0";
         const state = you?.missions.find((m) => m.id === def.id);
@@ -151,6 +167,11 @@ export class GuidePanel extends Panel {
         } else if (!state.done) {
           el("button", "btn ghost", row, "Abandon").onclick = () => send(this.game, "mission", { action: "abandon", id: def.id });
         }
+      });
+    }
+    for (const def of MISSIONS.filter((m) => m.body === this.body && missionGiver(m) !== g.id && !m.trial)) {
+      missionCard(body, def, you, (row) => {
+        el("span", "rw", row, `${giverWhere(missionGiver(def))} gives this one.`);
       });
     }
     const foot = el("div", "foot", b);
@@ -318,7 +339,8 @@ export class JournalPanel extends Panel {
   private renderSites(body: HTMLElement, you: YouPlus | null) {
     const found = new Set(you?.sites ?? []);
     el("p", "sub", body, `${found.size} of ${WILD_SITES.length} sites found this life. Each guards a chest; finding one is worth XP once per life.`);
-    for (const planet of ["arcadia", "hollowmere", "meridian"] as const) {
+    // Every body with sites, in body order (Lumen's Quietfall Wreck too: it counts in the total).
+    for (const planet of BODY_IDS.filter((b) => WILD_SITES.some((x) => x.body === b))) {
       el("div", "cat", body, planet);
       for (const s of WILD_SITES.filter((x) => x.body === planet)) {
         const row = el("div", "row", body);

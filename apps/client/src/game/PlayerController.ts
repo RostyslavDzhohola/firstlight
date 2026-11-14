@@ -98,6 +98,9 @@ const _cam = new THREE.Vector3();
 const _camUp = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
 const _start = new THREE.Vector3();
+const _aUp = new THREE.Vector3();
+const _aT = new THREE.Vector3();
+const _aAxis = new THREE.Vector3();
 const _lens = new THREE.Vector3();
 const _lensF = new THREE.Vector3();
 const _lensR = new THREE.Vector3();
@@ -510,14 +513,14 @@ export class PlayerController {
     // carry the body across a thin prop (a fence blocks 0.47 m either side of its middle), and a
     // fast fall can't skip a top's 0.4 m landing band.
     let floorR = 0;
-    if (!this.colliders && !this.structures && !this.nature) this.pos.addScaledVector(this.vel, dt);
+    if (!this.colliders && !this.structures && !this.nature) this.advance(dt, vH);
     else {
       const c = this.contact;
       const sc = this.structureContact;
       const steps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(Math.max((vH.length() * dt) / SUBSTEP_H, (Math.abs(vUpNew) * dt) / SUBSTEP_V))));
       const h = dt / steps;
       for (let k = 0; k < steps; k++) {
-        this.pos.addScaledVector(this.vel, h);
+        this.advance(h, vH);
         // Feet never below the ground mid-frame: uphill a step along the old tangent plane ends under
         // it, where a solid on the slope (its base is the ground at its centre) is checked against
         // feet lower than they will stand, and the snap below then lifted them into it (Codex review).
@@ -685,6 +688,32 @@ export class PlayerController {
 
   /** Over-the-shoulder camera. */
   /** Drop the motion into a push (`c` from a resolve), so the body slides along what pushed it. */
+  /**
+   * Move by the velocity for `h` seconds on the sphere (sky review 1): the ground part along the great
+   * circle, turning the velocity (and `vH`, the roll's heading) with the ground, and the radial part
+   * straight up or down. A straight line through the air would carry a fast body away from the
+   * centre (on Lumen, 240 m, a 16 m/s gallop lifted it by a quarter of the moon's pull), while the
+   * server's envelope is a radial ballistic path: a jump is as high at a gallop as standing still.
+   */
+  private advance(h: number, vH: THREE.Vector3) {
+    const r = this.pos.length();
+    const up = _aUp.copy(this.pos).divideScalar(r || 1);
+    const vUp = this.vel.dot(up);
+    const t = _aT.copy(this.vel).addScaledVector(up, -vUp);
+    const ground = t.length() * h;
+    if (!(r > 1) || ground < 1e-9) {
+      this.pos.addScaledVector(this.vel, h);
+      return;
+    }
+    const axis = _aAxis.crossVectors(up, t).normalize();
+    const angle = ground / r;
+    this.pos.applyAxisAngle(axis, angle);
+    this.vel.applyAxisAngle(axis, angle);
+    vH.applyAxisAngle(axis, angle);
+    if (this.dodgeT > 0) this.dodgeDir.applyAxisAngle(axis, angle);
+    this.pos.addScaledVector(_aUp.copy(this.pos).divideScalar(r), vUp * h);
+  }
+
   private slide(c: PropContact, vH: THREE.Vector3) {
     const n = _dir.set(c.nx, c.ny, c.nz);
     const into = this.vel.dot(n);
