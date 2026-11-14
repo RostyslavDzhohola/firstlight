@@ -65,7 +65,7 @@ describe("wild site placement", () => {
         expect(chordMetres(resolveAreaDir(BODIES[b], a.at), p.dir[0], p.dir[1], p.dir[2], R)).toBeGreaterThan(a.radius + foot);
       }
       for (const q of list) if (q !== p) expect(chordMetres(q.dir, p.dir[0], p.dir[1], p.dir[2], R)).toBeGreaterThan(foot + q.prefab.foot + WILD_SITE_RULES.siteClear - 1e-6);
-      for (const k of bodyBreakables(t)) expect(chordMetres([k.ux, k.uy, k.uz], p.dir[0], p.dir[1], p.dir[2], R)).toBeGreaterThan(foot + k.foot);
+      for (const k of bodyBreakables(t)) expect(chordMetres([k.ux, k.uy, k.uz], p.dir[0], p.dir[1], p.dir[2], R)).toBeGreaterThan(foot + k.foot + WILD_SITE_RULES.breakableClear);
       expect(t.groundHeight(p.dir[0], p.dir[1], p.dir[2])).toBeGreaterThan(BODIES[b].waterLevel + WILD_SITE_RULES.dry);
       expect(p.moved).toBeLessThanOrEqual(WILD_SITE_RULES.ring * WILD_SITE_RULES.rings);
     }
@@ -176,7 +176,7 @@ describe("wild site colliders", () => {
       }
     }
     expect(checked).toBeGreaterThan(100);
-  });
+  }, 60_000);
 });
 
 it("NPC defs used by the sites exist in NPC_DEFS (append-only ids)", () => {

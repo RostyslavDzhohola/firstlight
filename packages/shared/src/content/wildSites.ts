@@ -91,7 +91,7 @@ export const WILD_SITES: readonly WildSiteDef[] = [
   },
   {
     id: "hollow_elm", name: "The Hollow Elm", body: "hollowmere", kind: "landmark", prefab: "h_tree",
-    at: { between: [0, 1, 0.52] }, east: -60, yaw: 200, levels: [12, 13],
+    at: { between: [0, 1, 0.45] }, east: 30, yaw: 200, levels: [12, 13],
     guardian: { kind: "crypt_sentinel", level: 13 },
     pack: [{ kind: "cantor", count: 1, level: 12 }, { kind: "bone_archer", count: 2, level: 12 }, { kind: "gnawer", count: 3, level: 12 }],
     chest: { coins: 200, weapons: 1, tonics: 2, cosmetic: { id: "crowbeak_mask", chance: 1 / 12 } },

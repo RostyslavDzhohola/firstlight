@@ -4,8 +4,10 @@
 //
 // Each site starts from its content anchor and takes the first spot, on rings round it, that is clear:
 // dry ground under its whole footprint, gentle enough (the height spread under the footprint is
-// bounded), and far enough from every pad, the boss arena, the named NPC camps, the breakable sites,
-// the world objects (eggs, missions) and the sites already placed. The prefab stands on the median
+// bounded), and far enough from every pad, the boss arena, the named NPC camps, the world objects
+// (eggs, missions) and the sites already placed. The breakables are not asked: placing them costs a
+// second per body, and the natural props (which clear round the sites) must not wait for it; the
+// shared test holds every breakable off every footprint instead. The prefab stands on the median
 // ground height of its inner footprint; its walls and skirts reach down under the ground (the Blender
 // build sinks them 1–3 m), so a slope shows no gap.
 //
@@ -18,7 +20,6 @@ import { offsetDir } from "../content/places.ts";
 import { objectDir, objectsOn } from "../content/world.ts";
 import { WILD_SITE_PREFAB_BY_NAME, WILD_SITE_PREFABS, type WildSitePrefab } from "../content/wildSitePrefabs.ts";
 import { wildSitesOn, type WildSiteDef } from "../content/wildSites.ts";
-import { bodyBreakables } from "./breakables.ts";
 import { chordMetres, padDirs, type Dir } from "./pads.ts";
 import { placeSiteItem, placeSolids, type StructureSolid } from "./sites.ts";
 import type { Terrain } from "./terrain.ts";
@@ -37,7 +38,7 @@ export const WILD_SITE_RULES = {
   arenaClear: 30,
   campClear: 25,
   siteClear: 30,
-  /** From a breakable (its own footprint) and from a world object (egg, mission spot). */
+  /** From a breakable's footprint (held by the shared test, not searched) and from a world object (egg, mission spot). */
   breakableClear: 3,
   objectClear: 15,
   /** The lowest ground under the footprint stands this far above the water. */
@@ -126,7 +127,6 @@ export function wildSitePlacements(terrain: Terrain): readonly WildSitePlacement
   const pads = padDirs(body);
   const arena = bossArena(terrain);
   const camps = NPC_AREAS.filter((a) => a.planet === body.id && a.camp).map((a) => ({ dir: resolveAreaDir(body, a.at), radius: a.radius }));
-  const breakables = bodyBreakables(terrain);
   const objects = objectsOn(body.id).map((o) => objectDir(o));
   const chord = (a: Dir, b: Dir) => chordMetres(a, b[0], b[1], b[2], R);
   const fits = (d: Dir, foot: number): number | null => {
@@ -135,7 +135,6 @@ export function wildSitePlacements(terrain: Terrain): readonly WildSitePlacement
     if (camps.some((c) => chord(c.dir, d) < c.radius + W.campClear + foot)) return null;
     if (out.some((s) => chord(s.dir, d) < s.prefab.foot + W.siteClear + foot)) return null;
     if (objects.some((o) => chord(o, d) < W.objectClear + foot)) return null;
-    for (const b of breakables) if (chordMetres([b.ux, b.uy, b.uz], d[0], d[1], d[2], R) < foot + b.foot + W.breakableClear) return null;
     const { inner, all } = footprintHeights(terrain, d, foot);
     let lo = Infinity, hi = -Infinity;
     for (const h of all) {
