@@ -23,6 +23,7 @@ import { applyGroundLook, applyTerrainSettings, terrainMaterialFor, terrainUnifo
 import { applyWaterLook, createWaterMesh, waterMaterialFor } from "../render/water.ts";
 import type { WorldBuild } from "../game/worldReady.ts";
 import { SiteTown } from "./SiteTown.ts";
+import { WildSites } from "./WildSites.ts";
 import { siteGrassMask } from "./siteGrass.ts";
 
 export { LOOKS, type BodyLook };
@@ -80,6 +81,8 @@ export class Planet {
   readonly props: PropSystem;
   /** The body's structure site: the Portus castle town (D38) or the planet's pad-0 outpost (D42). */
   readonly town: SiteTown | null;
+  /** The planet's wild sites (content/wildSites.ts): Blender-built ruins, towers, caves and landmarks. */
+  readonly wildSites: WildSites | null;
   readonly waterGroup = new THREE.Group();
   private readonly scene: THREE.Scene;
   private readonly chunkInfos: ChunkInfo[] = [];
@@ -172,6 +175,8 @@ export class Planet {
     this.group.add(this.props.group);
     this.town = hub || bodyId in OUTPOSTS ? new SiteTown(this.terrain, this.settings) : null;
     if (this.town) this.group.add(this.town.group);
+    this.wildSites = hub ? null : new WildSites(this.terrain, this.settings);
+    if (this.wildSites) this.group.add(this.wildSites.group);
     this.material = terrainMaterialFor(this.settings);
     this.waterMaterial = waterMaterialFor(this.settings.on.waterfx ? this.settings.water : 0);
     // A hidden one-triangle water patch at the planet centre: the warm-up protocol shows hidden
@@ -231,6 +236,7 @@ export class Planet {
     this.grass.applySettings(s);
     this.props.applySettings(s);
     this.town?.applySettings(s);
+    this.wildSites?.applySettings(s);
   }
 
   /**
@@ -250,6 +256,7 @@ export class Planet {
     this.props.update(camera.position, now);
     this.landmarks.update(camera);
     this.town?.update(camera);
+    this.wildSites?.update(camera);
 
     if (!this.eager && now - this.lastStream < 200) return this.pendingNear(ux, uy, uz);
     this.lastStream = now;
@@ -452,6 +459,7 @@ export class Planet {
     this.landmarks.dispose();
     this.props.dispose();
     this.town?.dispose();
+    this.wildSites?.dispose();
     // The sun rig and sky planets are shared across bodies (re-skinned by the next Planet).
     this.waterDummy.geometry.dispose();
     this.scene.remove(this.group);

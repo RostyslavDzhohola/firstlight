@@ -2,6 +2,7 @@
 // (missions, medals and titles, wardrobe), the E7 keypad, the HUD mission tracker and the admin
 // console. Panels free the mouse while open and give it back on close.
 
+import { WILD_SITES } from "@firstlight/shared/content/wildSites";
 import "./quests.css";
 import type { BodyId } from "@firstlight/shared";
 import { COSMETIC_BY_ID, COSMETIC_SLOTS, RARITY_STYLE, isExtraCosmetic, itemName } from "@firstlight/shared/content/items";
@@ -194,7 +195,7 @@ export class CuratorPanel extends Panel {
 // ---------------------------------------------------------------- journal
 
 export class JournalPanel extends Panel {
-  private tab: "missions" | "medals" | "wardrobe" = "missions";
+  private tab: "missions" | "medals" | "wardrobe" | "sites" = "missions";
   protected closeKeys = ["KeyJ"];
 
   show(tab?: JournalPanel["tab"]) {
@@ -211,7 +212,7 @@ export class JournalPanel extends Panel {
     const title = you?.title ? MEDALS.find((m) => m.id === you.title)?.title : null;
     el("div", "sub", head, title ? `Title: ${title}` : "No title worn");
     const tabs = el("div", "tabs", b);
-    for (const t of ["missions", "medals", "wardrobe"] as const) {
+    for (const t of ["missions", "medals", "wardrobe", "sites"] as const) {
       const x = el("button", `tab${this.tab === t ? " on" : ""}`, tabs, t[0]!.toUpperCase() + t.slice(1));
       x.onclick = () => {
         this.tab = t;
@@ -221,6 +222,7 @@ export class JournalPanel extends Panel {
     const body = el("div", "body", b);
     if (this.tab === "missions") this.renderMissions(body, you);
     else if (this.tab === "medals") this.renderMedals(body, you);
+    else if (this.tab === "sites") this.renderSites(body, you);
     else this.renderWardrobe(body, you);
     const foot = el("div", "foot", b);
     el("span", "", foot, "J or Esc to close");
@@ -261,6 +263,26 @@ export class JournalPanel extends Panel {
         const worn = you?.title === m.id;
         const btn = el("button", `btn${worn ? " ghost" : ""}`, row, worn ? "Remove" : "Wear");
         btn.onclick = () => send(this.game, "title", { medalId: worn ? null : m.id });
+      }
+    }
+  }
+
+  /** Wild sites found this life (content/wildSites.ts), by planet, with their level band. */
+  private renderSites(body: HTMLElement, you: YouPlus | null) {
+    const found = new Set(you?.sites ?? []);
+    el("p", "sub", body, `${found.size} of ${WILD_SITES.length} sites found this life. Each guards a chest; finding one is worth XP once per life.`);
+    for (const planet of ["arcadia", "hollowmere", "meridian"] as const) {
+      el("div", "cat", body, planet);
+      for (const s of WILD_SITES.filter((x) => x.body === planet)) {
+        const row = el("div", "row", body);
+        const left = el("div", "", row);
+        if (!found.has(s.id)) {
+          el("div", "nm", left, "???");
+          el("div", "meta", left, `An unfound place · levels ${s.levels[0]}–${s.levels[1]}`);
+          continue;
+        }
+        el("div", "nm", left, `${s.name} · Lv ${s.levels[0]}–${s.levels[1]}`);
+        el("div", "meta", left, s.blurb);
       }
     }
   }

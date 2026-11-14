@@ -570,7 +570,8 @@ export class Game {
     if (layout) await Promise.race([layout, new Promise((r) => setTimeout(r, 10_000))]);
     for (let i = 0; i < 12 && this.nature.warm(this.player.pos.x, this.player.pos.y, this.player.pos.z, 120, 1) > 0; i++) await new Promise((r) => setTimeout(r, 0));
     setLoading("Loading characters…", 0.8);
-    await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready]); // resolve null on failure: capsules / box horses
+    // The wild sites' GLB (~100–250 KB) resolves null on failure too: their colliders draw as stone.
+    await Promise.all([preloadAvatars(), preloadHorse(), this.planet.props.ready, this.planet.wildSites?.ready]); // resolve null on failure: capsules / box horses
     alive("loading characters");
     if (this.planet.town) {
       // The castle town (Portus) or the pad outpost (a planet) is in the scene before the probe and
