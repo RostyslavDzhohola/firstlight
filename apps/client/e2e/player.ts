@@ -509,7 +509,12 @@ export class Player {
         const a = trail[trail.length - 4]!;
         const b = s.player!.pos;
         if (Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1) {
-          await this.unstick(t.bearing, ++stuck);
+          // Inside a walled outpost or town with the target beyond its wall (the walk pressed into
+          // Arcadia's palisade for 90 s): out through the nearest gate first, then on from there.
+          if (++stuck >= 2 && (s.gates?.length ?? 0) > 0 && s.zone?.server === "safe" && t.surface > (s.zone.toSafe ?? 0)) {
+            await this.walkOutOfTown(Math.max(20_000, until - Date.now()));
+            stuck = 0;
+          } else await this.unstick(t.bearing, stuck);
           trail.length = 0;
         }
       }

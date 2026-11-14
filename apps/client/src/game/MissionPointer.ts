@@ -86,6 +86,11 @@ class MissionPointer implements ClientSystem {
       const hunt = huntTargets();
       const eligible = hunt && open && hunt.id === open.id ? hunt.npcs : null;
       this.target = def ? (def.race || def.defend || def.collect ? this.objective(def, open!.counts, [p.x, p.y, p.z]) : missionTarget(def, g.bodyId, [p.x, p.y, p.z], npcs, (x, y, z) => terrain.groundHeight(x, y, z), { eligible, counts: open!.counts })) : null;
+      // The missions panel (top right) is kept clear too: a pinned label at the right edge sat on it
+      // (play-through 2026-11-14). Read with the pick, 4 times a second, not every frame.
+      const panel = g.hud.root.querySelector<HTMLElement>(".fl-missions");
+      const pr = panel && !panel.hidden ? panel.getBoundingClientRect() : null;
+      this.panelRect = pr && pr.width > 0 ? { left: pr.left - 8, top: pr.top - 8, right: pr.right + 8, bottom: pr.bottom + 8 } : null;
       const visit = guideToVisit(g.bodyId, g.hud.you?.missions ?? [], !!this.target);
       const gdef = visit ? WORLD_OBJECT_BY_ID.get(visit.id) : undefined;
       this.guide = visit && gdef ? { label: `${visit.name} · missions`, pos: objectPos(gdef, (x, y, z) => terrain.groundHeight(x, y, z)) } : null;
@@ -109,7 +114,7 @@ class MissionPointer implements ClientSystem {
       const h = this.box.offsetHeight;
       if (w > 0 && h > 0) this.boxSize = { w, h };
     }
-    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null, this.keepClear());
+    const c = placeCallout(ndc, innerWidth, innerHeight, this.boxSize ?? { w: 160, h: 48 }, null, this.panelRect ? [...this.keepClear(), this.panelRect] : this.keepClear());
     const key = `${Math.round(c.x)},${Math.round(c.y)},${c.edge ? Math.round(c.angle * 20) : "-"},${c.flip ? 1 : 0}`;
     if (key === this.last.key) return;
     this.last.key = key;
@@ -121,6 +126,8 @@ class MissionPointer implements ClientSystem {
   }
 
   private clear: { w: number; h: number; rects: Rect[] } | null = null;
+  /** The missions panel's screen rect (with a margin), refreshed at each pick; null while it is hidden. */
+  private panelRect: Rect | null = null;
 
   /**
    * Where the label never goes (D-polish-ux-6): the crosshair, and the top-centre column (zone

@@ -9,6 +9,7 @@
 import * as THREE from "three/webgpu";
 import { BODIES, portalSpots, type PortalSpot } from "@firstlight/shared";
 import { ONBOARDING } from "@firstlight/shared/content/onboarding";
+import { GUIDES } from "@firstlight/shared/content/missions";
 import type { YouState } from "@firstlight/shared/net/protocol";
 import { WEAPONS, type TierStats, type WeaponDef } from "@firstlight/shared/content/weapons";
 import { config, flags } from "../config.ts";
@@ -327,7 +328,13 @@ export class OnboardingClient implements ClientSystem {
     const hud = this.hud;
     if (hud && this.doneTimer.running) {
       const timer = this.doneTimer;
+      let told = false;
       const poll = setInterval(() => {
+        const body = this.game.bodyId;
+        if (!told && body !== ONBOARDING.BODY && body in GUIDES && this.playable()) {
+          told = true;
+          hud.arrived(BODIES[body].name, GUIDES[body as keyof typeof GUIDES].name);
+        }
         if (!timer.tick()) return;
         clearInterval(poll);
         hud.dispose();
