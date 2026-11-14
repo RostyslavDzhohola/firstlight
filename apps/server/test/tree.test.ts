@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BODIES, isSafe } from "@firstlight/shared";
 import { playerMaxHp, RESPEC, TREE, treePoints } from "@firstlight/shared/content/tree";
+import Database from "better-sqlite3";
 import { ensureAccount, killCharacter, loadCharacter, openGameDb, saveCharacter, type CharacterData, type Db } from "../src/db/index.ts";
+import { MIGRATIONS, migrate } from "../src/db/schema.ts";
 import { dodgeReady, moveLimits } from "../src/world/movement.ts";
 import { tempDir } from "./auth-helpers.ts";
 import { safeLeave, startServer, waitFor } from "./helpers.ts";
@@ -117,7 +119,7 @@ describe("build tree on a live room (#81)", () => {
   }, 20_000);
 });
 
-describe("build tree storage (migration 12)", () => {
+describe("build tree storage (migration 13)", () => {
   let dir: string;
   let db: Db;
   beforeEach(() => {
@@ -156,6 +158,26 @@ describe("build tree storage (migration 12)", () => {
     expect(loadCharacter(db, "saved")!.tree).toEqual(["magic_attuned"]);
     expect(saveCharacter(db, "nobody", row(["blade_edge"]))).toBe(false);
     expect(db.prepare("SELECT 1 FROM character_tree WHERE user_id = 'nobody'").get()).toBeUndefined();
+  });
+
+  it("upgrades a database already at user_version 12 with the funnel's tables, keeping their rows", () => {
+    const old = new Database(":memory:");
+    try {
+      for (let v = 0; v < 12; v++) old.exec(MIGRATIONS[v]!);
+      old.pragma("user_version = 12");
+      old.prepare("INSERT INTO funnel_step (subject, step, at) VALUES ('u:a', 'join', 5)").run();
+      old.prepare("INSERT INTO funnel_day (day, metric, num, den) VALUES ('2026-11-12', 'kpi', 3, 4)").run();
+      expect(old.prepare("SELECT name FROM sqlite_master WHERE name = 'character_tree'").get()).toBeUndefined();
+      expect(migrate(old)).toBe(13);
+      expect(old.pragma("user_version", { simple: true })).toBe(13);
+      ensureAccount(old, "u1");
+      saveCharacter(old, "u1", row(["body_hardy"]));
+      expect(loadCharacter(old, "u1")!.tree).toEqual(["body_hardy"]);
+      expect(old.prepare("SELECT COUNT(*) AS n FROM funnel_step").get()).toEqual({ n: 1 });
+      expect(old.prepare("SELECT num, den FROM funnel_day").get()).toEqual({ num: 3, den: 4 });
+    } finally {
+      old.close();
+    }
   });
 
   it("knows every node id once", () => {

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { BODIES, padDirs } from "@firstlight/shared";
+import { BODIES, createTerrain, padDirs } from "@firstlight/shared";
+import { wildSitePlacements } from "@firstlight/shared/planet/wildSites";
 import { resolveAreaDir } from "@firstlight/shared/content/arenas";
 import { MISSION_BY_ID } from "@firstlight/shared/content/missions";
 import { NPC_AREAS, NPC_INDEX } from "@firstlight/shared/content/npcs";
-import { missionTarget } from "./missionTarget.ts";
+import { missionTarget, siteSpot } from "./missionTarget.ts";
 
 const flat = () => 0;
 const on = (body: "arcadia" | "hollowmere" | "meridian", d: readonly number[]): [number, number, number] => {
@@ -79,5 +80,29 @@ describe("the pointer follows the server's huntTargets and quotas", () => {
     expect(missionTarget(M1, "meridian", mme, [assoc, officer], flat, { counts: [2, 1] })?.title).toBe("Associate");
     // Both done (the server would have completed it): just the area.
     expect(missionTarget(M1, "meridian", mme, [assoc, officer], flat, { counts: [6, 1] })?.creep).toBe(false);
+  });
+});
+
+describe("L1 on Lumen: with no counting creature in view the pointer leads to the Quietfall Wreck (moon walk 2026-11-14)", () => {
+  const L1 = MISSION_BY_ID.get("L1")!;
+  const terrain = createTerrain("lumen");
+  const wreck = wildSitePlacements(terrain).find((w) => w.site.id === "quietfall_wreck")!;
+  const R = BODIES.lumen.radius;
+  const me = (() => {
+    const d = padDirs(BODIES.lumen)[0]!;
+    return [d[0]! * R, d[1]! * R, d[2]! * R] as [number, number, number];
+  })();
+
+  it("points at the wreck (its title and its spot on the ground)", () => {
+    const t = missionTarget(L1, "lumen", me, [], (x, y, z) => terrain.groundHeight(x, y, z), { siteAt: siteSpot(terrain) });
+    expect(t?.title).toBe("The Quietfall Wreck");
+    expect(t?.creep).toBe(false);
+    const r = R + wreck.base;
+    expect(Math.hypot(t!.at[0] - wreck.dir[0] * r, t!.at[1] - wreck.dir[1] * r, t!.at[2] - wreck.dir[2] * r)).toBeLessThan(3);
+  });
+
+  it("a Glimmerhop in view still wins (the hunt's creatures first)", () => {
+    const hop = npc("glimmerhop", [me[0] + 5, me[1], me[2]], 40);
+    expect(missionTarget(L1, "lumen", me, [hop], (x, y, z) => terrain.groundHeight(x, y, z), { siteAt: siteSpot(terrain) })?.title).toBe("Glimmerhop");
   });
 });

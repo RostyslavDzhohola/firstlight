@@ -9,6 +9,7 @@
 .fl-hud[data-body="arcadia"] { --world: var(--arcadia); }
 .fl-hud[data-body="hollowmere"] { --world: var(--hollowmere-2); }
 .fl-hud[data-body="meridian"] { --world: var(--meridian-2); }
+.fl-hud[data-body="lumen"] { --world: var(--lumen); }
 
 /* One corner language for the HUD's holo frames (D-ui-6): the framed ones (missions, trial strip,
    banners) keep four ticks, every other holo surface gets two, top-left and bottom-right, all in the
@@ -72,6 +73,7 @@
 .fl-arrive[data-body="arcadia"] { --c: var(--arcadia); }
 .fl-arrive[data-body="hollowmere"] { --c: var(--hollowmere-2); }
 .fl-arrive[data-body="meridian"] { --c: var(--meridian-2); }
+.fl-arrive[data-body="lumen"] { --c: var(--lumen); }
 .fl-arrive.is-out { animation: fl-arrive-out 700ms var(--ease-in-out) both; }
 @keyframes fl-arrive-in { 0% { opacity: 0; } 10% { opacity: .75; } 16% { opacity: .25; } 34% { opacity: 1; } 100% { opacity: 1; } }
 @keyframes fl-arrive-out { to { opacity: 0; transform: translateX(-50%) translateY(-6px); } }

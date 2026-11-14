@@ -203,5 +203,5 @@ Setup: a fresh guest (clean browser profile) on a stack with an empty database, 
 5. A deploy mid-session the one reload can't fix: "A NEW VERSION IS OUT" with Reload.
 6. Pointer lock refused: "Click to look around", nothing throws.
 7. A phone-sized window: the home page fits, says how to play, offers the touch try.
-8. The funnel: the page reports page, Play, pick and world (seconds, renderer) once each.
+8. The funnel: the page asks the server for one (test) visit, then reports Play, pick and world (seconds, renderer) under it once each; a reload asks for no new visit and resends nothing.
 9. The tab frozen in the background (`JFAIL_BACKGROUND_S`, default 60): the world runs on, still connected.

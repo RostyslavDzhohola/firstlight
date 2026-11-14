@@ -72,8 +72,9 @@ apps/client/e2e/live/fl.mjs quit       # ends it; so do 20 idle minutes (FL_LIVE
 
 ## The first part, start to finish
 
-`tutorial` (every step up to the portal; `step` does one and reads its card), `step` again for the
-portal, `talk` (Lark's three missions), then `quest A1`, `quest A2`, `quest A3`. A hunt (A1) fights
+`tutorial` (every step; it ends in the plaza since #68, and its attack step is one click; `step`
+does one and reads its card), `portal arcadia`, `talk` (Lark's three missions), then `quest A1`,
+`quest A2`, `quest A3`. A hunt (A1) fights
 what the mission pointer marks and anything hostile within reach (15 m with a ranged weapon, 8 m with
 a melee one). A find (A2) or a reach (A3) sprints past creatures to the objective (a sprint outruns
 them, and every fight on the way costs HP nothing heals back but tonics and level-ups), presses E at

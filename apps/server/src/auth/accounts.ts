@@ -19,7 +19,7 @@ import { linkAccounts } from "../db/link.ts";
 import { setDisplayName } from "../db/accounts.ts";
 import { reserveOtpSend, releaseOtpSend } from "../db/otp-budget.ts";
 import { closeDanglingSessions, pruneSessionLog } from "../db/sessions.ts";
-import { pruneClientErrors } from "../db/funnel.ts";
+import { flushFunnel, pruneClientErrors, rollupFunnel } from "../db/funnel.ts";
 import { stmt } from "../db/game-db.ts";
 import { authOptions, authRequestState, buildAuth, OTP_MIN_LEVEL, OTP_PER_ACCOUNT_PER_DAY, OTP_PUBLIC_PER_IP_PER_DAY, OTP_PUBLIC_SHARE, type FirstlightAuth } from "./better-auth.ts";
 import { hmacHex, safeEqual } from "./crypto.ts";
@@ -211,6 +211,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
   const housekeeping = () => {
     pruneSessionLog(db);
     pruneClientErrors(db);
+    rollupFunnel(db); // the funnel's old cohort days folded into funnel_day (D-ship-6)
     try {
       const n = pruneGuests(authDb, db, { isLive: (userId) => !!sessions.get(userId) });
       if (n) console.log(`pruned ${n} abandoned guest account(s)`);
@@ -357,6 +358,7 @@ export async function createAccounts(cfg: AccountsConfig): Promise<Accounts> {
     close() {
       closed = true;
       clearInterval(pruneTimer);
+      flushFunnel(db); // queued funnel rows and error reports (db/funnel.ts)
       setGameDb(null);
       try {
         db.close();

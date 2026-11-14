@@ -270,6 +270,18 @@ export class OnboardingHud {
     if (this.repoUrl) this.repoLinks(c, this.repoUrl);
   }
 
+  /**
+   * The end card stays up across the walk through the portal; once the player has arrived on a
+   * planet its "Next" names that planet's guide instead of the portal behind them (play-through
+   * 2026-11-14: it still said "walk into the Arcadia portal … here" on Arcadia).
+   */
+  arrived(planet: string, guide: string) {
+    const next = this.card.querySelector("p");
+    if (next) next.replaceChildren();
+    if (next) rich(next, `The **Spark** medal is yours: wear its title from the journal (**J**). **Next:** you're on **${planet}**: talk to **${guide}** by the pad for your first missions (the compass marks the way).`);
+    this.setWay(null);
+  }
+
   dispose() {
     removeEventListener("resize", this.onResize);
     this.panelObserver?.disconnect();

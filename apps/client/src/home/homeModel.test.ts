@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HomeOnline } from "@firstlight/shared/net/home";
+import { BODIES, BODY_IDS, padDirs } from "@firstlight/shared";
 import { fmtPlayTime, hallRows, namesLine, onlineLabel, progressView, starterIndex, visitsLine, worldCards } from "./homeModel.ts";
 
 const online: HomeOnline = {
@@ -35,7 +36,9 @@ describe("home model", () => {
       pads: [{ body: "arcadia", padId: "1" }, { body: "arcadia", padId: "1" }, { body: "arcadia", padId: "4" }],
       playMs: 2 * 3600_000 + 14 * 60_000,
     });
-    expect(v).toMatchObject({ name: "Wren_07", starter: 3, starterName: "Unit 7", level: 3, coins: 214, medals: 2, title: "Regicide", pads: 2, padsTotal: 44, body: "Hollowmere", playTime: "2 h 14 min", playing: true });
+    expect(v).toMatchObject({ name: "Wren_07", starter: 3, starterName: "Unit 7", level: 3, coins: 214, medals: 2, title: "Regicide", pads: 2, padsTotal: 56, body: "Hollowmere", playTime: "2 h 14 min", playing: true });
+    // Every pad a player can discover, Lumen's 12 included (sky review 4: the count could pass the total).
+    expect(v.padsTotal).toBe(BODY_IDS.reduce((n, b) => n + (BODIES[b].padLayout === "none" ? 0 : padDirs(BODIES[b]).length), 0));
     expect(v.xpText).toBe("60 / 260 XP");
     expect(v.xpFrac).toBeCloseTo(60 / 260);
     expect(starterIndex(2)).toBe(2);

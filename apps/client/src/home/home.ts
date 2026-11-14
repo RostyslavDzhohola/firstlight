@@ -324,6 +324,7 @@ export function renderBoard(board: HomeBoard | null, tab: Tab): void {
  * card, D-fixes-3); the analytics disclosure is the footer's Privacy card.
  */
 export function renderVisits(visits: HomeVisits | null, ourOnline: number | null): void {
+  privacyLink(); // whatever the counts say: the disclosure is always there
   const box = $("home-visits");
   if (!box) return;
   const line = visitsLine(visits, ourOnline);
@@ -348,14 +349,13 @@ export function renderVisits(visits: HomeVisits | null, ourOnline: number | null
     total.replaceChildren("Total visits ");
     el("b", "num", total, line.total);
   } else if (total) total.hidden = true;
-  privacyLink();
 }
 
-/** The footer's "Privacy" link (only with DataFast in the page): a short card on its analytics and the opt-out (#12). */
+/** The footer's "Privacy" link (always: our own funnel is disclosed with or without DataFast): what is counted and the opt-out (#12). */
 function privacyLink(): void {
   const text = privacyText(config.datafast);
   const credit = document.querySelector(".fl-home__credit");
-  if (!text || !credit || document.getElementById("home-privacy")) return;
+  if (!credit || document.getElementById("home-privacy")) return;
   const b = button("Privacy", "fl-link fl-home__privacy", credit as HTMLElement, () => openPrivacy(text));
   b.id = "home-privacy";
   b.dataset.e2e = "home-privacy";

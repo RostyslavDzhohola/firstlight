@@ -86,7 +86,7 @@ describe("agents: joining", () => {
     expect(o.guide).toMatchObject({ id: "guide", name: "Lark" });
     expect(o.portals[0]).toMatchObject({ id: "portal:portus", to: "portus" });
     expect(o.pads[0]).toMatchObject({ id: "pad:0" });
-    expect(o.offers.map((m) => m.id)).toEqual(["A1", "A2", "A3", "A4"]);
+    expect(o.offers.map((m) => m.id)).toEqual(["A1", "A2", "A3", "A4", "L1"]);
     expect(o.summary).toContain("agentB [AI] L1 on arcadia");
     expect(Buffer.byteLength(o.summary)).toBeLessThan(1500);
     expect(Buffer.byteLength(JSON.stringify(o))).toBeLessThan(6000);
@@ -259,10 +259,12 @@ describe("agents: missions and fighting", () => {
     expect(talk).toMatchObject({ ok: true, talkedTo: "Lark" });
     const r = await a.takeMissions();
     expect(r.ok).toBe(true);
-    expect((r.taken as { id: string }[]).map((m) => m.id)).toEqual(["A1", "A2", "A3", "A4"]);
+    expect((r.taken as { id: string }[]).map((m) => m.id)).toEqual(["A1", "A2", "A3", "A4", "L1"]);
     const o = a.observe();
     expect(o.offers).toEqual([]);
-    expect(o.missions.map((m) => [m.id, m.progress, m.goal, m.done])).toEqual([["A1", 0, 8, false], ["A2", 0, 1, false], ["A3", 0, 1, false], ["A4", 0, 5, false]]);
+    expect(o.missions.slice(0, 4).map((m) => [m.id, m.progress, m.goal, m.done])).toEqual([["A1", 0, 8, false], ["A2", 0, 1, false], ["A3", 0, 1, false], ["A4", 0, 5, false]]);
+    // Lark also sends the player to the moon (L1, lane sky).
+    expect(o.missions.map((m) => m.id)).toEqual(["A1", "A2", "A3", "A4", "L1"]);
     expect(o.missions[0]!.where!.dist).toBeGreaterThan(20);
     expect(o.events.some((e) => e.text.startsWith("Mission accepted: Pest Control"))).toBe(true);
     expect(o.summary).toContain("A1 Pest Control 0/8");
